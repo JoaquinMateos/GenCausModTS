@@ -14,6 +14,7 @@ Key references:
 from __future__ import annotations
 
 from abc import abstractmethod
+from typing import Any
 
 from torch import Tensor
 
@@ -94,7 +95,7 @@ class BaseStaticDynamicDisentangler(BaseModel):
     def ood_score(self, x: Tensor, target_domain: Tensor | None = None) -> Tensor:
         """Return a scalar score quantifying distributional shift."""
 
-    def forward(self, batch: Batch) -> DisentangledFactors:
+    def forward(self, batch: Batch) -> Any:
         return self.disentangle(batch.x)
 
     @abstractmethod

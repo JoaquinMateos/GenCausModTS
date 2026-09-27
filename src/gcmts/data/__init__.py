@@ -14,14 +14,19 @@ from gcmts.data.synthetic import (
     TemporalNonlinearGenerator,
     VARGenerator,
 )
+from gcmts.data.synthetic_effect import HarmonicOscillatorGenerator
+from gcmts.data.synthetic_sdd import EvolvingDomainGenerator, MultiDomainGenerator
 
 __all__ = [
     "BaseDataGenerator",
     "CartPoleGenerator",
     "Causal3DIdentGenerator",
+    "EvolvingDomainGenerator",
+    "HarmonicOscillatorGenerator",
     "InterventionalTemporalGenerator",
     "LinearSDEGenerator",
     "LTSCMGenerator",
+    "MultiDomainGenerator",
     "NCTRLGenerator",
     "NonlinearICAGenerator",
     "SlowFeatureGenerator",

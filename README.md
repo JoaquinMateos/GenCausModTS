@@ -172,7 +172,7 @@ src/gcmts/
 │   └── utils.py                       # MCC, Hungarian matching
 ├── causal_representation_learning/    # base.py + methods/
 ├── effect_estimation/                 # base.py + methods/ (interface + stubs)
-├── static_dynamic_disentanglement/    # base.py + methods/ (interface + stubs)
+├── static_dynamic_disentanglement/    # base.py + methods/ (SYNC, DANN, ERM)
 ├── data/                              # synthetic generators and loaders
 ├── evaluation/                        # metrics registry + benchmark runners
 └── typing.py                          # Batch, outputs, ambiguity classes

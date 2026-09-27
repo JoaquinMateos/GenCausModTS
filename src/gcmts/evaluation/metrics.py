@@ -32,7 +32,11 @@ __all__ = [
     "PEHEMetric",
     "ATEMetric",
     "CFMAEMetric",
+    "MBEMetric",
+    "MMD2Metric",
     "OODMSEMetric",
+    "DomainAccuracyMetric",
+    "MIGMetric",
 ]
 
 
@@ -101,7 +105,11 @@ def _default_registry() -> MetricRegistry:
     reg.register(PEHEMetric())
     reg.register(ATEMetric())
     reg.register(CFMAEMetric())
+    reg.register(MBEMetric())
+    reg.register(MMD2Metric())
     reg.register(OODMSEMetric())
+    reg.register(DomainAccuracyMetric())
+    reg.register(MIGMetric())
     return reg
 
 
@@ -329,6 +337,43 @@ class CFMAEMetric(Metric):
 
 # --- Static-dynamic metrics --------------------------------------------------
 
+class MBEMetric(Metric):
+    """Mean bias error: the signed counterpart of the counterfactual MAE."""
+
+    def __init__(self) -> None:
+        super().__init__("mbe", "L3_counterfactual", higher_is_better=False)
+
+    def __call__(self, prediction: Tensor, target: Tensor) -> MetricResult:
+        bias = (prediction - target).mean().item()
+        return MetricResult(self.name, float(bias), self.level, self.higher_is_better)
+
+
+class MMD2Metric(Metric):
+    r"""Squared maximum mean discrepancy with an RBF kernel.
+
+    ``MMD^2(P, Q) = E[k(x,x')] - 2 E[k(x,y)] + E[k(y,y')]`` on flattened
+    samples. Lower is better; zero means the two empirical distributions agree.
+    """
+
+    def __init__(self, bandwidth: float = 1.0) -> None:
+        super().__init__("mmd2", "L3_counterfactual", higher_is_better=False)
+        self.bandwidth = bandwidth
+
+    def __call__(self, prediction: Tensor, target: Tensor) -> MetricResult:
+        x = prediction.reshape(prediction.shape[0], -1)
+        y = target.reshape(target.shape[0], -1)
+        scale = 2.0 * self.bandwidth**2
+
+        def kernel(a: Tensor, b: Tensor) -> Tensor:
+            diff = a.unsqueeze(1) - b.unsqueeze(0)
+            return torch.exp(-(diff**2).sum(-1) / scale)
+
+        value = (
+            kernel(x, x).mean() + kernel(y, y).mean() - 2.0 * kernel(x, y).mean()
+        ).item()
+        return MetricResult(self.name, float(value), self.level, self.higher_is_better)
+
+
 class OODMSEMetric(Metric):
     """Out-of-distribution mean squared error."""
 
@@ -338,6 +383,44 @@ class OODMSEMetric(Metric):
     def __call__(self, prediction: Tensor, target: Tensor) -> MetricResult:
         mse = ((prediction - target) ** 2).mean().item()
         return MetricResult(self.name, mse, self.level, self.higher_is_better)
+
+
+class DomainAccuracyMetric(Metric):
+    """Accuracy of inferred discrete domain/regime labels."""
+
+    def __init__(self) -> None:
+        super().__init__("domain_accuracy", "L1_generalisation", higher_is_better=True)
+
+    def __call__(self, prediction: Tensor, target: Tensor) -> MetricResult:
+        pred = prediction.reshape(-1).long()
+        true = target.reshape(-1).long()
+        accuracy = (pred == true).float().mean().item()
+        return MetricResult(self.name, float(accuracy), self.level, self.higher_is_better)
+
+
+class MIGMetric(Metric):
+    """Mutual-Information-Gap-style score from the latent/factor importance matrix.
+
+    For each ground-truth factor we rank the normalised importances of the
+    latents and average the gap between the top two, so that a factor explained
+    by a single latent scores high and a factor spread over many scores low.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("mig", "L1_generalisation", higher_is_better=True)
+
+    def __call__(self, prediction: Tensor, target: Tensor) -> MetricResult:
+        matrix = _importance_matrix(prediction, target)
+        gaps = []
+        for i in range(matrix.shape[0]):
+            row = matrix[i]
+            total = row.sum()
+            if total <= 0:
+                gaps.append(0.0)
+                continue
+            normalised = np.sort(row / total)[::-1]
+            gaps.append(float(normalised[0] - normalised[1]) if normalised.size > 1 else 0.0)
+        return MetricResult(self.name, float(np.mean(gaps)), self.level, self.higher_is_better)
 
 
 DEFAULT_REGISTRY = _default_registry()

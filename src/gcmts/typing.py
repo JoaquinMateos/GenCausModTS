@@ -52,6 +52,9 @@ class Batch:
     context: TensorDict | None = None  # regimes, interventions, domains
     mask: Tensor | None = None  # missingness / padding mask (B, T)
     adjacency: Tensor | None = None  # ground-truth (d, d, p) latent adjacency
+    counterfactual: Tensor | None = None  # ground-truth counterfactual (B, T, D)
+    outcome: Tensor | None = None  # ground-truth scalar outcome / target (B, ...)
+    domain: Tensor | None = None  # ground-truth domain/regime index (B,) or (B, T)
 
     def __post_init__(self) -> None:
         if self.x.ndim not in {2, 3}:
