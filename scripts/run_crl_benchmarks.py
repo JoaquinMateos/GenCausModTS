@@ -72,6 +72,10 @@ class CaseResult:
     recon_mse: float
     mcc: float
     r2_matched: float
+    r2_sep: float | None
+    dci_disentanglement: float | None
+    dci_completeness: float | None
+    dci_informativeness: float | None
     w2: float | None
     z_shape_ok: bool
     roundtrip_ok: bool
@@ -86,21 +90,21 @@ def build_cases(quick: bool) -> list[CaseConfig]:
     cases = [
         CaseConfig(
             name="ivae_linear",
-            model_factory=lambda: IVAE(observed_dim=5, latent_dim=3, u_dim=4),
+            model_factory=lambda: IVAE(observed_dim=5, latent_dim=3, u_dim=10),
             generator_factory=lambda: NonlinearICAGenerator(
-                observed_dim=5, latent_dim=3, horizon=1, n_regimes=4, mixing="linear", seed=0
+                observed_dim=5, latent_dim=3, horizon=1, n_regimes=10, mixing="linear", seed=0
             ),
             epochs=int(2000 * scale),
-            note="canonical iVAE benchmark (regime-conditioned variance)",
+            note="iVAE, 10 regimes >= nk+1 required for identifiability",
         ),
         CaseConfig(
             name="ivae_nonlinear",
-            model_factory=lambda: IVAE(observed_dim=5, latent_dim=3, u_dim=4),
+            model_factory=lambda: IVAE(observed_dim=5, latent_dim=3, u_dim=10),
             generator_factory=lambda: NonlinearICAGenerator(
-                observed_dim=5, latent_dim=3, horizon=1, n_regimes=4, mixing="nonlinear", seed=0
+                observed_dim=5, latent_dim=3, horizon=1, n_regimes=10, mixing="nonlinear", seed=0
             ),
             epochs=int(1500 * scale),
-            note="nonlinear tanh mixing (harder)",
+            note="nonlinear tanh mixing, 10 regimes (harder)",
         ),
         CaseConfig(
             name="leap_temporal",
@@ -255,6 +259,11 @@ def run_case(cfg: CaseConfig, device: str = "auto", batch_size: int = 256) -> Ca
     resolved_device = trainer.resolve_device(model)
     eval_batch = move_batch(generator.sample(2048), resolved_device)
 
+    r2_sep_value: float | None = None
+    dci_dis: float | None = None
+    dci_comp: float | None = None
+    dci_info: float | None = None
+
     if cfg.kind == "sde":
         with torch.no_grad():
             outputs = model.forward(eval_batch)
@@ -278,7 +287,14 @@ def run_case(cfg: CaseConfig, device: str = "auto", batch_size: int = 256) -> Ca
             name=cfg.name,
             model=model,
             data=eval_batch,
-            metrics=["mcc", "r2_diag"],
+            metrics=[
+                "mcc",
+                "r2_diag",
+                "r2_sep",
+                "dci_disentanglement",
+                "dci_completeness",
+                "dci_informativeness",
+            ],
             causal_level="L1_association",
         )
         result = CrlBenchmarkRunner().run(task)
@@ -292,6 +308,10 @@ def run_case(cfg: CaseConfig, device: str = "auto", batch_size: int = 256) -> Ca
         )
         mcc_value = scores.get("mcc", float("nan"))
         r2_value = scores.get("r2_diag", float("nan"))
+        r2_sep_value = scores.get("r2_sep")
+        dci_dis = scores.get("dci_disentanglement")
+        dci_comp = scores.get("dci_completeness")
+        dci_info = scores.get("dci_informativeness")
         if mcc_value < 0.2:
             logger.warning(
                 "CASE %s MCC=%.3f is near chance; check configuration/training.",
@@ -299,10 +319,15 @@ def run_case(cfg: CaseConfig, device: str = "auto", batch_size: int = 256) -> Ca
                 mcc_value,
             )
         logger.info(
-            "RESULT %s | mcc=%.3f r2_matched=%.3f recon_mse=%.4f loss=%.4f (%.1fs)",
+            "RESULT %s | mcc=%.3f r2_diag=%.3f r2_sep=%.3f dci=(%.3f/%.3f/%.3f) "
+            "recon_mse=%.4f loss=%.4f (%.1fs)",
             cfg.name,
             mcc_value,
             r2_value,
+            float("nan") if r2_sep_value is None else r2_sep_value,
+            float("nan") if dci_dis is None else dci_dis,
+            float("nan") if dci_comp is None else dci_comp,
+            float("nan") if dci_info is None else dci_info,
             recon_mse,
             final_loss,
             seconds,
@@ -317,6 +342,10 @@ def run_case(cfg: CaseConfig, device: str = "auto", batch_size: int = 256) -> Ca
         recon_mse=recon_mse,
         mcc=mcc_value,
         r2_matched=r2_value,
+        r2_sep=r2_sep_value,
+        dci_disentanglement=dci_dis,
+        dci_completeness=dci_comp,
+        dci_informativeness=dci_info,
         w2=w2_value if cfg.kind == "sde" else None,
         z_shape_ok=z_shape_ok,
         roundtrip_ok=roundtrip_ok,
@@ -357,17 +386,23 @@ def save_results(results: list[CaseResult], out_dir: Path) -> None:
 def print_table(results: list[CaseResult]) -> None:
     header = (
         f"{'case':<22}{'method':<10}{'params':>9}{'loss':>9}"
-        f"{'recon':>9}{'mcc':>7}{'r2':>7}{'w2':>8}{'sec':>7}{'device':>7}"
+        f"{'recon':>9}{'mcc':>7}{'r2d':>7}{'r2s':>7}{'dciD':>7}{'dciC':>7}{'dciI':>7}"
+        f"{'w2':>8}{'sec':>7}{'device':>7}"
     )
     logger.info("-" * len(header))
     logger.info(header)
     logger.info("-" * len(header))
     for r in results:
         w2 = f"{r.w2:>8.3f}" if r.w2 is not None else f"{'—':>8}"
+
+        def _fmt(value: float | None) -> str:
+            return f"{'—':>7}" if value is None else f"{value:>7.3f}"
+
         logger.info(
             f"{r.case:<22}{r.method:<10}{r.n_parameters:>9}{r.final_loss:>9.3f}"
-            f"{r.recon_mse:>9.4f}{r.mcc:>7.3f}{r.r2_matched:>7.3f}{w2}"
-            f"{r.seconds:>7.1f}{r.device:>7}"
+            f"{r.recon_mse:>9.4f}{r.mcc:>7.3f}{r.r2_matched:>7.3f}{_fmt(r.r2_sep)}"
+            f"{_fmt(r.dci_disentanglement)}{_fmt(r.dci_completeness)}"
+            f"{_fmt(r.dci_informativeness)}{w2}{r.seconds:>7.1f}{r.device:>7}"
         )
     logger.info("-" * len(header))
 
