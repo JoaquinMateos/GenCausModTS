@@ -11,10 +11,10 @@ to permutation and component-wise invertible transformations.
 from __future__ import annotations
 
 import logging
+import math
 
 import torch
 from torch import Tensor
-from torch.nn import functional as F
 
 from gcmts.causal_representation_learning.base import BaseCausalRepresentationLearner
 from gcmts.core.backbones import (
@@ -23,6 +23,7 @@ from gcmts.core.backbones import (
     GaussianHead,
     flatten_sequence,
     gaussian_logpdf,
+    gaussian_reconstruction_nll,
     prepare_context,
     reparameterise,
     unflatten_sequence,
@@ -55,8 +56,11 @@ class IVAE(BaseCausalRepresentationLearner):
         hidden_dims: tuple[int, ...] = (128, 128),
         decoder_hidden: tuple[int, ...] = (128, 128),
         kl_weight: float = 1.0,
+        obs_noise: float = 1.0,
     ) -> None:
         super().__init__(observed_dim=observed_dim, latent_dim=latent_dim, max_lag=1)
+        if obs_noise <= 0:
+            raise ValueError("obs_noise must be positive.")
         self.u_dim = u_dim
         self.kl_weight = kl_weight
         self.encoder = GaussianHead(
@@ -64,6 +68,8 @@ class IVAE(BaseCausalRepresentationLearner):
         )
         self.decoder = MLP(latent_dim, observed_dim, hidden_dims=decoder_hidden)
         self.prior = ExpFamilyPrior(u_dim, latent_dim, hidden_dims=hidden_dims)
+        self.register_buffer("obs_logvar", math.log(obs_noise**2) * torch.ones(1))
+        self.obs_logvar: Tensor
         logger.debug("Initialised IVAE (D=%d, d=%d, u=%d)", observed_dim, latent_dim, u_dim)
 
     def _condition(self, x: Tensor, u: Tensor | None) -> Tensor:
@@ -110,7 +116,9 @@ class IVAE(BaseCausalRepresentationLearner):
     def loss(self, outputs: CausalRepresentationOutput, batch: Batch) -> dict[str, Tensor]:
         if outputs.x_recon is None:
             raise ValueError("IVAE forward output is missing the reconstruction.")
-        recon = F.mse_loss(outputs.x_recon.reshape_as(batch.x), batch.x)
+        recon = gaussian_reconstruction_nll(
+            outputs.x_recon.reshape_as(batch.x), batch.x, self.obs_logvar
+        )
         extras = outputs.extras or {}
         kl = (extras["log_q"] - extras["log_p"]).mean()
         total = recon + self.kl_weight * kl

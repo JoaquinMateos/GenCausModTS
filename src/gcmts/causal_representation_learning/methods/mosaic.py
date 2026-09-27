@@ -13,10 +13,10 @@ encourages sparse module supports.
 from __future__ import annotations
 
 import logging
+import math
 
 import torch
 from torch import Tensor, nn
-from torch.nn import functional as F
 
 from gcmts.causal_representation_learning.base import BaseCausalRepresentationLearner
 from gcmts.core.backbones import (
@@ -24,6 +24,7 @@ from gcmts.core.backbones import (
     GaussianHead,
     flatten_sequence,
     gaussian_logpdf,
+    gaussian_reconstruction_nll,
     prepare_context,
     reparameterise,
     unflatten_sequence,
@@ -100,7 +101,10 @@ class MOSAIC(BaseCausalRepresentationLearner):
         decoder_hidden: tuple[int, ...] = (64,),
         sparsity: float = 0.01,
         kl_weight: float = 1.0,
+        obs_noise: float = 1.0,
     ) -> None:
+        if obs_noise <= 0:
+            raise ValueError("obs_noise must be positive.")
         super().__init__(observed_dim=observed_dim, latent_dim=latent_dim, max_lag=1)
         self.u_dim = u_dim
         self.sparsity = sparsity
@@ -110,6 +114,8 @@ class MOSAIC(BaseCausalRepresentationLearner):
         self.encoder = GaussianHead(observed_dim + u_dim, latent_dim, hidden_dims=hidden_dims)
         self.decoder = _SparseAdditiveDecoder(observed_dim, latent_dim, hidden=decoder_hidden)
         self.support: Tensor | None = None
+        self.register_buffer("obs_logvar", math.log(obs_noise**2) * torch.ones(1))
+        self.obs_logvar: Tensor
         logger.debug("Initialised MOSAIC (D=%d, d=%d, u=%d)", observed_dim, latent_dim, u_dim)
 
     def _condition(self, x: Tensor, u: Tensor | None) -> Tensor:
@@ -152,7 +158,9 @@ class MOSAIC(BaseCausalRepresentationLearner):
     def loss(self, outputs: CausalRepresentationOutput, batch: Batch) -> dict[str, Tensor]:
         if outputs.x_recon is None or outputs.extras is None:
             raise ValueError("MOSAIC forward output is incomplete.")
-        recon = F.mse_loss(outputs.x_recon.reshape_as(batch.x), batch.x)
+        recon = gaussian_reconstruction_nll(
+            outputs.x_recon.reshape_as(batch.x), batch.x, self.obs_logvar
+        )
         kl = (outputs.extras["log_q"] - outputs.extras["log_p"]).mean()
         sparsity = outputs.extras["importance"].sum()
         total = recon + self.kl_weight * kl + self.sparsity * sparsity

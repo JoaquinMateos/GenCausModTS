@@ -36,7 +36,7 @@ from gcmts.causal_representation_learning.methods import (
     TDRL,
     SlowFlows,
 )
-from gcmts.core import SimpleTrainer, move_batch
+from gcmts.core import SimpleTrainer, move_batch, save_training_report
 from gcmts.core.graph_ops import estimate_latent_adjacency
 from gcmts.data.synthetic import (
     InterventionalTemporalGenerator,
@@ -94,7 +94,7 @@ def build_cases(quick: bool) -> list[CaseConfig]:
     cases = [
         CaseConfig(
             name="ivae_linear",
-            model_factory=lambda: IVAE(observed_dim=5, latent_dim=3, u_dim=10),
+            model_factory=lambda: IVAE(observed_dim=5, latent_dim=3, u_dim=10, obs_noise=0.05),
             generator_factory=lambda: NonlinearICAGenerator(
                 observed_dim=5, latent_dim=3, horizon=1, n_regimes=10, mixing="linear", seed=0
             ),
@@ -103,7 +103,7 @@ def build_cases(quick: bool) -> list[CaseConfig]:
         ),
         CaseConfig(
             name="ivae_nonlinear",
-            model_factory=lambda: IVAE(observed_dim=5, latent_dim=3, u_dim=10),
+            model_factory=lambda: IVAE(observed_dim=5, latent_dim=3, u_dim=10, obs_noise=0.05),
             generator_factory=lambda: NonlinearICAGenerator(
                 observed_dim=5, latent_dim=3, horizon=1, n_regimes=10, mixing="nonlinear", seed=0
             ),
@@ -112,7 +112,9 @@ def build_cases(quick: bool) -> list[CaseConfig]:
         ),
         CaseConfig(
             name="leap_temporal",
-            model_factory=lambda: LEAP(observed_dim=6, latent_dim=3, max_lag=1, u_dim=4),
+            model_factory=lambda: LEAP(
+                observed_dim=6, latent_dim=3, max_lag=1, u_dim=4, kl_weight=5.0, obs_noise=0.1
+            ),
             generator_factory=lambda: TemporalNonlinearGenerator(
                 observed_dim=6,
                 latent_dim=3,
@@ -152,6 +154,7 @@ def build_cases(quick: bool) -> list[CaseConfig]:
                 latent_dyn_dim=2,
                 latent_obs_dim=1,
                 u_dim=3,
+                obs_noise=0.1,
             ),
             generator_factory=lambda: TDRLGenerator(
                 observed_dim=6,
@@ -167,7 +170,7 @@ def build_cases(quick: bool) -> list[CaseConfig]:
         ),
         CaseConfig(
             name="nctrl_regimes",
-            model_factory=lambda: NCTRL(observed_dim=6, latent_dim=3, n_regimes=3),
+            model_factory=lambda: NCTRL(observed_dim=6, latent_dim=3, n_regimes=3, obs_noise=0.1),
             generator_factory=lambda: NCTRLGenerator(
                 observed_dim=6, latent_dim=3, horizon=16, n_regimes=3, seed=0
             ),
@@ -176,7 +179,7 @@ def build_cases(quick: bool) -> list[CaseConfig]:
         ),
         CaseConfig(
             name="mosaic_modules",
-            model_factory=lambda: MOSAIC(observed_dim=5, latent_dim=3, u_dim=2),
+            model_factory=lambda: MOSAIC(observed_dim=5, latent_dim=3, u_dim=2, obs_noise=0.1),
             generator_factory=lambda: TemporalNonlinearGenerator(
                 observed_dim=5,
                 latent_dim=3,
@@ -227,7 +230,12 @@ def _check_outputs(
     return z_shape_ok, roundtrip_ok, finite
 
 
-def run_case(cfg: CaseConfig, device: str = "auto", batch_size: int = 256) -> CaseResult:
+def run_case(
+    cfg: CaseConfig,
+    device: str = "auto",
+    batch_size: int = 256,
+    out_dir: Path = Path("outputs"),
+) -> CaseResult:
     logger.info("=" * 72)
     logger.info("CASE %s | %s", cfg.name, cfg.note)
     torch.manual_seed(0)
@@ -246,6 +254,7 @@ def run_case(cfg: CaseConfig, device: str = "auto", batch_size: int = 256) -> Ca
     probe = generator.sample(16)
     z_shape_ok, roundtrip_ok, finite = _check_outputs(model, probe)
 
+    exp_dir = out_dir / cfg.name
     trainer = SimpleTrainer(
         max_epochs=max(cfg.epochs, 1),
         lr=cfg.lr,
@@ -254,11 +263,19 @@ def run_case(cfg: CaseConfig, device: str = "auto", batch_size: int = 256) -> Ca
         log_every=max(cfg.epochs // 10, 1),
         device=device,
         seed=0,
+        grad_clip=1.0,
+        scheduler="cosine",
+        warmup_fraction=0.05,
+        val_size=512,
+        val_every=10,
     )
     start = time.perf_counter()
     history = trainer.fit(model, generator)
     seconds = time.perf_counter() - start
     final_loss = history["loss"][-1] if history.get("loss") else float("nan")
+
+    save_training_report(history, exp_dir, title=f"{cfg.name} ({type(model).__name__})")
+    model.save(exp_dir / "model.pt")
 
     resolved_device = trainer.resolve_device(model)
     eval_batch = move_batch(generator.sample(2048), resolved_device)
@@ -464,7 +481,10 @@ def main() -> int:
         if not cases:
             logger.error("No cases matched --only %s", args.only)
             return 2
-    results = [run_case(cfg, device=args.device, batch_size=args.batch_size) for cfg in cases]
+    results = [
+        run_case(cfg, device=args.device, batch_size=args.batch_size, out_dir=args.out_dir)
+        for cfg in cases
+    ]
 
     print_table(results)
     save_results(results, args.out_dir)

@@ -95,7 +95,11 @@ reports this, and `CrlBenchmarkRunner` / `EffectBenchmarkRunner` /
 - **Evaluation at the right level** — a metric registry (`MCC`, `R²_diag`,
   `SHD`, `PEHE`, `ATE`, `CF MAE`, `OOD MSE`, …) plus benchmark runners.
 - **Logging trainer** — `SimpleTrainer` with deterministic batching, device
-  selection (CPU/CUDA/MPS), gradient clipping, and progress logs.
+  selection (CPU/CUDA/MPS), gradient clipping, linear warmup + cosine decay
+  (`cosine`/`plateau`/`step`/`none`), held-out validation monitoring with early
+  stopping, and per-epoch history.
+- **Training curves** — `save_training_report` writes `history.json`/`.csv` and
+  a loss/terms/learning-rate figure to `outputs/<experiment>/`.
 - **Typed and tested** — `mypy --strict` and `ruff` clean; a `pytest` suite
   covering flows' invertibility, graph operators, solvers, and every method's
   forward/loss/gradients plus latent-recovery sanity checks.
@@ -138,9 +142,12 @@ from gcmts.evaluation import BenchmarkTask, CrlBenchmarkRunner
 data = NonlinearICAGenerator(
     observed_dim=6, latent_dim=3, horizon=1, n_regimes=3, mixing="linear", seed=0
 )
-model = IVAE(observed_dim=6, latent_dim=3, u_dim=3)
+model = IVAE(observed_dim=6, latent_dim=3, u_dim=3, obs_noise=0.1)
 
-SimpleTrainer(max_epochs=2000, batch_size=256, seed=0).fit(model, data)
+# warmup + cosine schedule, validation monitoring, per-epoch history
+history = SimpleTrainer(
+    max_epochs=2000, batch_size=256, val_size=512, scheduler="cosine", seed=0
+).fit(model, data)
 
 task = BenchmarkTask(
     name="ivae", model=model, data=data.sample(2048),
@@ -270,8 +277,10 @@ uv run python scripts/run_crl_benchmarks.py --only leap_temporal
 ```
 
 Each method is trained on the synthetic benchmark matching its assumptions;
-input/output shapes are validated and results are written to
-`outputs/crl_benchmarks.{log,json,csv}`.
+input/output shapes are validated and the aggregate results are written to
+`outputs/crl_benchmarks.{log,json,csv}`. Per-experiment training histories,
+model checkpoints, and training-curve figures (`training_curves.png/pdf`) are
+written to `outputs/<case>/`.
 
 Preliminary results (`--batch-size 256`, single seed; RTX 3050):
 

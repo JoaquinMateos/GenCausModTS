@@ -30,6 +30,7 @@ __all__ = [
     "prepare_context",
     "gaussian_kl",
     "gaussian_logpdf",
+    "gaussian_reconstruction_nll",
     "reparameterise",
 ]
 
@@ -368,6 +369,28 @@ def prepare_context(
     elif value.ndim == 1:
         value = value.reshape(-1, 1)
     return _align_rows(value, n)
+
+
+def gaussian_reconstruction_nll(
+    x_recon: Tensor,
+    x: Tensor,
+    logvar: Tensor,
+) -> Tensor:
+    r"""Gaussian reconstruction NLL with a learned observation log-variance.
+
+    ``-log N(x; x_recon, exp(logvar))`` averaged over all elements:
+
+    .. math::
+        \tfrac{1}{2}\big((x-\hat x)^2 e^{-\log\sigma^2} + \log\sigma^2
+        + \log 2\pi\big).
+
+    Using a learned ``logvar`` makes the reconstruction/KL balance data-driven
+    instead of fixing an implicit unit variance, which matters when the true
+    observation noise is much smaller than the data scale.
+    """
+    logvar = logvar.clamp(LOGVAR_MIN, LOGVAR_MAX)
+    squared = (x_recon - x) ** 2
+    return (0.5 * (squared * torch.exp(-logvar) + logvar + _LOG_2PI)).mean()
 
 
 def gaussian_kl(

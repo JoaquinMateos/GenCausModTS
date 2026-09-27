@@ -14,10 +14,10 @@ identifiability is obtained from observations alone (no domain labels).
 from __future__ import annotations
 
 import logging
+import math
 
 import torch
 from torch import Tensor, nn
-from torch.nn import functional as F
 
 from gcmts.causal_representation_learning.base import BaseCausalRepresentationLearner
 from gcmts.causal_representation_learning.methods._temporal import hmm_log_marginal
@@ -26,6 +26,7 @@ from gcmts.core.backbones import (
     GaussianHead,
     flatten_sequence,
     gaussian_logpdf,
+    gaussian_reconstruction_nll,
     reparameterise,
     unflatten_sequence,
 )
@@ -58,7 +59,10 @@ class NCTRL(BaseCausalRepresentationLearner):
         hidden_dims: tuple[int, ...] = (128, 128),
         decoder_hidden: tuple[int, ...] = (128, 128),
         kl_weight: float = 1.0,
+        obs_noise: float = 1.0,
     ) -> None:
+        if obs_noise <= 0:
+            raise ValueError("obs_noise must be positive.")
         super().__init__(observed_dim=observed_dim, latent_dim=latent_dim, max_lag=1)
         self.n_regimes = n_regimes
         self.kl_weight = kl_weight
@@ -71,6 +75,8 @@ class NCTRL(BaseCausalRepresentationLearner):
         self.transition_logvar = nn.Parameter(torch.zeros(latent_dim))
         self.hmm_transition = nn.Parameter(torch.zeros(n_regimes, n_regimes))
         self.hmm_initial = nn.Parameter(torch.zeros(n_regimes))
+        self.register_buffer("obs_logvar", math.log(obs_noise**2) * torch.ones(1))
+        self.obs_logvar: Tensor
         logger.debug(
             "Initialised NCTRL (D=%d, d=%d, R=%d)", observed_dim, latent_dim, n_regimes
         )
@@ -137,7 +143,9 @@ class NCTRL(BaseCausalRepresentationLearner):
     def loss(self, outputs: CausalRepresentationOutput, batch: Batch) -> dict[str, Tensor]:
         if outputs.x_recon is None:
             raise ValueError("NCTRL forward output is missing the reconstruction.")
-        recon = F.mse_loss(outputs.x_recon.reshape_as(batch.x), batch.x)
+        recon = gaussian_reconstruction_nll(
+            outputs.x_recon.reshape_as(batch.x), batch.x, self.obs_logvar
+        )
         extras = outputs.extras or {}
         kl = (extras["log_q"] - extras["log_prior"]).mean()
         return {"loss": recon + self.kl_weight * kl, "recon": recon, "kl": kl}
