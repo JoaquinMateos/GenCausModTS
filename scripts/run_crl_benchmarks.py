@@ -37,6 +37,7 @@ from gcmts.causal_representation_learning.methods import (
     SlowFlows,
 )
 from gcmts.core import SimpleTrainer, move_batch
+from gcmts.core.graph_ops import estimate_latent_adjacency
 from gcmts.data.synthetic import (
     InterventionalTemporalGenerator,
     LinearSDEGenerator,
@@ -47,6 +48,7 @@ from gcmts.data.synthetic import (
     TemporalNonlinearGenerator,
 )
 from gcmts.evaluation import BenchmarkTask, CrlBenchmarkRunner
+from gcmts.evaluation.metrics import SHDMetric, WSHDMetric
 
 logger = logging.getLogger("gcmts.benchmarks")
 
@@ -76,6 +78,8 @@ class CaseResult:
     dci_disentanglement: float | None
     dci_completeness: float | None
     dci_informativeness: float | None
+    shd: float | None
+    wshd: float | None
     w2: float | None
     z_shape_ok: bool
     roundtrip_ok: bool
@@ -263,6 +267,8 @@ def run_case(cfg: CaseConfig, device: str = "auto", batch_size: int = 256) -> Ca
     dci_dis: float | None = None
     dci_comp: float | None = None
     dci_info: float | None = None
+    shd_value: float | None = None
+    wshd_value: float | None = None
 
     if cfg.kind == "sde":
         with torch.no_grad():
@@ -312,14 +318,31 @@ def run_case(cfg: CaseConfig, device: str = "auto", batch_size: int = 256) -> Ca
         dci_dis = scores.get("dci_disentanglement")
         dci_comp = scores.get("dci_completeness")
         dci_info = scores.get("dci_informativeness")
+
+        adj_true = eval_batch.adjacency
+        if adj_true is not None:
+            max_lag = int(getattr(generator, "max_lag", 1))
+            native = model.get_latent_adjacency()
+            if native is not None and tuple(native.shape) == tuple(adj_true.shape):
+                adj_est = native
+            else:
+                adj_est = estimate_latent_adjacency(z_pred, max_lag=max_lag)
+            shd_value = SHDMetric()(adj_est, adj_true).value
+            wshd_value = WSHDMetric()(adj_est, adj_true).value
+
         if mcc_value < 0.2:
             logger.warning(
                 "CASE %s MCC=%.3f is near chance; check configuration/training.",
                 cfg.name,
                 mcc_value,
             )
+        graph_msg = (
+            ""
+            if shd_value is None
+            else f" shd={shd_value:.1f} wshd={wshd_value:.2f}"
+        )
         logger.info(
-            "RESULT %s | mcc=%.3f r2_diag=%.3f r2_sep=%.3f dci=(%.3f/%.3f/%.3f) "
+            "RESULT %s | mcc=%.3f r2_diag=%.3f r2_sep=%.3f dci=(%.3f/%.3f/%.3f)%s "
             "recon_mse=%.4f loss=%.4f (%.1fs)",
             cfg.name,
             mcc_value,
@@ -328,6 +351,7 @@ def run_case(cfg: CaseConfig, device: str = "auto", batch_size: int = 256) -> Ca
             float("nan") if dci_dis is None else dci_dis,
             float("nan") if dci_comp is None else dci_comp,
             float("nan") if dci_info is None else dci_info,
+            graph_msg,
             recon_mse,
             final_loss,
             seconds,
@@ -346,6 +370,8 @@ def run_case(cfg: CaseConfig, device: str = "auto", batch_size: int = 256) -> Ca
         dci_disentanglement=dci_dis,
         dci_completeness=dci_comp,
         dci_informativeness=dci_info,
+        shd=shd_value,
+        wshd=wshd_value,
         w2=w2_value if cfg.kind == "sde" else None,
         z_shape_ok=z_shape_ok,
         roundtrip_ok=roundtrip_ok,
@@ -387,7 +413,7 @@ def print_table(results: list[CaseResult]) -> None:
     header = (
         f"{'case':<22}{'method':<10}{'params':>9}{'loss':>9}"
         f"{'recon':>9}{'mcc':>7}{'r2d':>7}{'r2s':>7}{'dciD':>7}{'dciC':>7}{'dciI':>7}"
-        f"{'w2':>8}{'sec':>7}{'device':>7}"
+        f"{'shd':>6}{'wshd':>7}{'w2':>8}{'sec':>7}{'device':>7}"
     )
     logger.info("-" * len(header))
     logger.info(header)
@@ -398,11 +424,15 @@ def print_table(results: list[CaseResult]) -> None:
         def _fmt(value: float | None) -> str:
             return f"{'—':>7}" if value is None else f"{value:>7.3f}"
 
+        def _gfmt(value: float | None, width: int) -> str:
+            return f"{'—':>{width}}" if value is None else f"{value:>{width}.1f}"
+
         logger.info(
             f"{r.case:<22}{r.method:<10}{r.n_parameters:>9}{r.final_loss:>9.3f}"
             f"{r.recon_mse:>9.4f}{r.mcc:>7.3f}{r.r2_matched:>7.3f}{_fmt(r.r2_sep)}"
             f"{_fmt(r.dci_disentanglement)}{_fmt(r.dci_completeness)}"
-            f"{_fmt(r.dci_informativeness)}{w2}{r.seconds:>7.1f}{r.device:>7}"
+            f"{_fmt(r.dci_informativeness)}{_gfmt(r.shd, 6)}{_gfmt(r.wshd, 7)}"
+            f"{w2}{r.seconds:>7.1f}{r.device:>7}"
         )
     logger.info("-" * len(header))
 

@@ -7,6 +7,8 @@ import torch
 
 from gcmts.core.graph_ops import (
     acyclicity,
+    aligned_shd,
+    estimate_latent_adjacency,
     is_dag,
     sample_dag,
     shd,
@@ -43,6 +45,36 @@ def test_shd_counts_differences():
     est = torch.zeros(3, 3)
     est[0, 2] = 1.0
     assert shd(est, true) == 2
+
+
+def test_estimate_latent_adjacency_recovers_known_graph():
+    torch.manual_seed(0)
+    dim, steps, batch = 3, 300, 8
+    true = torch.zeros(dim, dim, 1)
+    true[1, 0, 0] = 0.9  # z1_t <- z0_{t-1}
+    true[2, 1, 0] = 0.9  # z2_t <- z1_{t-1}
+    z = torch.zeros(batch, steps + 1, dim)
+    z[:, 0] = torch.randn(batch, dim)
+    for t in range(1, steps + 1):
+        z[:, t] = z[:, t - 1] @ true[:, :, 0].T + 0.01 * torch.randn(batch, dim)
+    est = estimate_latent_adjacency(z[:, 1:], max_lag=1, threshold=0.1)
+    assert torch.equal((est.abs() > 0).float(), (true.abs() > 0).float())
+
+
+def test_aligned_shd_is_permutation_invariant():
+    true = torch.zeros(3, 3, 1)
+    true[1, 0, 0] = 1.0
+    true[2, 1, 0] = 1.0
+    perm = [2, 0, 1]
+    permuted = true[torch.tensor(perm)][:, torch.tensor(perm)]
+    assert aligned_shd(permuted, true) == 0.0
+
+
+def test_aligned_shd_counts_missing_edge():
+    true = torch.zeros(3, 3, 1)
+    true[1, 0, 0] = 1.0
+    est = torch.zeros(3, 3, 1)
+    assert aligned_shd(est, true) == 1.0
 
 
 def test_topological_order():

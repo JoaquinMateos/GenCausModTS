@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, cast
 
 import torch
@@ -22,6 +23,8 @@ __all__ = [
     "LinearSDEGenerator",
     "TDRLGenerator",
     "NCTRLGenerator",
+    "Causal3DIdentGenerator",
+    "CartPoleGenerator",
 ]
 
 
@@ -187,7 +190,7 @@ class LTSCMGenerator(BaseDataGenerator):
             adjacency=self.latent_adjacency,
         )
         x, z = ltscm.sample(n_samples, horizon, return_latents=True)
-        return Batch(x=x, z=z)
+        return Batch(x=x, z=z, adjacency=self.latent_adjacency)
 
 
 def _frozen_mlp(
@@ -371,7 +374,7 @@ class TemporalNonlinearGenerator(BaseDataGenerator):
             ].unsqueeze(1)
         x = x + self.noise_std * torch.randn(x.shape, generator=self.rng)
         context = {"u": torch.nn.functional.one_hot(u, max(self.n_regimes, 1)).float()}
-        return Batch(x=x, z=z_obs, context=context)
+        return Batch(x=x, z=z_obs, context=context, adjacency=self.latent_adjacency)
 
 
 class InterventionalTemporalGenerator(BaseDataGenerator):
@@ -489,6 +492,8 @@ class SlowFeatureGenerator(BaseDataGenerator):
         self.nonlinearity = nonlinearity
         self.observation_noise = observation_noise
         self.rng = torch.Generator().manual_seed(seed or 0)
+        # z_t = z_{t-1} + eps_t: each source depends only on its own past.
+        self.latent_adjacency = torch.eye(observed_dim).unsqueeze(-1)
 
     def sample(self, n_samples: int, horizon: int | None = None, **kwargs: Any) -> Batch:
         horizon = horizon or self.horizon
@@ -502,7 +507,7 @@ class SlowFeatureGenerator(BaseDataGenerator):
         x = z + self.nonlinearity * torch.tanh(z)
         if self.observation_noise:
             x = x + self.observation_noise * torch.randn(x.shape, generator=self.rng)
-        return Batch(x=x, z=z)
+        return Batch(x=x, z=z, adjacency=self.latent_adjacency)
 
 
 class LinearSDEGenerator(BaseDataGenerator):
@@ -588,6 +593,10 @@ class TDRLGenerator(BaseDataGenerator):
             n_regimes, obs_dim
         ).clone()
         self.mixing = _frozen_mlp(latent_dim, observed_dim, hidden=hidden, generator=self.rng)
+        # fix/changing blocks depend on all past latents; observation block does not.
+        block = torch.zeros(latent_dim, latent_dim)
+        block[: fix_dim + chg_dim, :] = 1.0
+        self.latent_adjacency = block.unsqueeze(-1)
 
     def sample(self, n_samples: int, horizon: int | None = None, **kwargs: Any) -> Batch:
         horizon = horizon or self.horizon
@@ -609,16 +618,16 @@ class TDRLGenerator(BaseDataGenerator):
             )
         x = x + self.noise_std * torch.randn(x.shape, generator=self.rng)
         context = {"u": torch.nn.functional.one_hot(u, self.n_regimes).float()}
-        return Batch(x=x, z=z, context=context)
+        return Batch(x=x, z=z, context=context, adjacency=self.latent_adjacency)
 
 
 class NCTRLGenerator(BaseDataGenerator):
     r"""Temporal process with a first-order Markov regime process (NCTRL).
 
-    Regimes ``c_t`` follow a Markov chain with transition matrix ``P`` and the
+    Regimes ``r_t`` follow a Markov chain with transition matrix ``P`` and the
     latent transition is regime-dependent:
-    :math:`z_t = A_{c_t} z_{t-1} + \epsilon_t`, mixed by a fixed nonlinear map.
-    Regimes are latent; ``context["c"]`` is provided only for reference.
+    :math:`z_t = A_{r_t} z_{t-1} + \epsilon_t`, mixed by a fixed nonlinear map.
+    Regimes are latent; ``context["r"]`` is provided only for reference.
     """
 
     def __init__(
@@ -670,4 +679,170 @@ class NCTRLGenerator(BaseDataGenerator):
                 n_samples, horizon, self.observed_dim
             )
         x = x + self.noise_std * torch.randn(x.shape, generator=self.rng)
-        return Batch(x=x, z=z, context={"c": regimes})
+        return Batch(x=x, z=z, context={"r": regimes})
+
+
+class Causal3DIdentGenerator(BaseDataGenerator):
+    r"""Temporal Causal3DIdent-like benchmark with known visual factors.
+
+    A low-dimensional surrogate for the Causal3DIdent family: ``latent_dim``
+    continuous factors (object position, rotation, hue, spotlight, \dots) evolve
+    through a lagged acyclic mechanism and are rendered through a non-linear
+    observation map. When ``observed_dim == latent_dim`` and ``mixing ==
+    "invertible"`` the render is a fixed invertible flow, so latent recovery is
+    well posed; with ``observed_dim > latent_dim`` the render is non-invertible
+    (for methods that relax invertibility). Ground-truth factors ``z`` and the
+    latent adjacency are returned for MCC/R2/SHD.
+    """
+
+    def __init__(
+        self,
+        *,
+        observed_dim: int,
+        latent_dim: int,
+        horizon: int,
+        max_lag: int = 1,
+        adjacency_sparsity: float = 0.4,
+        mixing: str = "invertible",
+        mechanism_scale: float = 0.7,
+        noise_std: float = 0.1,
+        hidden: int = 64,
+        seed: int | None = None,
+    ) -> None:
+        super().__init__(observed_dim=observed_dim, horizon=horizon)
+        if mixing not in {"invertible", "nonlinear"}:
+            raise ValueError("mixing must be 'invertible' or 'nonlinear'.")
+        if mixing == "invertible" and observed_dim != latent_dim:
+            raise ValueError("invertible mixing requires observed_dim == latent_dim.")
+        self.latent_dim = latent_dim
+        self.max_lag = max_lag
+        self.mixing_type = mixing
+        self.noise_std = noise_std
+        self.rng = torch.Generator().manual_seed(seed or 0)
+        adj = torch.rand(latent_dim, latent_dim, generator=self.rng)
+        mask = (torch.rand_like(adj) < adjacency_sparsity).float()
+        adj = adj * mask * torch.triu(torch.ones_like(adj), diagonal=1)
+        self.latent_adjacency = (adj * mechanism_scale).unsqueeze(-1).expand(
+            -1, -1, max_lag
+        )
+        if mixing == "invertible":
+            self.mixing: nn.Module = random_invertible_mixing(
+                latent_dim, generator=self.rng
+            )
+        else:
+            self.mixing = _frozen_mlp(
+                latent_dim, observed_dim, hidden=hidden, generator=self.rng
+            )
+
+    def sample(self, n_samples: int, horizon: int | None = None, **kwargs: Any) -> Batch:
+        horizon = horizon or self.horizon
+        p = self.max_lag
+        z = torch.zeros(n_samples, horizon + p, self.latent_dim)
+        z[:, :p] = torch.randn(n_samples, p, self.latent_dim, generator=self.rng)
+        for t in range(p, horizon + p):
+            parents = z[:, t - p : t]
+            contrib = torch.zeros(n_samples, self.latent_dim)
+            for lag in range(p):
+                contrib = contrib + parents[:, lag] @ self.latent_adjacency[:, :, lag].T
+            eps = torch.randn(n_samples, self.latent_dim, generator=self.rng)
+            z[:, t] = contrib + eps * self.noise_std
+        z_obs = z[:, p:]
+        with torch.no_grad():
+            x = cast(Tensor, self.mixing(z_obs.reshape(-1, self.latent_dim))).reshape(
+                n_samples, horizon, self.observed_dim
+            )
+        x = x + self.noise_std * torch.randn(x.shape, generator=self.rng)
+        return Batch(x=x, z=z_obs, adjacency=self.latent_adjacency)
+
+
+class CartPoleGenerator(BaseDataGenerator):
+    r"""Regime-changing CartPole trajectories with known latent physical state.
+
+    Integrates the standard cart-pole dynamics under random actions, with
+    per-trajectory regime parameters (force magnitude, pole length and masses).
+    The latent state is the physical state
+    :math:`(x, \dot x, \theta, \dot\theta)`; observations are either the state
+    itself or a fixed non-linear render. No latent causal graph is defined, so
+    ``adjacency`` is ``None`` and SHD metrics do not apply.
+    """
+
+    def __init__(
+        self,
+        *,
+        horizon: int,
+        observed_dim: int = 4,
+        n_regimes: int = 3,
+        dt: float = 0.02,
+        gravity: float = 9.8,
+        mixing: str = "state",
+        noise_std: float = 0.05,
+        hidden: int = 64,
+        seed: int | None = None,
+    ) -> None:
+        super().__init__(observed_dim=observed_dim, horizon=horizon)
+        if mixing not in {"state", "nonlinear"}:
+            raise ValueError("mixing must be 'state' or 'nonlinear'.")
+        if mixing == "state" and observed_dim != 4:
+            raise ValueError("state observations require observed_dim == 4.")
+        self.n_regimes = n_regimes
+        self.dt = dt
+        self.gravity = gravity
+        self.noise_std = noise_std
+        self.mixing_type = mixing
+        self.rng = torch.Generator().manual_seed(seed or 0)
+        self.force_mag = 5.0 + 5.0 * torch.rand(n_regimes, generator=self.rng)
+        self.pole_length = 0.5 + 0.5 * torch.rand(n_regimes, generator=self.rng)
+        self.mass_cart = 0.5 + 0.5 * torch.rand(n_regimes, generator=self.rng)
+        self.mass_pole = 0.05 + 0.1 * torch.rand(n_regimes, generator=self.rng)
+        if mixing == "nonlinear":
+            self.mixing: nn.Module | None = _frozen_mlp(
+                4, observed_dim, hidden=hidden, generator=self.rng
+            )
+        else:
+            self.mixing = None
+
+    def sample(self, n_samples: int, horizon: int | None = None, **kwargs: Any) -> Batch:
+        horizon = horizon or self.horizon
+        u = torch.randint(0, self.n_regimes, (n_samples,), generator=self.rng)
+        force_mag = self.force_mag[u]
+        length = self.pole_length[u]
+        mass_cart = self.mass_cart[u]
+        mass_pole = self.mass_pole[u]
+        state = torch.zeros(n_samples, horizon, 4)
+        state[:, 0] = 0.05 * torch.randn(n_samples, 4, generator=self.rng)
+        actions = torch.where(
+            torch.rand(n_samples, horizon, generator=self.rng) < 0.5, 1.0, -1.0
+        )
+        for t in range(1, horizon):
+            x = state[:, t - 1, 0]
+            x_dot = state[:, t - 1, 1]
+            theta = state[:, t - 1, 2]
+            theta_dot = state[:, t - 1, 3]
+            cos = torch.cos(theta)
+            sin = torch.sin(theta)
+            force = actions[:, t - 1] * force_mag
+            temp = (force + mass_pole * length * theta_dot**2 * sin) / (
+                mass_cart + mass_pole
+            )
+            theta_acc = (self.gravity * sin - cos * temp) / (
+                length * (4.0 / 3.0 - mass_pole * cos**2 / (mass_cart + mass_pole))
+            )
+            x_acc = temp - mass_pole * length * theta_acc * cos / (
+                mass_cart + mass_pole
+            )
+            state[:, t, 0] = (x + self.dt * x_dot).clamp(-5.0, 5.0)
+            state[:, t, 1] = (x_dot + self.dt * x_acc).clamp(-10.0, 10.0)
+            state[:, t, 2] = (theta + self.dt * theta_dot).clamp(-math.pi, math.pi)
+            state[:, t, 3] = (theta_dot + self.dt * theta_acc).clamp(-15.0, 15.0)
+        with torch.no_grad():
+            if self.mixing is None:
+                x = state
+            else:
+                x = cast(
+                    Tensor, self.mixing(state.reshape(-1, 4))
+                ).reshape(n_samples, horizon, self.observed_dim)
+        x = x + self.noise_std * torch.randn(x.shape, generator=self.rng)
+        context = {
+            "u": torch.nn.functional.one_hot(u, self.n_regimes).float(),
+        }
+        return Batch(x=x, z=state, context=context)

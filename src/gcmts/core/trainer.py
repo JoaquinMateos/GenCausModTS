@@ -26,6 +26,8 @@ def move_batch(batch: Batch, device: torch.device) -> Batch:
         batch.mask = batch.mask.to(device)
     if batch.context is not None:
         batch.context = {k: v.to(device) for k, v in batch.context.items()}
+    if batch.adjacency is not None:
+        batch.adjacency = batch.adjacency.to(device)
     return batch
 
 
@@ -38,6 +40,7 @@ def _subset_batch(batch: Batch, indices: Tensor) -> Batch:
         z=None if batch.z is None else batch.z[indices],
         context=context,
         mask=None if batch.mask is None else batch.mask[indices],
+        adjacency=batch.adjacency,
     )
 
 

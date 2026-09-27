@@ -2,6 +2,8 @@
 
 from gcmts.data.base import BaseDataGenerator
 from gcmts.data.synthetic import (
+    CartPoleGenerator,
+    Causal3DIdentGenerator,
     InterventionalTemporalGenerator,
     LinearSDEGenerator,
     LTSCMGenerator,
@@ -15,6 +17,8 @@ from gcmts.data.synthetic import (
 
 __all__ = [
     "BaseDataGenerator",
+    "CartPoleGenerator",
+    "Causal3DIdentGenerator",
     "InterventionalTemporalGenerator",
     "LinearSDEGenerator",
     "LTSCMGenerator",

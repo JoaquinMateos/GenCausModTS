@@ -8,6 +8,9 @@ re-exported here.
 
 from __future__ import annotations
 
+from itertools import permutations
+from typing import cast
+
 import torch
 from torch import Tensor
 
@@ -19,6 +22,8 @@ __all__ = [
     "is_dag",
     "shd",
     "weighted_shd",
+    "aligned_shd",
+    "estimate_latent_adjacency",
     "topological_order",
     "lagged_adjacency_to_dag",
 ]
@@ -99,6 +104,81 @@ def weighted_shd(
     true = _binarise(adj_true, threshold)
     weight = torch.maximum(adj_est.abs(), adj_true.abs())
     return float(((est != true).float() * weight).sum().item())
+
+
+def estimate_latent_adjacency(
+    z: Tensor,
+    *,
+    max_lag: int = 1,
+    threshold: float = 0.1,
+    standardize: bool = True,
+) -> Tensor:
+    """Fit a sparse lagged latent graph from trajectories by least squares.
+
+    This is the post-hoc protocol used by TDRL's paper ("we fit a sparse causal
+    graph on the learned latents"): regress ``z_t`` on ``z_{t-1:t-p}`` after
+    standardising each latent, then keep the coefficients whose magnitude exceeds
+    ``threshold``. The result is an ``(d, d, p)`` tensor where ``A[i, j, l] != 0``
+    means ``z_{i,t}`` depends on ``z_{j,t-1-l}``.
+
+    Args:
+        z: latents of shape ``(B, T, d)``.
+        max_lag: temporal lag ``p``.
+        threshold: absolute coefficient threshold on standardised latents.
+        standardize: center/scale each latent across batch and time first.
+    """
+    if z.ndim != 3:
+        raise ValueError("estimate_latent_adjacency expects z of shape (B, T, d).")
+    batch, time, dim = z.shape
+    p = max(1, int(max_lag))
+    if time <= p:
+        return torch.zeros(dim, dim, p, dtype=z.dtype)
+    zc = z
+    if standardize:
+        mean = z.mean(dim=(0, 1), keepdim=True)
+        scale = z.std(dim=(0, 1), keepdim=True) + 1e-6
+        zc = (z - mean) / scale
+    features = torch.stack(
+        [zc[:, p - 1 - lag : time - 1 - lag, :] for lag in range(p)], dim=-1
+    )  # (B, T-p, d, p)
+    design = features.reshape(-1, dim * p)
+    target = zc[:, p:, :].reshape(-1, dim)
+    coef = torch.linalg.lstsq(design, target).solution  # (d*p, d)
+    adj = coef.T.reshape(dim, p, dim).permute(0, 2, 1).contiguous()  # (d, d, p)
+    if threshold > 0:
+        adj = torch.where(adj.abs() > threshold, adj, torch.zeros_like(adj))
+    return cast(Tensor, adj.to(z.dtype))
+
+
+def aligned_shd(
+    adj_est: Tensor,
+    adj_true: Tensor,
+    *,
+    threshold: float = 1e-3,
+    weighted: bool = False,
+) -> float:
+    """SHD/WSHD minimised over latent permutations.
+
+    Latent-variable models recover their factors only up to a permutation, so a
+    raw comparison is meaningless; we align the estimated graph to the ground
+    truth by the permutation minimising the distance (exhaustive for ``d <= 7``,
+    identity fallback otherwise). ``weighted=True`` uses :func:`weighted_shd`.
+    """
+    if adj_est.shape != adj_true.shape:
+        raise ValueError("Adjacency matrices must share a shape.")
+    dim = int(adj_est.shape[0])
+    perms = permutations(range(dim)) if dim <= 7 else [tuple(range(dim))]
+    best = float("inf")
+    for perm in perms:
+        index = torch.tensor(perm, device=adj_est.device)
+        permuted = adj_est[index][:, index]
+        value = (
+            weighted_shd(permuted, adj_true, threshold=threshold)
+            if weighted
+            else float(shd(permuted, adj_true, threshold=threshold))
+        )
+        best = min(best, value)
+    return best
 
 
 def topological_order(adj: Tensor) -> list[int]:

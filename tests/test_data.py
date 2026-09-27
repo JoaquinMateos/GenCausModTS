@@ -5,6 +5,8 @@ from __future__ import annotations
 import torch
 
 from gcmts.data.synthetic import (
+    CartPoleGenerator,
+    Causal3DIdentGenerator,
     InterventionalTemporalGenerator,
     LinearSDEGenerator,
     NCTRLGenerator,
@@ -86,9 +88,49 @@ def test_nctrl_generator_regimes_and_shapes():
     assert batch.x.shape == (4, 12, 5)
     assert batch.z is not None and batch.z.shape == (4, 12, 3)
     assert batch.context is not None
-    regimes = batch.context["c"]
+    regimes = batch.context["r"]
     assert regimes.shape == (4, 12)
     assert int(regimes.min()) >= 0 and int(regimes.max()) < 3
+
+
+def test_causal3dident_generator_invertible():
+    generator = Causal3DIdentGenerator(
+        observed_dim=5, latent_dim=5, horizon=9, mixing="invertible", seed=0
+    )
+    batch = generator.sample(6)
+    assert batch.x.shape == (6, 9, 5)
+    assert batch.z is not None and batch.z.shape == (6, 9, 5)
+    assert batch.adjacency is not None
+    assert torch.isfinite(batch.x).all()
+
+
+def test_causal3dident_generator_nonlinear_non_invertible():
+    generator = Causal3DIdentGenerator(
+        observed_dim=8, latent_dim=3, horizon=6, mixing="nonlinear", seed=1
+    )
+    batch = generator.sample(4)
+    assert batch.x.shape == (4, 6, 8)
+    assert batch.z is not None and batch.z.shape == (4, 6, 3)
+    assert torch.isfinite(batch.x).all()
+
+
+def test_cartpole_generator_state_and_regimes():
+    generator = CartPoleGenerator(horizon=20, n_regimes=3, seed=0)
+    batch = generator.sample(5)
+    assert batch.x.shape == (5, 20, 4)
+    assert batch.z is not None and batch.z.shape == (5, 20, 4)
+    assert batch.adjacency is None  # no latent causal graph for control systems
+    assert batch.context is not None and batch.context["u"].shape == (5, 3)
+    assert torch.isfinite(batch.x).all()
+
+
+def test_cartpole_generator_nonlinear_observations():
+    generator = CartPoleGenerator(
+        horizon=10, observed_dim=6, mixing="nonlinear", seed=2
+    )
+    batch = generator.sample(3)
+    assert batch.x.shape == (3, 10, 6)
+    assert batch.z is not None and batch.z.shape == (3, 10, 4)
 
 
 def test_linear_sde_generator_stationary_scale():

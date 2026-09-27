@@ -14,6 +14,7 @@ from sklearn.metrics import r2_score
 from sklearn.model_selection import train_test_split
 from torch import Tensor
 
+from gcmts.core.graph_ops import aligned_shd
 from gcmts.core.utils import hungarian_match, mcc
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "DCICompletenessMetric",
     "DCIInformativenessMetric",
     "SHDMetric",
+    "WSHDMetric",
     "PEHEMetric",
     "ATEMetric",
     "CFMAEMetric",
@@ -95,6 +97,7 @@ def _default_registry() -> MetricRegistry:
     reg.register(DCICompletenessMetric())
     reg.register(DCIInformativenessMetric())
     reg.register(SHDMetric())
+    reg.register(WSHDMetric())
     reg.register(PEHEMetric())
     reg.register(ATEMetric())
     reg.register(CFMAEMetric())
@@ -255,16 +258,34 @@ class DCIInformativenessMetric(Metric):
 
 
 class SHDMetric(Metric):
-    """Structural Hamming Distance between estimated and true adjacency."""
+    """Structural Hamming Distance between estimated and true adjacency.
+
+    The estimated graph is aligned to the ground truth over latent permutations
+    before counting edge additions/deletions, since latents are identified only
+    up to permutation. Accepts adjacency of shape ``(d, d)`` or ``(d, d, p)``.
+    """
 
     def __init__(self) -> None:
         super().__init__("shd", "L1_structure", higher_is_better=False)
 
     def __call__(self, prediction: Tensor, target: Tensor) -> MetricResult:
-        pred_bin = (prediction != 0).int()
-        tgt_bin = (target != 0).int()
-        distance = (pred_bin != tgt_bin).sum().item()
-        return MetricResult(self.name, float(distance), self.level, self.higher_is_better)
+        value = aligned_shd(prediction, target)
+        return MetricResult(self.name, value, self.level, self.higher_is_better)
+
+
+class WSHDMetric(Metric):
+    """Weighted SHD: structural differences weighted by edge magnitude.
+
+    Uses the same permutation alignment as :class:`SHDMetric`; see
+    :func:`gcmts.core.graph_ops.weighted_shd`.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("wshd", "L1_structure", higher_is_better=False)
+
+    def __call__(self, prediction: Tensor, target: Tensor) -> MetricResult:
+        value = aligned_shd(prediction, target, weighted=True)
+        return MetricResult(self.name, value, self.level, self.higher_is_better)
 
 
 # --- Effect-estimation metrics -----------------------------------------------
