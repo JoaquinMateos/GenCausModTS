@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+title: "gcmts: Generative Causal Modelling for Time Series"
+message: "If you use this software, please cite it and the companion review."
+type: software
+authors:
+  - family-names: Mateos
+    given-names: Joaquín
+    email: joaquin.mateos@uco.es
+    orcid: "https://orcid.org/0009-0002-8189-3236"
+  - family-names: Moya
+    given-names: Antonio R.
+    email: amoya@uco.es
+    orcid: "https://orcid.org/0000-0002-3657-4749"
+  - family-names: Ventura
+    given-names: Sebastián
+    email: sventura@uco.es
+    orcid: "https://orcid.org/0000-0003-4216-6378"
+license: MIT
+version: 0.1.0
+date-released: "2026-09-27"
+repository-code: "https://github.com/JoaquinMateos/GenCausModTS"
+keywords:
+  - causal representation learning
+  - time series
+  - counterfactual inference
+  - disentanglement
+  - generative models
