@@ -13,13 +13,12 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import csv
-import json
 import logging
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 import torch
 
@@ -33,6 +32,7 @@ from gcmts.evaluation.metrics import (
     MMD2Metric,
     PEHEMetric,
 )
+from gcmts.evaluation.report import aggregate_rows, save_rows
 
 logger = logging.getLogger("gcmts.ctee")
 
@@ -102,26 +102,25 @@ def evaluate(
     batch = move_batch(generator.sample(1024), device)
     action = batch.context["A"].to(device)
     zeros = torch.zeros_like(action)
-    ones = torch.ones_like(action)
 
-    y0 = _outcome(model.counterfactual(batch, {"A": zeros}).counterfactual, generator.outcome_dim)
-    y1 = _outcome(model.counterfactual(batch, {"A": ones}).counterfactual, generator.outcome_dim)
-    cf_hat = model.counterfactual(batch, {"A": 1.0 - action}).counterfactual
-    recon = model.counterfactual(batch, {"A": action}).counterfactual
-
+    cf_hat = model.counterfactual(batch, {"A": zeros}).counterfactual
+    factual_hat = model.counterfactual(batch, {"A": action}).counterfactual
     true_cf = batch.counterfactual
-    cf_outcome = _outcome(true_cf, generator.outcome_dim)
-    factual_outcome = batch.outcome
-    true_y0 = torch.where(action.squeeze(-1) > 0.5, cf_outcome, factual_outcome)
-    true_y1 = torch.where(action.squeeze(-1) > 0.5, factual_outcome, cf_outcome)
 
-    pehe = PEHEMetric()(y1 - y0, true_y1 - true_y0).value
-    ate_error = abs((y1 - y0).mean().item() - (true_y1 - true_y0).mean().item())
+    y_cf_hat = _outcome(cf_hat, generator.outcome_dim)
+    y_f_hat = _outcome(factual_hat, generator.outcome_dim)
+    y_cf_true = _outcome(true_cf, generator.outcome_dim)
+    y_f_true = batch.outcome
+
+    ite_hat = y_cf_hat - y_f_hat
+    ite_true = y_cf_true - y_f_true
+    pehe = PEHEMetric()(ite_hat, ite_true).value
+    ate_error = abs(ite_hat.mean().item() - ite_true.mean().item())
     cf_mae = CFMAEMetric()(cf_hat, true_cf).value
     cf_mbe = MBEMetric()(cf_hat, true_cf).value
     mmd2 = MMD2Metric()(cf_hat[:256], true_cf[:256]).value
-    recon_axiom = CFMAEMetric()(recon, batch.x).value
-    effectiveness = (y1 - y0).mean().item() - (true_y1 - true_y0).mean().item()
+    recon_axiom = CFMAEMetric()(factual_hat, batch.x).value
+    effectiveness = ite_hat.mean().item() - ite_true.mean().item()
     return {
         "pehe": pehe,
         "ate_error": ate_error,
@@ -133,11 +132,19 @@ def evaluate(
     }
 
 
-def run_case(cfg: CaseConfig, device: str, batch_size: int, out_dir: Path) -> CaseResult:
+def run_case(
+    cfg: CaseConfig,
+    device: str,
+    batch_size: int,
+    out_dir: Path,
+    *,
+    seed: int = 0,
+    save_curves: bool = True,
+) -> CaseResult:
     logger.info("=" * 72)
-    logger.info("CASE %s | %s", cfg.name, cfg.note)
-    torch.manual_seed(0)
-    generator = HarmonicOscillatorGenerator(n_units=3, observed_dim=6, horizon=24, seed=0)
+    logger.info("CASE %s seed=%d | %s", cfg.name, seed, cfg.note)
+    torch.manual_seed(seed)
+    generator = HarmonicOscillatorGenerator(n_units=3, observed_dim=6, horizon=24, seed=seed)
     model = cfg.model_factory()
     n_params = sum(p.numel() for p in model.parameters())
     exp_dir = out_dir / cfg.name
@@ -148,7 +155,7 @@ def run_case(cfg: CaseConfig, device: str, batch_size: int, out_dir: Path) -> Ca
         steps_per_epoch=15,
         log_every=max(cfg.epochs // 10, 1),
         device=device,
-        seed=0,
+        seed=seed,
         grad_clip=1.0,
         scheduler="cosine",
         val_size=512,
@@ -157,8 +164,9 @@ def run_case(cfg: CaseConfig, device: str, batch_size: int, out_dir: Path) -> Ca
     start = time.perf_counter()
     history = trainer.fit(model, generator)
     seconds = time.perf_counter() - start
-    save_training_report(history, exp_dir, title=f"{cfg.name} ({type(model).__name__})")
-    model.save(exp_dir / "model.pt")
+    if save_curves:
+        save_training_report(history, exp_dir, title=f"{cfg.name} ({type(model).__name__})")
+        model.save(exp_dir / "model.pt")
 
     resolved = trainer.resolve_device(model)
     scores = evaluate(model, generator, resolved)
@@ -190,36 +198,43 @@ def configure_logging(out_dir: Path) -> None:
     ]
 
 
-def save_results(results: list[CaseResult], out_dir: Path) -> None:
-    payload = [asdict(r) for r in results]
-    (out_dir / "ctee_benchmarks.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    with (out_dir / "ctee_benchmarks.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(payload[0].keys()))
-        writer.writeheader()
-        writer.writerows(payload)
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run CTEE benchmarks.")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--only", nargs="*", default=None)
+    parser.add_argument("--seeds", type=int, default=5, help="number of seeds")
     parser.add_argument("--out-dir", type=Path, default=Path("outputs"))
     args = parser.parse_args()
     configure_logging(args.out_dir)
     cases = build_cases()
     if args.only:
         cases = [c for c in cases if c.name in set(args.only)]
-    results = [run_case(c, args.device, args.batch_size, args.out_dir) for c in cases]
-    save_results(results, args.out_dir)
-    logger.info(
-        "%-18s %-8s %8s %8s %8s %8s %8s %8s",
-        "case", "method", "PEHE", "eATE", "CFMAE", "MBE", "MMD2", "recon",
-    )
-    for r in results:
+    rows: list[dict[str, Any]] = []
+    for seed in range(args.seeds):
+        for cfg in cases:
+            result = run_case(
+                cfg, args.device, args.batch_size, args.out_dir,
+                seed=seed, save_curves=(seed == 0),
+            )
+            rows.append(asdict(result))
+    save_rows(rows, args.out_dir, stem="ctee_benchmarks")
+    logger.info("%-18s %14s %14s %14s %14s", "case", "PEHE", "eATE", "CFMAE", "MBE")
+    aggregated = aggregate_rows(rows)
+
+    def stat(metrics: dict[str, Any], name: str) -> str:
+        if name not in metrics:
+            return "     --     "
+        return f"{metrics[name]['mean']:.3f}±{metrics[name]['std']:.3f}"
+
+    for case, metrics in aggregated.items():
         logger.info(
-            "%-18s %-8s %8.4f %8.4f %8.4f %8.4f %8.4f %8.4f",
-            r.case, r.method, r.pehe, r.ate_error, r.cf_mae, r.cf_mbe, r.mmd2, r.recon_axiom,
+            "%-18s %14s %14s %14s %14s",
+            case,
+            stat(metrics, "pehe"),
+            stat(metrics, "ate_error"),
+            stat(metrics, "cf_mae"),
+            stat(metrics, "cf_mbe"),
         )
     return 0
 

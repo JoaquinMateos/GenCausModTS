@@ -14,8 +14,6 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import csv
-import json
 import logging
 import time
 from collections.abc import Callable
@@ -49,6 +47,7 @@ from gcmts.data.synthetic import (
 )
 from gcmts.evaluation import BenchmarkTask, CrlBenchmarkRunner
 from gcmts.evaluation.metrics import SHDMetric, WSHDMetric
+from gcmts.evaluation.report import aggregate_rows, save_rows
 
 logger = logging.getLogger("gcmts.benchmarks")
 
@@ -57,7 +56,7 @@ logger = logging.getLogger("gcmts.benchmarks")
 class CaseConfig:
     name: str
     model_factory: Callable[[], BaseCausalRepresentationLearner]
-    generator_factory: Callable[[], Any]
+    generator_factory: Callable[[int], Any]
     epochs: int
     lr: float = 1e-3
     kind: str = "crl"  # "crl" (mixing model) or "sde" (observed-space process)
@@ -95,8 +94,8 @@ def build_cases(quick: bool) -> list[CaseConfig]:
         CaseConfig(
             name="ivae_linear",
             model_factory=lambda: IVAE(observed_dim=5, latent_dim=3, u_dim=10, obs_noise=0.05),
-            generator_factory=lambda: NonlinearICAGenerator(
-                observed_dim=5, latent_dim=3, horizon=1, n_regimes=10, mixing="linear", seed=0
+            generator_factory=lambda seed: NonlinearICAGenerator(
+                observed_dim=5, latent_dim=3, horizon=1, n_regimes=10, mixing="linear", seed=seed
             ),
             epochs=int(2000 * scale),
             note="iVAE, 10 regimes >= nk+1 required for identifiability",
@@ -104,8 +103,8 @@ def build_cases(quick: bool) -> list[CaseConfig]:
         CaseConfig(
             name="ivae_nonlinear",
             model_factory=lambda: IVAE(observed_dim=5, latent_dim=3, u_dim=10, obs_noise=0.05),
-            generator_factory=lambda: NonlinearICAGenerator(
-                observed_dim=5, latent_dim=3, horizon=1, n_regimes=10, mixing="nonlinear", seed=0
+            generator_factory=lambda seed: NonlinearICAGenerator(
+                observed_dim=5, latent_dim=3, horizon=1, n_regimes=10, mixing="nonlinear", seed=seed
             ),
             epochs=int(1500 * scale),
             note="nonlinear tanh mixing, 10 regimes (harder)",
@@ -115,7 +114,7 @@ def build_cases(quick: bool) -> list[CaseConfig]:
             model_factory=lambda: LEAP(
                 observed_dim=6, latent_dim=3, max_lag=1, u_dim=4, kl_weight=5.0, obs_noise=0.1
             ),
-            generator_factory=lambda: TemporalNonlinearGenerator(
+            generator_factory=lambda seed: TemporalNonlinearGenerator(
                 observed_dim=6,
                 latent_dim=3,
                 horizon=16,
@@ -123,7 +122,7 @@ def build_cases(quick: bool) -> list[CaseConfig]:
                 n_regimes=4,
                 regime_mode="time",
                 mixing="linear",
-                seed=0,
+                seed=seed,
             ),
             epochs=int(800 * scale),
             note="time-varying regime, linear mixing, regime-dependent noise",
@@ -131,7 +130,9 @@ def build_cases(quick: bool) -> list[CaseConfig]:
         CaseConfig(
             name="slow_flows",
             model_factory=lambda: SlowFlows(observed_dim=4, n_flow_layers=6),
-            generator_factory=lambda: SlowFeatureGenerator(observed_dim=4, horizon=16, seed=0),
+            generator_factory=lambda seed: SlowFeatureGenerator(
+                observed_dim=4, horizon=16, seed=seed
+            ),
             epochs=int(600 * scale),
             note="random-walk slow features, component-wise mixing",
         ),
@@ -140,8 +141,8 @@ def build_cases(quick: bool) -> list[CaseConfig]:
             model_factory=lambda: CITRIS(
                 observed_dim=5, n_vars=2, var_dim=2, n_shared=1, n_flow_layers=4
             ),
-            generator_factory=lambda: InterventionalTemporalGenerator(
-                n_vars=2, var_dim=2, n_shared=1, horizon=12, seed=0
+            generator_factory=lambda seed: InterventionalTemporalGenerator(
+                n_vars=2, var_dim=2, n_shared=1, horizon=12, seed=seed
             ),
             epochs=int(400 * scale),
             note="intervention-conditioned temporal process",
@@ -156,14 +157,14 @@ def build_cases(quick: bool) -> list[CaseConfig]:
                 u_dim=3,
                 obs_noise=0.1,
             ),
-            generator_factory=lambda: TDRLGenerator(
+            generator_factory=lambda seed: TDRLGenerator(
                 observed_dim=6,
                 fix_dim=1,
                 chg_dim=2,
                 obs_dim=1,
                 horizon=16,
                 n_regimes=3,
-                seed=0,
+                seed=seed,
             ),
             epochs=int(1000 * scale),
             note="TDRL generative model: fixed/changing/observation blocks",
@@ -171,8 +172,8 @@ def build_cases(quick: bool) -> list[CaseConfig]:
         CaseConfig(
             name="nctrl_regimes",
             model_factory=lambda: NCTRL(observed_dim=6, latent_dim=3, n_regimes=3, obs_noise=0.1),
-            generator_factory=lambda: NCTRLGenerator(
-                observed_dim=6, latent_dim=3, horizon=16, n_regimes=3, seed=0
+            generator_factory=lambda seed: NCTRLGenerator(
+                observed_dim=6, latent_dim=3, horizon=16, n_regimes=3, seed=seed
             ),
             epochs=int(1000 * scale),
             note="unknown HMM regimes inferred from observations only",
@@ -180,13 +181,13 @@ def build_cases(quick: bool) -> list[CaseConfig]:
         CaseConfig(
             name="mosaic_modules",
             model_factory=lambda: MOSAIC(observed_dim=5, latent_dim=3, u_dim=2, obs_noise=0.1),
-            generator_factory=lambda: TemporalNonlinearGenerator(
+            generator_factory=lambda seed: TemporalNonlinearGenerator(
                 observed_dim=5,
                 latent_dim=3,
                 horizon=8,
                 n_regimes=2,
                 mixing="linear",
-                seed=0,
+                seed=seed,
             ),
             epochs=int(1000 * scale),
             note="sparse additive module-support recovery",
@@ -194,7 +195,9 @@ def build_cases(quick: bool) -> list[CaseConfig]:
         CaseConfig(
             name="cegen_sde",
             model_factory=lambda: CEGEN(observed_dim=4, n_regions=4),
-            generator_factory=lambda: LinearSDEGenerator(observed_dim=4, horizon=20, seed=0),
+            generator_factory=lambda seed: LinearSDEGenerator(
+                observed_dim=4, horizon=20, seed=seed
+            ),
             epochs=int(800 * scale),
             kind="sde",
             note="linear SDE drift/diffusion via conditional W2",
@@ -235,12 +238,15 @@ def run_case(
     device: str = "auto",
     batch_size: int = 256,
     out_dir: Path = Path("outputs"),
+    *,
+    seed: int = 0,
+    save_curves: bool = True,
 ) -> CaseResult:
     logger.info("=" * 72)
-    logger.info("CASE %s | %s", cfg.name, cfg.note)
-    torch.manual_seed(0)
+    logger.info("CASE %s seed=%d | %s", cfg.name, seed, cfg.note)
+    torch.manual_seed(seed)
 
-    generator = cfg.generator_factory()
+    generator = cfg.generator_factory(seed)
     model = cfg.model_factory()
     n_params = sum(p.numel() for p in model.parameters())
     logger.info(
@@ -262,7 +268,7 @@ def run_case(
         steps_per_epoch=15,
         log_every=max(cfg.epochs // 10, 1),
         device=device,
-        seed=0,
+        seed=seed,
         grad_clip=1.0,
         scheduler="cosine",
         warmup_fraction=0.05,
@@ -274,8 +280,9 @@ def run_case(
     seconds = time.perf_counter() - start
     final_loss = history["loss"][-1] if history.get("loss") else float("nan")
 
-    save_training_report(history, exp_dir, title=f"{cfg.name} ({type(model).__name__})")
-    model.save(exp_dir / "model.pt")
+    if save_curves:
+        save_training_report(history, exp_dir, title=f"{cfg.name} ({type(model).__name__})")
+        model.save(exp_dir / "model.pt")
 
     resolved_device = trainer.resolve_device(model)
     eval_batch = move_batch(generator.sample(2048), resolved_device)
@@ -413,19 +420,6 @@ def configure_logging(log_path: Path) -> None:
     root.handlers = [file_handler, stream_handler]
 
 
-def save_results(results: list[CaseResult], out_dir: Path) -> None:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    payload = [asdict(r) for r in results]
-    (out_dir / "crl_benchmarks.json").write_text(
-        json.dumps(payload, indent=2), encoding="utf-8"
-    )
-    with (out_dir / "crl_benchmarks.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(payload[0].keys()))
-        writer.writeheader()
-        writer.writerows(payload)
-    logger.info("Saved results to %s", out_dir)
-
-
 def print_table(results: list[CaseResult]) -> None:
     header = (
         f"{'case':<22}{'method':<10}{'params':>9}{'loss':>9}"
@@ -458,6 +452,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run simple CRL benchmarks.")
     parser.add_argument("--quick", action="store_true", help="fewer epochs (smoke run)")
     parser.add_argument("--only", nargs="*", default=None, help="subset of case names")
+    parser.add_argument("--seeds", type=int, default=5, help="number of seeds")
     parser.add_argument("--out-dir", type=Path, default=Path("outputs"))
     parser.add_argument(
         "--device",
@@ -481,15 +476,45 @@ def main() -> int:
         if not cases:
             logger.error("No cases matched --only %s", args.only)
             return 2
-    results = [
-        run_case(cfg, device=args.device, batch_size=args.batch_size, out_dir=args.out_dir)
-        for cfg in cases
-    ]
+    rows: list[dict[str, Any]] = []
+    last_results: list[CaseResult] = []
+    for seed in range(args.seeds):
+        last_results = [
+            run_case(
+                cfg,
+                device=args.device,
+                batch_size=args.batch_size,
+                out_dir=args.out_dir,
+                seed=seed,
+                save_curves=(seed == 0),
+            )
+            for cfg in cases
+        ]
+        rows.extend(asdict(r) for r in last_results)
 
-    print_table(results)
-    save_results(results, args.out_dir)
+    print_table(last_results)
+    save_rows(rows, args.out_dir, stem="crl_benchmarks")
 
-    all_ok = all(r.z_shape_ok and r.roundtrip_ok and r.finite for r in results)
+    aggregated = aggregate_rows(rows)
+    logger.info("=== mean±std over %d seeds ===", args.seeds)
+
+    def stat(case: str, name: str) -> str:
+        if case not in aggregated or name not in aggregated[case]:
+            return "--"
+        entry = aggregated[case][name]
+        return f"{entry['mean']:.3f}±{entry['std']:.3f}"
+
+    for result in last_results:
+        logger.info(
+            "%-22s mcc=%s r2d=%s r2s=%s shd=%s",
+            result.case,
+            stat(result.case, "mcc"),
+            stat(result.case, "r2_matched"),
+            stat(result.case, "r2_sep"),
+            stat(result.case, "shd"),
+        )
+
+    all_ok = all(r.z_shape_ok and r.roundtrip_ok and r.finite for r in last_results)
     logger.info("Sanity checks passed for all cases: %s", all_ok)
     if not all_ok:
         logger.error("Some cases failed input/output sanity checks.")

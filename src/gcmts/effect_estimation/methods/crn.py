@@ -17,7 +17,7 @@ import logging
 from typing import cast
 
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 
 from gcmts.core.backbones import MLP, GaussianHead, gaussian_kl, gaussian_reconstruction_nll
 from gcmts.effect_estimation.base import BaseEffectEstimator
@@ -56,7 +56,10 @@ class CRN(BaseEffectEstimator):
         self.horizon = horizon
         self.encoder = GaussianHead(observed_dim * horizon, latent_dim, hidden_dims=hidden_dims)
         self.decoder = MLP(latent_dim, observed_dim, hidden_dims=hidden_dims)
-        self.dynamics = MLP(latent_dim + treatment_dim, latent_dim, hidden_dims=hidden_dims)
+        # Linear state-space transition with an explicit treatment term, so the
+        # treatment cannot be absorbed into the latent state and ignored.
+        self.transition_a = nn.Parameter(torch.zeros(latent_dim, latent_dim))
+        self.transition_b = nn.Parameter(torch.zeros(latent_dim, treatment_dim))
         self.register_buffer(
             "obs_logvar", torch.log(torch.tensor(obs_noise**2)).expand(1).clone()
         )
@@ -79,8 +82,8 @@ class CRN(BaseEffectEstimator):
         states = [state]
         current = state
         for t in range(horizon - 1):
-            step = self.dynamics(torch.cat([current, actions[:, t]], dim=-1))
-            current = current + step
+            drift = current @ self.transition_a.T + actions[:, t] @ self.transition_b.T
+            current = current + drift
             states.append(current)
         return torch.stack(states, dim=1)
 

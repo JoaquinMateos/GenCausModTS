@@ -9,6 +9,7 @@ from gcmts.evaluation.benchmark import (
     EffectBenchmarkRunner,
 )
 from gcmts.evaluation.metrics import DEFAULT_REGISTRY, MetricRegistry
+from gcmts.evaluation.report import aggregate_rows, save_rows
 
 __all__ = [
     "BenchmarkResult",
@@ -19,4 +20,6 @@ __all__ = [
     "EffectBenchmarkRunner",
     "DEFAULT_REGISTRY",
     "MetricRegistry",
+    "aggregate_rows",
+    "save_rows",
 ]

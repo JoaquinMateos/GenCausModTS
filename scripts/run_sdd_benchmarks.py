@@ -13,8 +13,6 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import csv
-import json
 import logging
 import time
 from collections.abc import Callable
@@ -27,8 +25,9 @@ import torch
 from gcmts.core import SimpleTrainer, move_batch, save_training_report
 from gcmts.data.synthetic_sdd import MultiDomainGenerator
 from gcmts.evaluation.metrics import MIGMetric
+from gcmts.evaluation.report import aggregate_rows, save_rows
 from gcmts.static_dynamic_disentanglement.base import BaseStaticDynamicDisentangler
-from gcmts.static_dynamic_disentanglement.methods import DANN, ERM, SYNC
+from gcmts.static_dynamic_disentanglement.methods import DANN, ERM, SYNC, VREx
 
 logger = logging.getLogger("gcmts.sdd")
 
@@ -93,6 +92,12 @@ def build_cases() -> list[CaseConfig]:
             note="domain-adversarial invariant outcome representation (UDA)",
         ),
         CaseConfig(
+            name="vrex_multidomain",
+            model_factory=lambda: VREx(**common),
+            epochs=600,
+            note="variance-of-risk domain generalisation",
+        ),
+        CaseConfig(
             name="erm_multidomain",
             model_factory=lambda: ERM(**common),
             epochs=600,
@@ -135,11 +140,19 @@ def evaluate(
     }
 
 
-def run_case(cfg: CaseConfig, device: str, batch_size: int, out_dir: Path) -> CaseResult:
+def run_case(
+    cfg: CaseConfig,
+    device: str,
+    batch_size: int,
+    out_dir: Path,
+    *,
+    seed: int = 0,
+    save_curves: bool = True,
+) -> CaseResult:
     logger.info("=" * 72)
-    logger.info("CASE %s | %s", cfg.name, cfg.note)
-    torch.manual_seed(0)
-    generator = MultiDomainGenerator(n_domains=5, observed_dim=8, horizon=12, seed=0)
+    logger.info("CASE %s seed=%d | %s", cfg.name, seed, cfg.note)
+    torch.manual_seed(seed)
+    generator = MultiDomainGenerator(n_domains=5, observed_dim=8, horizon=12, seed=seed)
     model = cfg.model_factory()
     n_params = sum(p.numel() for p in model.parameters())
     exp_dir = out_dir / cfg.name
@@ -150,7 +163,7 @@ def run_case(cfg: CaseConfig, device: str, batch_size: int, out_dir: Path) -> Ca
         steps_per_epoch=15,
         log_every=max(cfg.epochs // 10, 1),
         device=device,
-        seed=0,
+        seed=seed,
         grad_clip=1.0,
         scheduler="cosine",
         val_size=512,
@@ -159,8 +172,9 @@ def run_case(cfg: CaseConfig, device: str, batch_size: int, out_dir: Path) -> Ca
     start = time.perf_counter()
     history = trainer.fit(model, _SplitGenerator(generator, TRAIN_DOMAINS))
     seconds = time.perf_counter() - start
-    save_training_report(history, exp_dir, title=f"{cfg.name} ({type(model).__name__})")
-    model.save(exp_dir / "model.pt")
+    if save_curves:
+        save_training_report(history, exp_dir, title=f"{cfg.name} ({type(model).__name__})")
+        model.save(exp_dir / "model.pt")
 
     resolved = trainer.resolve_device(model)
     scores = evaluate(model, generator, resolved)
@@ -225,38 +239,47 @@ def configure_logging(out_dir: Path) -> None:
     ]
 
 
-def save_results(results: list[CaseResult], out_dir: Path) -> None:
-    payload = [asdict(r) for r in results]
-    (out_dir / "sdd_benchmarks.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    with (out_dir / "sdd_benchmarks.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(payload[0].keys()))
-        writer.writeheader()
-        writer.writerows(payload)
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run SDD benchmarks.")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--only", nargs="*", default=None)
+    parser.add_argument("--seeds", type=int, default=5, help="number of seeds")
     parser.add_argument("--out-dir", type=Path, default=Path("outputs"))
     args = parser.parse_args()
     configure_logging(args.out_dir)
     cases = build_cases()
     if args.only:
         cases = [c for c in cases if c.name in set(args.only)]
-    results = [run_case(c, args.device, args.batch_size, args.out_dir) for c in cases]
-    results.append(oracle_result(args.out_dir))
-    save_results(results, args.out_dir)
+    rows: list[dict[str, Any]] = []
+    for seed in range(args.seeds):
+        for cfg in cases:
+            result = run_case(
+                cfg, args.device, args.batch_size, args.out_dir,
+                seed=seed, save_curves=(seed == 0),
+            )
+            rows.append(asdict(result))
+    rows.append(asdict(oracle_result(args.out_dir)))
+    save_rows(rows, args.out_dir, stem="sdd_benchmarks")
     logger.info(
-        "%-22s %-6s %8s %8s %8s %8s %8s",
-        "case", "method", "ID-MSE", "OOD-MSE", "OOD-MAE", "DomAcc", "MIG",
+        "%-22s %8s %8s %8s %8s",
+        "case", "ID-MSE", "OOD-MSE", "OOD-MAE", "MIG",
     )
-    for r in results:
-        acc = "--" if r.domain_accuracy is None else f"{r.domain_accuracy:.3f}"
+    aggregated = aggregate_rows(rows)
+
+    def stat(metrics: dict[str, Any], name: str) -> str:
+        if name not in metrics:
+            return "------"
+        return f"{metrics[name]['mean']:.3f}±{metrics[name]['std']:.3f}"
+
+    for case, metrics in aggregated.items():
         logger.info(
-            "%-22s %-6s %8.4f %8.4f %8.4f %8s %8.4f",
-            r.case, r.method, r.id_mse, r.ood_mse, r.ood_mae, acc, r.mig,
+            "%-22s %16s %16s %16s %16s",
+            case,
+            stat(metrics, "id_mse"),
+            stat(metrics, "ood_mse"),
+            stat(metrics, "ood_mae"),
+            stat(metrics, "mig"),
         )
     return 0
 

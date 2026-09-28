@@ -311,6 +311,85 @@ class DANN(_BaseDisentangler):
         )
 
 
+class VREx(_BaseDisentangler):
+    """Variance-of-risk (VREx) domain-generalisation predictor.
+
+    Reference: Krueger et al., *Out-of-Distribution Generalization via Risk
+    Extrapolation*, ICML 2021. The per-domain risks of the outcome predictor are
+    made uniform, so features whose relation to the target is unstable across
+    domains are discarded. This is the correct inductive bias when the spurious
+    *feature distribution* is domain-invariant but its *target relation* flips:
+    domain-adversarial methods cannot detect such features, but risk variance can.
+    """
+
+    def __init__(
+        self,
+        *,
+        observed_dim: int,
+        static_dim: int = 2,
+        dynamic_dim: int = 2,
+        spurious_static_dim: int = 1,
+        spurious_dynamic_dim: int = 1,
+        hidden_dims: tuple[int, ...] = (128, 128),
+        variance_weight: float = 100.0,
+        outcome_weight: float = 20.0,
+        obs_noise: float = 0.1,
+    ) -> None:
+        super().__init__(
+            observed_dim=observed_dim,
+            latent_static_dim=static_dim,
+            latent_dynamic_dim=dynamic_dim,
+            latent_spurious_static_dim=spurious_static_dim,
+            latent_spurious_dynamic_dim=spurious_dynamic_dim,
+            hidden_dims=hidden_dims,
+            obs_noise=obs_noise,
+        )
+        self.variance_weight = variance_weight
+        self.outcome_weight = outcome_weight
+        total = static_dim + dynamic_dim + spurious_static_dim + spurious_dynamic_dim
+        self.outcome_head = MLP(total, 1, hidden_dims=hidden_dims)
+
+    def predict_outcome(self, x: Tensor) -> Tensor:
+        pooled = self.latent_factors(x).mean(dim=1)
+        return cast(Tensor, self.outcome_head(pooled)).squeeze(-1)
+
+    def forward(self, batch: Batch) -> dict[str, Tensor]:
+        factors = self.extractor(batch.x)
+        recon = self.extractor.decode(factors)
+        pooled = self.latent_factors(batch.x).mean(dim=1)
+        return {
+            "recon": recon,
+            "outcome": self.outcome_head(pooled).squeeze(-1),
+        }
+
+    def loss(self, outputs: dict[str, Tensor], batch: Batch) -> dict[str, Tensor]:
+        recon = gaussian_reconstruction_nll(outputs["recon"], batch.x, self.obs_logvar)
+        target = batch.outcome
+        if target is None:
+            raise ValueError("VREx requires batch.outcome.")
+        squared = (outputs["outcome"] - target) ** 2
+        domain = batch.domain
+        if domain is None:
+            risk = squared.mean()
+            variance = torch.zeros((), device=squared.device)
+        else:
+            domains = domain.reshape(-1)
+            risks = torch.stack(
+                [squared[domains == d].mean() for d in torch.unique(domains)]
+            )
+            risk = risks.mean()
+            variance = risks.var(unbiased=False) if risks.numel() > 1 else torch.zeros(())
+        total = recon + self.outcome_weight * risk + self.variance_weight * variance
+        return {"loss": total, "recon": recon, "risk": risk, "variance": variance}
+
+    def identifiability_statement(self) -> str:
+        return (
+            "VREx: minimising the variance of per-environment risk selects the "
+            "outcome representation whose risk is invariant across environments, "
+            "which excludes spurious factors with domain-varying target relations."
+        )
+
+
 class ERM(_BaseDisentangler):
     """Empirical-risk-minimisation baseline: predicts from the full representation."""
 

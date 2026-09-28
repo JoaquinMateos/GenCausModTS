@@ -67,8 +67,9 @@ class CaTSG(BaseEffectEstimator):
         self.register_buffer("alpha_bar", alpha_bar)
         self.alpha_bar: Tensor
         self.time_dim = 32
+        self.cond_dim = horizon * treatment_dim
         self.denoiser = MLP(
-            self.dim + self.time_dim + treatment_dim, self.dim, hidden_dims=hidden_dims
+            self.dim + self.time_dim + self.cond_dim, self.dim, hidden_dims=hidden_dims
         )
 
     def _actions(self, batch: Batch) -> Tensor:
@@ -77,10 +78,10 @@ class CaTSG(BaseEffectEstimator):
         if batch.context is not None and "A" in batch.context:
             action = batch.context["A"]
         if action is None:
-            action = torch.zeros(x.shape[0], self.treatment_dim, device=x.device)
-        if action.ndim == 3:
-            action = action.mean(dim=1)
-        return action.float().to(x.device)
+            action = torch.zeros(x.shape[0], self.horizon, self.treatment_dim, device=x.device)
+        if action.ndim == 2:
+            action = action.unsqueeze(1).expand(-1, self.horizon, -1)
+        return action.reshape(x.shape[0], -1).float().to(x.device)
 
     def _eps(self, flat: Tensor, step: int, action: Tensor) -> Tensor:
         batch = flat.shape[0]
@@ -118,18 +119,19 @@ class CaTSG(BaseEffectEstimator):
         self, noise: dict[str, Tensor], intervention: dict[str, Tensor]
     ) -> dict[str, Tensor]:
         new_action = intervention["A"]
-        if new_action.ndim == 3:
-            new_action = new_action.mean(dim=1)
-        return {"code": noise["code"], "action": new_action.float()}
+        if new_action.ndim == 2:
+            new_action = new_action.unsqueeze(1).expand(-1, self.horizon, -1)
+        flat = new_action.reshape(new_action.shape[0], -1).float()
+        return {"code": noise["code"], "action": flat}
 
     def prediction(self, context: dict[str, Tensor], horizon: int) -> Tensor:
         return self._ddim_sample(context["code"], context["action"])[:, :horizon]
 
     def intervene(self, batch: Batch, intervention: dict[str, Tensor]) -> Tensor:
         action = intervention["A"]
-        if action.ndim == 3:
-            action = action.mean(dim=1)
-        action = action.float().to(batch.x.device)
+        if action.ndim == 2:
+            action = action.unsqueeze(1).expand(-1, self.horizon, -1)
+        action = action.reshape(batch.x.shape[0], -1).float().to(batch.x.device)
         code = torch.randn(batch.x.shape[0], self.dim, device=batch.x.device)
         return self._ddim_sample(code, action)
 

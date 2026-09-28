@@ -154,33 +154,48 @@ class HarmonicOscillatorGenerator(BaseDataGenerator):
         factual_action: Tensor | None = None,
         **kwargs: Any,
     ) -> Batch:
-        """Return a factual batch with its exact counterfactual under ``1 - a``."""
-        outcomes = self.potential_outcomes(n_samples)
+        r"""Return a factual batch and the exact counterfactual with the treatment off.
+
+        The factual treatment switches on at a random time ``t_0 ~ U{0,..,T-1}``
+        and stays on, so different trajectories exhibit different treatment
+        durations; this within-trajectory variation is what makes the effect
+        identifiable from factual data alone. The counterfactual keeps the same
+        exogenous noise but sets the treatment off throughout.
+        """
+        horizon = horizon or self.horizon
+        initial = torch.randn(n_samples, self.latent_dim, generator=self.rng)
+        process_noise = self.process_noise * torch.randn(
+            n_samples, horizon, self.latent_dim, generator=self.rng
+        )
+        observation_noise = self.observation_noise * torch.randn(
+            n_samples, horizon, self.observed_dim, generator=self.rng
+        )
+        stiffness = (
+            self.stiffness
+            * (1.0 + 0.4 * torch.randn(n_samples, self.n_units, generator=self.rng))
+        ).clamp(min=0.3)
+        gain = 0.5 + torch.rand(n_samples, 1, generator=self.rng)
+
         if factual_action is None:
-            action = (torch.rand(n_samples, generator=self.rng) < 0.5).float()
+            switch = torch.randint(0, horizon, (n_samples,), generator=self.rng)
+            times = torch.arange(horizon).unsqueeze(0)
+            action = (times >= switch.unsqueeze(1)).float() * gain
         else:
             action = factual_action.float()
-        cf_action = 1.0 - action
-        factual = torch.where(
-            action.bool().view(-1, 1, 1),
-            outcomes["observed1"],
-            outcomes["observed0"],
+            if action.ndim == 2:
+                action = action.unsqueeze(1).expand(-1, horizon, -1)[:, :, 0]
+        counter_action = torch.zeros_like(action)
+
+        latent_f, observed_f = self._roll(
+            initial, action, process_noise, observation_noise, stiffness
         )
-        counterfactual = torch.where(
-            cf_action.bool().view(-1, 1, 1),
-            outcomes["observed1"],
-            outcomes["observed0"],
+        latent_c, observed_c = self._roll(
+            initial, counter_action, process_noise, observation_noise, stiffness
         )
-        latent = torch.where(
-            action.bool().view(-1, 1, 1),
-            outcomes["latent1"],
-            outcomes["latent0"],
-        )
-        outcome = torch.where(action.bool(), outcomes["y1"], outcomes["y0"])
         return Batch(
-            x=factual,
-            z=latent,
-            context={"A": action.view(-1, 1)},
-            counterfactual=counterfactual,
-            outcome=outcome,
+            x=observed_f,
+            z=latent_f,
+            context={"A": action.unsqueeze(-1)},
+            counterfactual=observed_c,
+            outcome=self._outcome(observed_f),
         )
