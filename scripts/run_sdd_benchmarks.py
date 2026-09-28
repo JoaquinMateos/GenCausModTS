@@ -24,7 +24,7 @@ import torch
 
 from gcmts.core import SimpleTrainer, move_batch, save_training_report
 from gcmts.data.synthetic_sdd import MultiDomainGenerator
-from gcmts.evaluation.metrics import MIGMetric
+from gcmts.evaluation.metrics import CDSMetric, MIGMetric
 from gcmts.evaluation.report import aggregate_rows, save_rows
 from gcmts.static_dynamic_disentanglement.base import BaseStaticDynamicDisentangler
 from gcmts.static_dynamic_disentanglement.methods import DANN, ERM, SYNC, VREx
@@ -55,6 +55,7 @@ class CaseResult:
     ood_mae: float
     domain_accuracy: float | None
     mig: float
+    cds: float
     seconds: float
     device: str = "auto"
 
@@ -131,12 +132,14 @@ def evaluate(
 
     factors = model.latent_factors(ood_batch.x)  # type: ignore[attr-defined]
     mig = MIGMetric()(factors, ood_batch.z).value
+    cds = CDSMetric()(factors, ood_batch.z).value
     return {
         "id_mse": id_mse,
         "ood_mse": ood_mse,
         "ood_mae": ood_mae,
         "domain_accuracy": domain_accuracy,
         "mig": mig,
+        "cds": cds,
     }
 
 
@@ -224,6 +227,7 @@ def oracle_result(out_dir: Path) -> CaseResult:
         ood_mae=float(np.abs(diff).mean()),
         domain_accuracy=None,
         mig=float("nan"),
+        cds=float("nan"),
         seconds=0.0,
         device="cpu",
     )

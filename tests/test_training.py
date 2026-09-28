@@ -9,6 +9,7 @@ from gcmts.core import SimpleTrainer
 from gcmts.core.backbones import gaussian_reconstruction_nll
 from gcmts.core.history import plot_training_curves, save_history
 from gcmts.data.synthetic import NonlinearICAGenerator
+from gcmts.evaluation.report import paired_wilcoxon
 
 
 def test_trainer_history_scheduling_and_validation():
@@ -66,3 +67,11 @@ def test_methods_expose_observation_noise_buffer():
     model = IVAE(observed_dim=4, latent_dim=2, u_dim=3, obs_noise=0.1)
     assert "obs_logvar" in dict(model.named_buffers())
     assert torch.isclose(model.obs_logvar, torch.full((1,), 2.0 * torch.log(torch.tensor(0.1))))
+
+
+def test_paired_wilcoxon_detects_separation():
+    rows = [{"case": "a", "m": 0.1}, {"case": "a", "m": 0.2}, {"case": "a", "m": 0.15},
+            {"case": "a", "m": 0.12}, {"case": "a", "m": 0.18},
+            {"case": "b", "m": 0.9}, {"case": "b", "m": 0.8}, {"case": "b", "m": 0.95},
+            {"case": "b", "m": 0.85}, {"case": "b", "m": 0.88}]
+    assert paired_wilcoxon(rows, "a", "b", "m") <= 0.1

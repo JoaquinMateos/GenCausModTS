@@ -37,6 +37,7 @@ __all__ = [
     "OODMSEMetric",
     "DomainAccuracyMetric",
     "MIGMetric",
+    "CDSMetric",
 ]
 
 
@@ -110,6 +111,7 @@ def _default_registry() -> MetricRegistry:
     reg.register(OODMSEMetric())
     reg.register(DomainAccuracyMetric())
     reg.register(MIGMetric())
+    reg.register(CDSMetric())
     return reg
 
 
@@ -396,6 +398,27 @@ class DomainAccuracyMetric(Metric):
         true = target.reshape(-1).long()
         accuracy = (pred == true).float().mean().item()
         return MetricResult(self.name, float(accuracy), self.level, self.higher_is_better)
+
+
+class CDSMetric(Metric):
+    """Causal Disentanglement Score.
+
+    For each ground-truth factor, the fraction of its total feature importance
+    carried by its single best-explaining latent; averaged over factors. A value
+    near one means each factor is concentrated in one latent, near zero means it
+    is spread across many.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("cds", "L1_generalisation", higher_is_better=True)
+
+    def __call__(self, prediction: Tensor, target: Tensor) -> MetricResult:
+        matrix = _importance_matrix(prediction, target)
+        scores = []
+        for i in range(matrix.shape[0]):
+            total = matrix[i].sum()
+            scores.append(float(matrix[i].max() / total) if total > 0 else 0.0)
+        return MetricResult(self.name, float(np.mean(scores)), self.level, self.higher_is_better)
 
 
 class MIGMetric(Metric):

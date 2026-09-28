@@ -9,9 +9,33 @@ from typing import Any
 
 import numpy as np
 
-__all__ = ["aggregate_rows", "save_rows"]
+__all__ = ["aggregate_rows", "save_rows", "paired_wilcoxon"]
 
 _NON_METRIC = {"epochs", "n_parameters", "seconds"}
+
+
+def paired_wilcoxon(
+    rows: list[dict[str, Any]],
+    case_a: str,
+    case_b: str,
+    metric: str,
+) -> float:
+    """Paired Wilcoxon signed-rank p-value for ``case_a`` vs ``case_b`` on ``metric``.
+
+    Rows are matched by their per-seed order of appearance, so both cases must
+    have been evaluated under the same seed schedule.
+    """
+    from scipy.stats import wilcoxon
+
+    values_a = [float(r[metric]) for r in rows if r["case"] == case_a and r.get(metric) is not None]
+    values_b = [float(r[metric]) for r in rows if r["case"] == case_b and r.get(metric) is not None]
+    n = min(len(values_a), len(values_b))
+    if n < 2:
+        return float("nan")
+    if all(a == b for a, b in zip(values_a[:n], values_b[:n], strict=True)):
+        return 1.0
+    result = wilcoxon(values_a[:n], values_b[:n])
+    return float(result.pvalue)
 
 
 def aggregate_rows(

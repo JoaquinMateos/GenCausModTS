@@ -5,7 +5,7 @@ from __future__ import annotations
 import torch
 
 from gcmts.data.synthetic_sdd import MultiDomainGenerator
-from gcmts.evaluation.metrics import DomainAccuracyMetric, MIGMetric
+from gcmts.evaluation.metrics import CDSMetric, DomainAccuracyMetric, MIGMetric
 from gcmts.static_dynamic_disentanglement.methods import DANN, ERM, SYNC
 
 
@@ -50,3 +50,4 @@ def test_sdd_metrics():
     latents = torch.randn(128, 4)
     factors = latents + 0.01 * torch.randn(128, 4)
     assert MIGMetric()(latents, factors).value > 0.0
+    assert 0.0 <= CDSMetric()(latents, factors).value <= 1.0

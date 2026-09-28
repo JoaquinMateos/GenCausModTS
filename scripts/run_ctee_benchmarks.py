@@ -16,7 +16,7 @@ import argparse
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +59,8 @@ class CaseResult:
     mmd2: float
     recon_axiom: float
     effectiveness: float
+    effectiveness_ok: float
+    reversibility: float
     seconds: float
     device: str = "auto"
 
@@ -121,6 +123,13 @@ def evaluate(
     mmd2 = MMD2Metric()(cf_hat[:256], true_cf[:256]).value
     recon_axiom = CFMAEMetric()(factual_hat, batch.x).value
     effectiveness = ite_hat.mean().item() - ite_true.mean().item()
+    effectiveness_ok = float(ite_hat.mean().item() * ite_true.mean().item() > 0)
+
+    # Reversibility: start from the estimated counterfactual (treatment off) and
+    # apply the factual treatment; a reversible model recovers the factual state.
+    cf_batch = replace(batch, x=cf_hat, context={"A": zeros})
+    recovered = model.counterfactual(cf_batch, {"A": action}).counterfactual
+    reversibility = CFMAEMetric()(recovered, batch.x).value
     return {
         "pehe": pehe,
         "ate_error": ate_error,
@@ -129,6 +138,8 @@ def evaluate(
         "mmd2": mmd2,
         "recon_axiom": recon_axiom,
         "effectiveness": effectiveness,
+        "effectiveness_ok": effectiveness_ok,
+        "reversibility": reversibility,
     }
 
 

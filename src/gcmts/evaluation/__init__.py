@@ -9,7 +9,7 @@ from gcmts.evaluation.benchmark import (
     EffectBenchmarkRunner,
 )
 from gcmts.evaluation.metrics import DEFAULT_REGISTRY, MetricRegistry
-from gcmts.evaluation.report import aggregate_rows, save_rows
+from gcmts.evaluation.report import aggregate_rows, paired_wilcoxon, save_rows
 
 __all__ = [
     "BenchmarkResult",
@@ -21,5 +21,6 @@ __all__ = [
     "DEFAULT_REGISTRY",
     "MetricRegistry",
     "aggregate_rows",
+    "paired_wilcoxon",
     "save_rows",
 ]
