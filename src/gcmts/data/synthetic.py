@@ -360,6 +360,13 @@ class TemporalNonlinearGenerator(BaseDataGenerator):
             ).unsqueeze(-1)
             z[:, t] = contrib + eps * step_scale
         z_obs = z[:, p:]
+        # Standardise each latent dimension (a component-wise invertible transform
+        # that preserves identifiability) so the benchmark is well-conditioned:
+        # unit-variance latents and observation noise that is small relative to
+        # the signal, matching the controlled synthetic setups of the papers.
+        z_obs = (z_obs - z_obs.mean(dim=(0, 1), keepdim=True)) / (
+            z_obs.std(dim=(0, 1), keepdim=True) + 1e-6
+        )
         with torch.no_grad():
             if self.mixing_type == "linear":
                 x = z_obs @ self.linear_weight.T
@@ -612,6 +619,9 @@ class TDRLGenerator(BaseDataGenerator):
             )
             noise = self.noise_std * torch.randn(n_samples, self.latent_dim, generator=self.rng)
             z[:, t] = torch.cat([z_fix, z_chg, z_obs], dim=-1) + noise
+        # Standardise latents: unit-variance factors make the benchmark
+        # well-conditioned without affecting identifiability.
+        z = (z - z.mean(dim=(0, 1), keepdim=True)) / (z.std(dim=(0, 1), keepdim=True) + 1e-6)
         with torch.no_grad():
             x = cast(Tensor, self.mixing(z.reshape(-1, self.latent_dim))).reshape(
                 n_samples, horizon, self.observed_dim
@@ -674,6 +684,8 @@ class NCTRLGenerator(BaseDataGenerator):
             drift = torch.einsum("bij,bj->bi", matrices, z[:, t - 1])
             noise = self.noise_std * torch.randn(n_samples, self.latent_dim, generator=self.rng)
             z[:, t] = drift + noise
+        # Unit-variance latents for a well-conditioned benchmark.
+        z = (z - z.mean(dim=(0, 1), keepdim=True)) / (z.std(dim=(0, 1), keepdim=True) + 1e-6)
         with torch.no_grad():
             x = cast(Tensor, self.mixing(z.reshape(-1, self.latent_dim))).reshape(
                 n_samples, horizon, self.observed_dim

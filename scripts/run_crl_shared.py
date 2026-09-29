@@ -103,20 +103,28 @@ def build_methods(
             "LEAP",
             lambda: LEAP(
                 observed_dim=D, latent_dim=d, max_lag=1, u_dim=u,
-                kl_weight=5.0, obs_noise=0.1,
+                kl_weight=0.01, obs_noise=0.1,
             ),
-            800,
+            2000,
         ),
         (
             "TDRL",
             lambda: TDRL(
                 observed_dim=D, latent_fix_dim=fix, latent_dyn_dim=dyn, latent_obs_dim=obs,
-                u_dim=u, obs_noise=0.1,
+                u_dim=u, kl_weight=0.01, obs_noise=0.1,
             ),
-            800,
+            2000,
         ),
-        ("NCTRL", lambda: NCTRL(observed_dim=D, latent_dim=d, n_regimes=u, obs_noise=0.1), 1000),
-        ("MOSAIC", lambda: MOSAIC(observed_dim=D, latent_dim=d, u_dim=u, obs_noise=0.1), 800),
+        (
+            "NCTRL",
+            lambda: NCTRL(observed_dim=D, latent_dim=d, n_regimes=u, kl_weight=0.01, obs_noise=0.1),
+            2000,
+        ),
+        (
+            "MOSAIC",
+            lambda: MOSAIC(observed_dim=D, latent_dim=d, u_dim=u, kl_weight=0.1, obs_noise=0.1),
+            1200,
+        ),
     ]
 
 

@@ -58,7 +58,7 @@ class NCTRL(BaseCausalRepresentationLearner):
         transition_hidden: int = 128,
         hidden_dims: tuple[int, ...] = (128, 128),
         decoder_hidden: tuple[int, ...] = (128, 128),
-        kl_weight: float = 1.0,
+        kl_weight: float = 0.01,
         obs_noise: float = 1.0,
     ) -> None:
         if obs_noise <= 0:

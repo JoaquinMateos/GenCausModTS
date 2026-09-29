@@ -112,7 +112,7 @@ def build_cases(quick: bool) -> list[CaseConfig]:
         CaseConfig(
             name="leap_temporal",
             model_factory=lambda: LEAP(
-                observed_dim=6, latent_dim=3, max_lag=1, u_dim=4, kl_weight=5.0, obs_noise=0.1
+                observed_dim=6, latent_dim=3, max_lag=1, u_dim=4, kl_weight=0.01, obs_noise=0.1
             ),
             generator_factory=lambda seed: TemporalNonlinearGenerator(
                 observed_dim=6,
@@ -124,7 +124,7 @@ def build_cases(quick: bool) -> list[CaseConfig]:
                 mixing="linear",
                 seed=seed,
             ),
-            epochs=int(800 * scale),
+            epochs=int(2000 * scale),
             note="time-varying regime, linear mixing, regime-dependent noise",
         ),
         CaseConfig(
@@ -155,6 +155,7 @@ def build_cases(quick: bool) -> list[CaseConfig]:
                 latent_dyn_dim=2,
                 latent_obs_dim=1,
                 u_dim=3,
+                kl_weight=0.01,
                 obs_noise=0.1,
             ),
             generator_factory=lambda seed: TDRLGenerator(
@@ -166,21 +167,25 @@ def build_cases(quick: bool) -> list[CaseConfig]:
                 n_regimes=3,
                 seed=seed,
             ),
-            epochs=int(1000 * scale),
+            epochs=int(2000 * scale),
             note="TDRL generative model: fixed/changing/observation blocks",
         ),
         CaseConfig(
             name="nctrl_regimes",
-            model_factory=lambda: NCTRL(observed_dim=6, latent_dim=3, n_regimes=3, obs_noise=0.1),
+            model_factory=lambda: NCTRL(
+                observed_dim=6, latent_dim=3, n_regimes=3, kl_weight=0.01, obs_noise=0.1
+            ),
             generator_factory=lambda seed: NCTRLGenerator(
                 observed_dim=6, latent_dim=3, horizon=16, n_regimes=3, seed=seed
             ),
-            epochs=int(1000 * scale),
+            epochs=int(2000 * scale),
             note="unknown HMM regimes inferred from observations only",
         ),
         CaseConfig(
             name="mosaic_modules",
-            model_factory=lambda: MOSAIC(observed_dim=5, latent_dim=3, u_dim=2, obs_noise=0.1),
+            model_factory=lambda: MOSAIC(
+                observed_dim=5, latent_dim=3, u_dim=2, kl_weight=0.1, obs_noise=0.1
+            ),
             generator_factory=lambda seed: TemporalNonlinearGenerator(
                 observed_dim=5,
                 latent_dim=3,
@@ -189,7 +194,7 @@ def build_cases(quick: bool) -> list[CaseConfig]:
                 mixing="linear",
                 seed=seed,
             ),
-            epochs=int(1000 * scale),
+            epochs=int(1200 * scale),
             note="sparse additive module-support recovery",
         ),
         CaseConfig(
