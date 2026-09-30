@@ -195,3 +195,28 @@ def test_predict_next_observations_all_temporal_methods():
     for model in models:
         forecast = model.predict_next_observations(batch.x[:, :-1], 1, context)
         assert forecast.shape == (8, 1, 6)
+
+
+def test_forecast_with_per_timestep_context():
+    """Multi-step rollout must accept a per-timestep (B, T, R) context."""
+    import torch
+
+    from gcmts.causal_representation_learning.methods import LEAP, MOSAIC, TDRL
+    from gcmts.data.synthetic import TemporalNonlinearGenerator
+
+    torch.manual_seed(0)
+    generator = TemporalNonlinearGenerator(
+        observed_dim=6, latent_dim=3, horizon=12, max_lag=1, n_regimes=4,
+        regime_mode="time", mixing="linear", seed=0,
+    )
+    batch = generator.sample(8)
+    assert batch.context["u"].ndim == 3
+    context = {"u": batch.context["u"][:, :-1]}
+    models = [
+        LEAP(observed_dim=6, latent_dim=3, u_dim=4),
+        TDRL(observed_dim=6, latent_fix_dim=1, latent_dyn_dim=1, latent_obs_dim=1, u_dim=4),
+        MOSAIC(observed_dim=6, latent_dim=3, u_dim=4),
+    ]
+    for model in models:
+        forecast = model.predict_next_observations(batch.x[:, :-1], 2, context)
+        assert forecast.shape == (8, 2, 6)

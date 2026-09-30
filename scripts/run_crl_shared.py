@@ -61,8 +61,14 @@ SUITES: dict[str, Suite] = {
         horizon=16,
         n_regimes=4,
         make_generator=lambda seed: TemporalNonlinearGenerator(
-            observed_dim=6, latent_dim=3, horizon=16, max_lag=1, n_regimes=4,
-            regime_mode="time", mixing="linear", seed=seed,
+            observed_dim=6,
+            latent_dim=3,
+            horizon=16,
+            max_lag=1,
+            n_regimes=4,
+            regime_mode="time",
+            mixing="linear",
+            seed=seed,
         ),
     ),
     "causal3d": Suite(
@@ -72,8 +78,12 @@ SUITES: dict[str, Suite] = {
         horizon=16,
         n_regimes=1,
         make_generator=lambda seed: Causal3DIdentGenerator(
-            observed_dim=4, latent_dim=4, horizon=16, max_lag=1,
-            mixing="invertible", seed=seed,
+            observed_dim=4,
+            latent_dim=4,
+            horizon=16,
+            max_lag=1,
+            mixing="invertible",
+            seed=seed,
         ),
     ),
     "cartpole": Suite(
@@ -83,7 +93,10 @@ SUITES: dict[str, Suite] = {
         horizon=16,
         n_regimes=3,
         make_generator=lambda seed: CartPoleGenerator(
-            horizon=16, observed_dim=4, n_regimes=3, seed=seed,
+            horizon=16,
+            observed_dim=4,
+            n_regimes=3,
+            seed=seed,
         ),
     ),
 }
@@ -102,16 +115,25 @@ def build_methods(
         (
             "LEAP",
             lambda: LEAP(
-                observed_dim=D, latent_dim=d, max_lag=1, u_dim=u,
-                kl_weight=0.01, obs_noise=0.1,
+                observed_dim=D,
+                latent_dim=d,
+                max_lag=1,
+                u_dim=u,
+                kl_weight=0.01,
+                obs_noise=0.1,
             ),
             2000,
         ),
         (
             "TDRL",
             lambda: TDRL(
-                observed_dim=D, latent_fix_dim=fix, latent_dyn_dim=dyn, latent_obs_dim=obs,
-                u_dim=u, kl_weight=0.01, obs_noise=0.1,
+                observed_dim=D,
+                latent_fix_dim=fix,
+                latent_dyn_dim=dyn,
+                latent_obs_dim=obs,
+                u_dim=u,
+                kl_weight=0.01,
+                obs_noise=0.1,
             ),
             2000,
         ),
@@ -138,7 +160,36 @@ class Row:
     r2_sep: float
     dci: float
     shd: float | None
+    forecast1: float
+    forecast4: float
     seconds: float
+
+
+def _slice_context(context: Any, time: int, new_time: int) -> dict[str, Any]:
+    """Truncate per-timestep context tensors to match a shortened input window."""
+    out: dict[str, Any] = {}
+    for key, value in (context or {}).items():
+        out[key] = value[:, :new_time] if (value.ndim == 3 and value.shape[1] == time) else value
+    return out
+
+
+def _forecast_mse(model: BaseCausalRepresentationLearner, batch: Any, steps: int) -> float:
+    """Forecast ``steps`` future observations from the preceding window."""
+    time = batch.x.shape[1]
+    if time <= steps:
+        return float("nan")
+    inp = batch.x[:, : time - steps]
+    context = _slice_context(batch.context, time, time - steps)
+    with torch.no_grad():
+        pred = model.predict_next_observations(inp, steps, context)
+    target = batch.x[:, time - steps :]
+    return float(((pred - target) ** 2).mean())
+
+
+def _persistence_mse(batch: Any, steps: int) -> float:
+    time = batch.x.shape[1]
+    last = batch.x[:, time - steps - 1 : time - steps]
+    return float(((last.expand(-1, steps, -1) - batch.x[:, time - steps :]) ** 2).mean())
 
 
 def _run(
@@ -156,9 +207,17 @@ def _run(
     generator = suite.make_generator(seed)
     model = factory()
     trainer = SimpleTrainer(
-        max_epochs=epochs, lr=1e-3, batch_size=batch_size, steps_per_epoch=15,
-        log_every=max(epochs // 10, 1), device=device, seed=seed, grad_clip=1.0,
-        scheduler="cosine", val_size=512, val_every=20,
+        max_epochs=epochs,
+        lr=1e-3,
+        batch_size=batch_size,
+        steps_per_epoch=15,
+        log_every=max(epochs // 10, 1),
+        device=device,
+        seed=seed,
+        grad_clip=1.0,
+        scheduler="cosine",
+        val_size=512,
+        val_every=20,
     )
     start = time.perf_counter()
     history = trainer.fit(model, generator)
@@ -170,7 +229,9 @@ def _run(
     resolved = trainer.resolve_device(model)
     batch = move_batch(generator.sample(2048), resolved)
     task = BenchmarkTask(
-        name=f"{suite.name}_{method}", model=model, data=batch,
+        name=f"{suite.name}_{method}",
+        model=model,
+        data=batch,
         metrics=["mcc", "r2_diag", "r2_sep", "dci_disentanglement"],
         causal_level="L1_association",
     )
@@ -184,6 +245,8 @@ def _run(
         adj_est = estimate_latent_adjacency(z_pred, max_lag=max_lag)
         shd = SHDMetric()(adj_est, batch.adjacency).value
         _ = WSHDMetric()  # available for future reporting
+    forecast1 = _forecast_mse(model, batch, 1)
+    forecast4 = _forecast_mse(model, batch, 4)
     return Row(
         case=method,
         suite=suite.name,
@@ -193,6 +256,8 @@ def _run(
         r2_sep=scores["r2_sep"],
         dci=scores["dci_disentanglement"],
         shd=shd,
+        forecast1=forecast1,
+        forecast4=forecast4,
         seconds=seconds,
     )
 
@@ -219,15 +284,51 @@ def main() -> int:
     rows: list[dict[str, Any]] = []
     for seed in range(args.seeds):
         for name, factory, epochs in methods:
-            row = _run(suite, name, factory, epochs, seed, args.device, args.batch_size,
-                       args.out_dir, save_curves=(seed == 0))
+            row = _run(
+                suite,
+                name,
+                factory,
+                epochs,
+                seed,
+                args.device,
+                args.batch_size,
+                args.out_dir,
+                save_curves=(seed == 0),
+            )
             rows.append(asdict(row))
             logger.info(
-                "RESULT %s/%s seed=%d mcc=%.3f r2d=%.3f r2s=%.3f dci=%.3f shd=%s",
-                suite.name, name, seed, row.mcc, row.r2_diag, row.r2_sep, row.dci,
+                "RESULT %s/%s seed=%d mcc=%.3f r2d=%.3f r2s=%.3f dci=%.3f shd=%s f1=%.3f f4=%.3f",
+                suite.name,
+                name,
+                seed,
+                row.mcc,
+                row.r2_diag,
+                row.r2_sep,
+                row.dci,
                 "n/a" if row.shd is None else f"{row.shd:.1f}",
+                row.forecast1,
+                row.forecast4,
             )
     save_rows(rows, args.out_dir, stem=f"crl_shared_{suite.name}")
+
+    # Persistence / ridge-AR(1) reference rows on the same process.
+    from sklearn.linear_model import Ridge
+
+    eval_batch = move_batch(suite.make_generator(0).sample(4096), torch.device("cpu"))
+    train_batch = suite.make_generator(12345).sample(8192)
+    flat_x = train_batch.x[:, :-1].reshape(-1, train_batch.x.shape[-1]).numpy()
+    flat_y = train_batch.x[:, 1:].reshape(-1, train_batch.x.shape[-1]).numpy()
+    ar = Ridge(alpha=1e-3).fit(flat_x, flat_y)
+    test_x = eval_batch.x[:, :-1].reshape(-1, eval_batch.x.shape[-1]).numpy()
+    test_y = eval_batch.x[:, 1:].reshape(-1, eval_batch.x.shape[-1]).numpy()
+    ar_mse = float(((ar.predict(test_x) - test_y) ** 2).mean())
+    logger.info(
+        "BASELINE %s persistence f1=%.4f f4=%.4f | AR(1) f1=%.4f",
+        suite.name,
+        _persistence_mse(eval_batch, 1),
+        _persistence_mse(eval_batch, 4),
+        ar_mse,
+    )
 
     aggregated = aggregate_rows(rows)
 
@@ -240,13 +341,14 @@ def main() -> int:
     logger.info("=== %s mean±std over %d seeds ===", suite.name, args.seeds)
     for name, _, _ in methods:
         logger.info(
-            "%-8s mcc=%s r2d=%s r2s=%s dci=%s shd=%s",
+            "%-8s mcc=%s r2d=%s r2s=%s shd=%s f1=%s f4=%s",
             name,
             stat(name, "mcc"),
             stat(name, "r2_diag"),
             stat(name, "r2_sep"),
-            stat(name, "dci"),
             stat(name, "shd"),
+            stat(name, "forecast1"),
+            stat(name, "forecast4"),
         )
     return 0
 

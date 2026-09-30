@@ -31,6 +31,18 @@ from gcmts.typing import Batch, CausalRepresentationOutput
 __all__ = ["BaseCausalRepresentationLearner"]
 
 
+def _last_step_context(
+    context: dict[str, Tensor] | None, time: int
+) -> dict[str, Tensor] | None:
+    """Reduce a per-timestep context to its last step for autoregressive rollout."""
+    if context is None:
+        return None
+    return {
+        key: value[:, -1:] if (value.ndim == 3 and value.shape[1] == time) else value
+        for key, value in context.items()
+    }
+
+
 class BaseCausalRepresentationLearner(BaseModel):
     """Abstract base for identifiable causal representation learners.
 
@@ -105,7 +117,8 @@ class BaseCausalRepresentationLearner(BaseModel):
     ) -> Tensor:
         """Forecast observations by encoding, transitioning, and decoding."""
         z = self.encode(x, context)
-        z_future = self.predict_next_latents(z, steps, context)
+        roll_context = _last_step_context(context, x.shape[1] if x.ndim == 3 else 1)
+        z_future = self.predict_next_latents(z, steps, roll_context)
         return self.decode(z_future)
 
     @abstractmethod
