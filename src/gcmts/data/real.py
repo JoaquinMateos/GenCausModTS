@@ -51,6 +51,7 @@ class RealTimeSeries:
         train_frac: float = 0.7,
         val_frac: float = 0.1,
         max_windows: int | None = 20000,
+        missing_value: float | None = None,
         seed: int = 0,
     ) -> None:
         frame = pd.read_csv(path)
@@ -58,6 +59,10 @@ class RealTimeSeries:
         frame = frame.select_dtypes(include=[np.number])
         if channels is not None:
             frame = frame[channels]
+        if missing_value is not None:
+            # Some archives (e.g. Jena climate) use -9999 as a sentinel.
+            frame = frame.mask(frame <= missing_value)
+            frame = frame.interpolate(limit_direction="both").bfill().ffill()
         values = frame.to_numpy(dtype=np.float32)
         if subsample > 1:
             values = values[::subsample]

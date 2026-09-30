@@ -43,12 +43,28 @@ class DatasetSpec:
     horizon: int
     subsample: int = 1
     channels: list[str] | None = None
+    missing_value: float | None = None
 
 
 DATASETS = {
     "etth1": DatasetSpec("etth1", "ETTh1.csv", horizon=24),
     "etth2": DatasetSpec("etth2", "ETTh2.csv", horizon=24),
-    "jena": DatasetSpec("jena", "jena_climate_2009_2016.csv", horizon=24, subsample=6),
+    "jena": DatasetSpec(
+        "jena",
+        "jena_climate_2009_2016.csv",
+        horizon=24,
+        subsample=6,
+        channels=[
+            "T (degC)",
+            "p (mbar)",
+            "rh (%)",
+            "VPmax (mbar)",
+            "VPact (mbar)",
+            "wv (m/s)",
+            "max. wv (m/s)",
+        ],
+        missing_value=-999.0,
+    ),
 }
 
 
@@ -163,6 +179,7 @@ def run_case(
         horizon=spec.horizon,
         subsample=spec.subsample,
         channels=spec.channels,
+        missing_value=spec.missing_value,
         seed=seed,
     )
     model = factory()
@@ -222,6 +239,7 @@ def baseline_rows(spec: DatasetSpec) -> list[dict[str, Any]]:
         horizon=spec.horizon,
         subsample=spec.subsample,
         channels=spec.channels,
+        missing_value=spec.missing_value,
         seed=0,
     )
     train = series.windows["train"]
@@ -287,6 +305,7 @@ def main() -> int:
             horizon=spec.horizon,
             subsample=spec.subsample,
             channels=spec.channels,
+            missing_value=spec.missing_value,
         )
         latent_dim = max(min(probe.observed_dim, 8), 3)
         rows.extend(baseline_rows(spec))
