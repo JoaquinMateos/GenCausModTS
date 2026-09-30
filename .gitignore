@@ -55,3 +55,6 @@ outputs_*/
 *.onnx
 wandb/
 lightning_logs/
+
+# downloaded real datasets (see scripts/download_datasets.py)
+data/real/

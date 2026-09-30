@@ -169,3 +169,29 @@ def test_mosaic_recovers_latents():
     z_pred = model.encode(batch.x, batch.context)
     assert batch.z is not None
     assert mcc(batch.z, z_pred) > 0.3
+
+
+def test_predict_next_observations_all_temporal_methods():
+    """Every temporal method must support one-step forecasting (transition path)."""
+    import torch
+
+    from gcmts.causal_representation_learning.methods import IVAE, LEAP, MOSAIC, NCTRL, TDRL
+    from gcmts.data.synthetic import TemporalNonlinearGenerator
+
+    torch.manual_seed(0)
+    generator = TemporalNonlinearGenerator(
+        observed_dim=6, latent_dim=3, horizon=8, max_lag=1, n_regimes=3,
+        regime_mode="time", mixing="linear", seed=0,
+    )
+    batch = generator.sample(8)
+    models = [
+        IVAE(observed_dim=6, latent_dim=3, u_dim=3),
+        LEAP(observed_dim=6, latent_dim=3, u_dim=3),
+        TDRL(observed_dim=6, latent_fix_dim=1, latent_dyn_dim=1, latent_obs_dim=1, u_dim=3),
+        NCTRL(observed_dim=6, latent_dim=3, n_regimes=3),
+        MOSAIC(observed_dim=6, latent_dim=3, u_dim=3),
+    ]
+    context = {"u": torch.zeros(8, 3)}
+    for model in models:
+        forecast = model.predict_next_observations(batch.x[:, :-1], 1, context)
+        assert forecast.shape == (8, 1, 6)

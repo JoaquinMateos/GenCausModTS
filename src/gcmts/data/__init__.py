@@ -1,6 +1,7 @@
 """Data generators and loaders."""
 
 from gcmts.data.base import BaseDataGenerator
+from gcmts.data.real import RealTimeSeries, RealTSGenerator
 from gcmts.data.synthetic import (
     CartPoleGenerator,
     Causal3DIdentGenerator,
@@ -19,6 +20,8 @@ from gcmts.data.synthetic_sdd import EvolvingDomainGenerator, MultiDomainGenerat
 
 __all__ = [
     "BaseDataGenerator",
+    "RealTimeSeries",
+    "RealTSGenerator",
     "CartPoleGenerator",
     "Causal3DIdentGenerator",
     "EvolvingDomainGenerator",

@@ -97,7 +97,7 @@ class NCTRL(BaseCausalRepresentationLearner):
         log_pi = torch.log_softmax(self.hmm_initial, dim=-1)
         weights = log_pi.exp().to(previous.device)
         means = torch.stack([net(previous) for net in self.transition_nets], dim=0)
-        return (weights.view(-1, 1) * means).sum(dim=0)
+        return (weights.view(-1, 1, 1) * means).sum(dim=0)
 
     def _log_emissions(self, z_seq: Tensor) -> Tensor:
         batch, time, dim = z_seq.shape
