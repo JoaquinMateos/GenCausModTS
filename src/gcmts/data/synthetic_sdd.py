@@ -57,9 +57,17 @@ class MultiDomainGenerator(BaseDataGenerator):
         self.noise_std = noise_std
         self.rng = torch.Generator().manual_seed(seed or 0)
         self.mixing = torch.randn(observed_dim, latent_dim, generator=self.rng)
-        self.causal_coeff = 0.7 * torch.randn(
-            dynamic_dim, static_dim + dynamic_dim, generator=self.rng
-        )
+        coeff = 0.7 * torch.randn(dynamic_dim, static_dim + dynamic_dim, generator=self.rng)
+        # Stabilise the dynamic-dynamic block: with a random recurrence the
+        # spectral radius can exceed one and trajectories explode for some
+        # seeds, which makes every method fail for reasons unrelated to the
+        # disentanglement question. Rescale so the process is stationary.
+        dynamic_block = coeff[:, static_dim:]
+        if dynamic_block.numel():
+            radius = float(torch.linalg.eigvals(dynamic_block).abs().max())
+            if radius > 0.6:
+                coeff = coeff * (0.6 / radius)
+        self.causal_coeff = coeff
         # Causal dynamics are domain-invariant, so the causal factors transfer
         # exactly; only the spurious correlation flips on the held-out domain.
         self.dynamic_scale = torch.ones(n_domains)

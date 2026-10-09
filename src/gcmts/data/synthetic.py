@@ -764,7 +764,11 @@ class Causal3DIdentGenerator(BaseDataGenerator):
                 n_samples, horizon, self.observed_dim
             )
         x = x + self.noise_std * torch.randn(x.shape, generator=self.rng)
-        return Batch(x=x, z=z_obs, adjacency=self.latent_adjacency)
+        # The visual factors evolve under a single stationary process, so the
+        # auxiliary context is constant; conditional methods still receive a
+        # well-formed one-dimensional context.
+        context = {"u": torch.ones(n_samples, 1)}
+        return Batch(x=x, z=z_obs, context=context, adjacency=self.latent_adjacency)
 
 
 class CartPoleGenerator(BaseDataGenerator):

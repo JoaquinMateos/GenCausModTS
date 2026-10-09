@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import torch
 
+from gcmts.core.backbones import CNNDecoder, CNNEncoder
+from gcmts.data.causal3dident import Causal3DIdentImageGenerator
 from gcmts.data.synthetic import (
     CartPoleGenerator,
     Causal3DIdentGenerator,
@@ -14,6 +16,7 @@ from gcmts.data.synthetic import (
     TDRLGenerator,
     TemporalNonlinearGenerator,
 )
+from gcmts.data.voronoi import VoronoiGenerator
 from gcmts.evaluation.metrics import R2DiagMetric
 
 
@@ -139,6 +142,39 @@ def test_linear_sde_generator_stationary_scale():
     assert torch.isfinite(batch.x).all()
     # Stable drift: the process should not blow up.
     assert batch.x.abs().mean() < 50
+
+
+def test_voronoi_generator_interventions_and_graph():
+    generator = VoronoiGenerator(n_vars=5, horizon=10, seed=0)
+    batch = generator.sample(6)
+    assert batch.x.shape == (6, 10, 6)
+    assert batch.z is not None and batch.z.shape == (6, 10, 6)
+    assert batch.context is not None
+    targets = batch.context["I"]
+    assert targets.shape == (6, 10, 5)
+    assert torch.all((targets == 0) | (targets == 1))
+    assert torch.all(targets[:, 0] == 0)
+    assert targets.sum(-1).max() <= 1  # single-target interventions
+    assert batch.adjacency is not None and batch.adjacency.shape == (6, 6, 2)
+    instantaneous = batch.adjacency[..., 0]
+    assert torch.all(instantaneous.tril() == 0)  # acyclic causal order
+    assert torch.isfinite(batch.x).all()
+
+
+def test_causal3dident_image_generator_and_cnn():
+    generator = Causal3DIdentImageGenerator(horizon=5, image_size=32, seed=1)
+    batch = generator.sample(4)
+    assert batch.x.shape == (4, 5, 3 * 32 * 32)
+    assert batch.z is not None and batch.z.shape == (4, 5, 6)
+    assert batch.context is not None and batch.context["I"].shape == (4, 5, 6)
+    images = generator.to_image(batch.x)
+    assert images.shape == (4, 5, 3, 32, 32)
+    encoder = CNNEncoder(3, 8)
+    decoder = CNNDecoder(8, 3, image_size=32)
+    latent = encoder(images.reshape(-1, 3, 32, 32))
+    assert latent.shape == (20, 8)
+    reconstruction = decoder(latent)
+    assert reconstruction.shape == (20, 3, 32, 32)
 
 
 def test_r2_diag_is_permutation_invariant():
