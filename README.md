@@ -49,7 +49,19 @@ metrics whose ground truth actually exists.
 | --- | --- | --- | --- |
 | **Identifiable CRL** | Recover latent causal variables/mechanisms from `x = g(z)` up to an ambiguity class | L1 / L2 | `causal_representation_learning` |
 | **Effect estimation** | Estimate `P(X \| do(A=a))` and counterfactual trajectories | L2 / L3 | `effect_estimation` |
-| **Static–dynamic disentanglement** | Separate invariant from varying causal factors | L1 (generalisation) | `static_dynamic_disentanglement` |
+| **Static–dynamic** (CRL sub-branch I.B.2) | Separate invariant from varying causal factors | L1 (generalisation) | `static_dynamic_disentanglement` |
+
+### Paradigm taxonomies
+
+The five branches of **Causal Representation Learning**, by the primary source of
+the identification constraint (I.A–I.E):
+
+<img src="docs/figures/crl_taxonomy.png" alt="Taxonomy of Causal Representation Learning" width="620">
+
+The four identification strategies of **Counterfactual & Treatment-Effect
+Estimation** (II.A–II.D):
+
+<img src="docs/figures/ctee_taxonomy.png" alt="Identification strategies for counterfactual and treatment-effect estimation" width="700">
 
 ### Latent temporal structural causal model
 
@@ -65,6 +77,12 @@ exogenous context (regime, domain, or intervention), `g` is an unknown mixing
 map, and the contemporaneous subgraph is a DAG. `TSCM` and `LTSCM` in
 `gcmts.core.tscm` implement forward simulation, noise re-sampling, and
 interventions for this model.
+
+<img src="docs/figures/ltscm.png" alt="Latent Temporal Structural Causal Model" width="760">
+
+*Context `u_t`, latent `z_{i,t}` and observed `x_{i,t}` states unrolled over time;
+`f` the latent mechanism, `g` the mixing (decoder) map, `ε` process noise and `η`
+observation noise, with parents bounded by lag `p`.*
 
 ### Pearl's hierarchy
 
@@ -186,18 +204,18 @@ carries ground-truth latents and context (regimes `u`, intervention targets `I`)
 
 ## Implemented methods
 
-The five **Identifiable-CRL sub-taxonomies** of the review are covered.
+All five **CRL branches** of the review are covered.
 
-| Sub-taxonomy | Method | Ambiguity class | Reference |
+| Branch | Method | Ambiguity class | Reference |
 | --- | --- | --- | --- |
-| Foundations | iVAE | permutation + component-wise invertible | Khemakhem et al., 2020 |
-| Temporal & sequential | LEAP | permutation + component-wise invertible | Yao et al., 2021 |
-| Temporal & sequential | TDRL | permutation + component-wise invertible | Yao et al., 2022 |
-| Temporal & sequential | NCTRL | permutation + component-wise invertible | Song et al., 2023 |
-| Temporal & sequential | Slow Flows | linear demixing | Pineau et al., 2020 |
-| Intervention-conditioned | CITRIS | element-wise invertible | Lippe et al., 2022 |
-| Latent hierarchical & module | MOSAIC | permutation of module supports | Fan et al., 2026 |
-| Continuous-time SDEs | CEGEN | exact drift/volatility (no mixing) | Remlinger et al., 2021 |
+| I.A Temporal structure | Slow Flows | linear demixing | Pineau et al., 2020 |
+| I.A Temporal structure | CEGEN | exact drift/volatility (no mixing) | Remlinger et al., 2021 |
+| I.B Non-stationarity & environment shift | LEAP | permutation + component-wise invertible | Yao et al., 2021 |
+| I.B Non-stationarity & environment shift | TDRL | permutation + component-wise invertible | Yao et al., 2022 |
+| I.B Non-stationarity & environment shift | NCTRL | permutation + component-wise invertible | Song et al., 2023 |
+| I.C Observed auxiliary variables | iVAE | permutation + component-wise invertible | Khemakhem et al., 2020 |
+| I.D Recorded interventions | CITRIS | element-wise invertible | Lippe et al., 2022 |
+| I.E Structural & functional constraints | MOSAIC | permutation of module supports | Fan et al., 2026 |
 
 ### iVAE — identifiable VAE
 Learns `x = g(z) + η` with an auxiliary-conditioned, factorised exponential-family
@@ -247,6 +265,13 @@ Wasserstein-2 (Bures) distance.
 Every method exposes its assumptions and ambiguity through
 `identifiability_statement()` and `ambiguity_class()`.
 
+The **effect-estimation** paradigm implements CaTSG (score-guided diffusion),
+CRN (counterfactual recurrent network), GANITE (adversarial ITE) and CEPAE
+(conditional-entropy-penalised autoencoder); the **static–dynamic** sub-branch
+(CRL I.B.2) implements SYNC (four-way factor split), DANN and VREx (invariant prediction),
+with ERM and oracle baselines. See `effect_estimation/methods/` and
+`static_dynamic_disentanglement/methods/`.
+
 ---
 
 ## Evaluation
@@ -255,9 +280,10 @@ Metrics live in `gcmts.evaluation.metrics` and are indexed by causal level:
 
 | Family | Metrics | Ground truth required |
 | --- | --- | --- |
-| Representation recovery | `MCC`, `R²_diag` | latent factors |
+| Representation recovery | `MCC`, `R²_diag`, `R²_sep`, `DCI` | latent factors |
 | Structural recovery | `SHD`, `WSHD` | latent graph |
-| Counterfactual/treatment | `PEHE`, `ε_ATE`, `CF MAE`, `MMD²`, `J-FTSD` | counterfactuals |
+| Intervention recovery | `triplet`, `two_sample` | intervention targets |
+| Counterfactual/treatment | `PEHE`, `ε_ATE`, `CF MAE/MBE`, `MMD²`, `J-FTSD` | counterfactuals |
 | Generalisation | `OOD MSE/MAE`, domain-ID accuracy, `MIG`, `CDS` | held-out regimes |
 
 `MCC` is invariant to permutation and monotone rescaling (the empirical
@@ -265,20 +291,40 @@ signature of identifiability); `R²_diag` matches components by correlation befo
 scoring. The benchmark runners move data to the model's device and compute only
 the requested metrics.
 
+Statistical comparison lives in `gcmts.evaluation.stats`: Holm-corrected paired
+Wilcoxon signed-rank tests paired by `(problem, seed)`, the Friedman omnibus
+test, and the Nemenyi post-hoc test with the critical difference
+`CD = q_α √(k(k+1)/6N)` and Demsar-style CD diagrams.
+
+Loaders with ground-truth causal quantities (rule R1): the tumour-growth
+simulator (`data.semi_synthetic.TumourGrowthSimulator`), IHDP (100
+replications), ACIC (hand-download layout), and the Voronoi/Causal Pinball SCM
+(`data.voronoi.VoronoiGenerator`). A differentiable Causal3DIdent image
+surrogate with known factors and interventions lives in
+`data.causal3dident.py`, with CNN encoder/decoder backbones in
+`core.backbones`.
+
 ---
 
 ## Benchmarks
 
 ```bash
-uv run python scripts/run_crl_benchmarks.py                 # CPU
-uv run python scripts/run_crl_benchmarks.py --device cuda   # GPU
-uv run python scripts/run_crl_benchmarks.py --quick         # smoke run
-uv run python scripts/run_crl_benchmarks.py --only leap_temporal
+uv run python scripts/download_datasets.py                  # real + IHDP archives
+uv run python scripts/download_datasets.py --generate       # materialise Voronoi tensors
+uv run python scripts/run_crl_benchmarks.py --device cuda   # per-method sanity check
+uv run python scripts/run_crl_shared.py --suite npvar --device cuda --seeds 10
+uv run python scripts/run_crl_shared.py --grid --device cuda --seeds 10
+uv run python scripts/run_ctee_benchmarks.py --device cuda --seeds 10
+uv run python scripts/run_sdd_benchmarks.py --device cuda --seeds 10
+uv run python scripts/make_paper_tables.py                  # LaTeX tables from JSON
 ```
 
 Each method is trained on the synthetic benchmark matching its assumptions;
 input/output shapes are validated and the aggregate results are written to
-`outputs/crl_benchmarks.{log,json,csv}`. Per-experiment training histories,
+`outputs/crl_benchmarks.{log,json,csv}`. The shared suites (NP/VAR, CartPole,
+Causal3DIdent, Voronoi) and the 18-problem grid are written to
+`outputs_shared/`, together with Holm-corrected Wilcoxon tests,
+Friedman/Nemenyi summaries and CD diagrams. Per-experiment training histories,
 model checkpoints, and training-curve figures (`training_curves.png/pdf`) are
 written to `outputs/<case>/`.
 
@@ -301,6 +347,13 @@ recover strongly; iVAE, NCTRL and MOSAIC are moderate; TDRL is weaker but above
 chance. CEGEN operates in observation space and is scored by its conditional W²
 loss. On GPU the suite is ≈1.7× faster at batch 256.
 
+These single-seed numbers are the implementation sanity check. The comparative
+protocol uses ten seeds: on NP/VAR no pairwise representation difference
+survives Holm correction, the forecast columns separate LEAP/NCTRL from
+iVAE/TDRL/MOSAIC, and the CRL methods are ranked over an eighteen-problem
+configuration grid with Friedman/Nemenyi tests (see `outputs_shared/` and
+`scripts/make_paper_tables.py`).
+
 ---
 
 ## Taxonomy coverage
@@ -311,9 +364,9 @@ uv run python scripts/taxonomy_coverage.py --strict   # non-zero if any row unco
 ```
 
 The script parses the bundled taxonomy table (`docs/taxonomy_table.tex`) and
-maps each sub-taxonomy to its implemented method(s). Identifiable CRL is fully
-covered (5/5); the effect-estimation and disentanglement sub-taxonomies are
-declared but not yet implemented.
+maps each branch to its implemented method(s). All five CRL branches are
+covered (5/5); the effect-estimation and adjacent branches are declared but not
+yet tracked by this CRL-focused script.
 
 ---
 
@@ -348,14 +401,16 @@ The design and roadmap are documented in [`docs/design.md`](docs/design.md).
 
 ## Limitations and roadmap
 
-- **Under-tuned methods.** TDRL and MOSAIC are above chance but not yet tuned to
-  their best attainable performance; MOSAIC's result varies with training length.
-- **Single-seed preliminary results.** The reported table is a single-seed sanity
-  check; the multi-seed protocol with confidence intervals and significance tests
-  is planned.
-- **Effect estimation and disentanglement** are specified through their abstract
-  bases but not yet implemented.
-- **Real-data loaders** (clinical, climate, single-cell) are on the roadmap.
+- **Under-tuned methods.** TDRL and NCTRL are above chance but below their
+  papers' reported ranges; further architecture/tuning work is needed.
+- **Statistical protocol.** The shared suites and the configuration grid run
+  with ten seeds and report Holm-corrected Wilcoxon plus Friedman/Nemenyi tests;
+  bootstrap confidence intervals and a tagged release with a DOI are pending.
+- **Pending methods.** iCITRIS, APPEX, and the adjacent-branch methods
+  (structure discovery, decision-making, explanation) are not implemented.
+- **Pending benchmarks.** The SDE suite in the shared comparison and the
+  rendered image variant of Causal3DIdent remain to be run; the ACIC archives
+  require a hand download.
 
 ---
 
