@@ -1,8 +1,10 @@
-"""Check CRL sub-taxonomy coverage against the taxonomy table.
+"""Check object-returned taxonomy coverage against the taxonomy table.
 
 Parses the bundled taxonomy table (``docs/taxonomy_table.tex``) and reports, for
-every sub-taxonomy, which implemented ``gcmts`` method covers it (matched by
-BibTeX key).
+every branch, which implemented ``gcmts`` method covers it (matched by
+BibTeX key). Covers all three paradigms: CRL (I.A--I.E), counterfactual and
+treatment-effect estimation (II.A--II.C) and the static--dynamic sub-branch of
+non-stationarity (I.B.2).
 
 Usage::
 
@@ -37,6 +39,13 @@ IMPLEMENTED: dict[str, str] = {
     "CITRIS": "lippeCITRISCausalIdentifiability2022",
     "MOSAIC": "shichengfanMOSAICModuleDiscovery2026",
     "CEGEN": "carlremlingerConditionalLossDeep2021",
+    # Counterfactual & treatment-effect estimation (Paradigm II).
+    "GANITE": "yoonGANITEEstimationIndividualized2018",
+    "CRN": "bicaEstimatingCounterfactualTreatment2020",
+    "CEPAE": "tomasgarrigaCEPAEConditionalEntropyPenalized2026",
+    "CaTSG": "yutongxiaCausalTimeSeries2025",
+    # Static--dynamic sub-branch (I.B.2).
+    "SYNC": "heLearningTimeAwareCausal2025",
 }
 _KEY_TO_METHOD = {key: name for name, key in IMPLEMENTED.items()}
 
@@ -44,7 +53,7 @@ _KEY_TO_METHOD = {key: name for name, key in IMPLEMENTED.items()}
 @dataclass
 class Row:
     category: str
-    sub_taxonomy: str
+    branch: str
     keys: list[str]
     methods: list[str]
 
@@ -72,7 +81,7 @@ def parse_table(path: Path) -> list[Row]:
             continue
         keys = [k.strip() for k in keys_match.group(1).split(",") if k.strip()]
         methods = [_KEY_TO_METHOD[k] for k in keys if k in _KEY_TO_METHOD]
-        rows.append(Row(category=category, sub_taxonomy=sub, keys=keys, methods=methods))
+        rows.append(Row(category=category, branch=sub, keys=keys, methods=methods))
     return rows
 
 
@@ -80,18 +89,18 @@ def render(rows: list[Row]) -> str:
     lines = [
         "# Taxonomy Coverage",
         "",
-        "| Category | Sub-taxonomy | Covered | Implemented method(s) |",
+        "| Category | Branch | Covered | Implemented method(s) |",
         "| --- | --- | :---: | --- |",
     ]
     for row in rows:
         methods = ", ".join(row.methods) if row.methods else "—"
         lines.append(
-            f"| {row.category} | {row.sub_taxonomy} | {'✅' if row.covered else '❌'} | {methods} |"
+            f"| {row.category} | {row.branch} | {'✅' if row.covered else '❌'} | {methods} |"
         )
     covered = sum(1 for r in rows if r.covered)
     lines += [
         "",
-        f"Covered sub-taxonomies: **{covered}/{len(rows)}**.",
+        f"Covered branches: **{covered}/{len(rows)}**.",
         "",
         "Implemented methods: " + ", ".join(IMPLEMENTED),
         "",
@@ -116,7 +125,7 @@ def main() -> int:
             [
                 {
                     "category": r.category,
-                    "sub_taxonomy": r.sub_taxonomy,
+                    "branch": r.branch,
                     "covered": r.covered,
                     "methods": r.methods,
                 }
@@ -130,7 +139,7 @@ def main() -> int:
 
     crl_rows = [r for r in rows if r.category.startswith("1.")]
     crl_ok = all(r.covered for r in crl_rows)
-    print(f"CRL sub-taxonomies covered: {sum(r.covered for r in crl_rows)}/{len(crl_rows)}")
+    print(f"CRL branches covered: {sum(r.covered for r in crl_rows)}/{len(crl_rows)}")
     if args.strict and not all(r.covered for r in rows):
         return 1
     return 0 if crl_ok else 1

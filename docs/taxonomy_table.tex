@@ -1,35 +1,37 @@
 
-\begin{table*}
+\begin{table}
   \centering
   \footnotesize
   \renewcommand{\arraystretch}{1.25}
-  \caption{Literature Classification Matrix by Generative Causal Taxonomy}
+  \caption{Literature classification matrix by generative causal taxonomy. Each layer poses a single question whose mutually exclusive answers are the branches: for CRL, the primary source of the identification constraint; for CTEE, the primary identification strategy; for the adjacent branches, the kind of object returned.}
   \label{tab:full_classification}
   \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}} p{0.25\textwidth} p{0.34\textwidth} p{0.35\textwidth} @{}}
     \toprule
-    \textbf{Taxonomy Category} & \textbf{Sub-Taxonomy} & \textbf{References} \\
+    \textbf{Taxonomy Category} & \textbf{Branch} & \textbf{References} \\
     \midrule
-    \textbf{1. Identifiable CRL} & General \& Multi-Environment Foundations & \cite{scholkopfCausalRepresentationLearning2021, kugelgenIdentifiableCausalRepresentation2024, moranInterpretableDeepGenerative2025, komanduriIdentifiableCausalRepresentations2024, sadeghiCausalRepresentationLearning2026, yaoMarryingCausalRepresentation2025, khemakhemVariationalAutoencodersNonlinear2020} \\
+    \textbf{1. Causal Representation Learning} & I.A Temporal structure & \cite{edouardpineauTimeSeriesSource2020, laizSELFSUPERVISEDCONTRASTIVELEARNING2025, hermannihalvaDisentanglingIdentifiableFeatures2021, chenCaRiNGLearningTemporal2024a, carlremlingerConditionalLossDeep2021, vincentguanIdentifyingDriftDiffusion2024, vincentguanGradientflowSDEsHave2025, a.hasanIdentifyingLatentStochastic2022a} \\
     \cmidrule(l){2-3}
-    & Temporal \& Sequential VAEs & \cite{weiranyaoLearningTemporallyCausal2021, yaoTemporallyDisentangledRepresentation2022, songTemporallyDisentangledRepresentation2023, songCausalTemporalRepresentation2024, liIdentificationTemporallyCausal2026, ruichucaiCausalViewTime2025, hermannihalvaDisentanglingIdentifiableFeatures2021, laizSELFSUPERVISEDCONTRASTIVELEARNING2025,edouardpineauTimeSeriesSource2020} \\
+     & I.B Non-stationarity \& environment shift & \cite{weiranyaoLearningTemporallyCausal2021, yaoTemporallyDisentangledRepresentation2022, songTemporallyDisentangledRepresentation2023, songCausalTemporalRepresentation2024, zijianliNonstationaryTimeSeries2024, prakulsunilhiremathLearningNonlinearRegime2026, zhaoGenerativeCausalInterpretation2023, heLearningTimeAwareCausal2025, spulerDisentanglingRegionalImpacts2026, yuanyuanwangDisentanglingContinuousTimeLatent2026} \\
     \cmidrule(l){2-3}
-    & Intervention-Conditioned CRL & \cite{lippeCITRISCausalIdentifiability2022, lippeCausalRepresentationLearning2023, nejatbakhshIdentifyingNeuralDynamics2025, kugelgenNonparametricIdentifiabilityCausal2023} \\
+     & I.C Observed auxiliary variables & \cite{khemakhemVariationalAutoencodersNonlinear2020, hyvarinenNonlinearICAUsing2019, changCausalDisentanglementBasedHidden2025, shenWeaklySupervisedDisentangled2022, zijianliIdentifiabilityHierarchicalTemporal2025} \\
     \cmidrule(l){2-3}
-    & Latent Hierarchical \& Module Discovery & \cite{prashantDifferentiableCausalDiscovery2024, shichengfanMOSAICModuleDiscovery2026, zijianliIdentifiabilityHierarchicalTemporal2025} \\
+     & I.D Recorded interventions & \cite{lippeCITRISCausalIdentifiability2022, nejatbakhshIdentifyingNeuralDynamics2025, lippeCausalRepresentationLearning2023, kugelgenNonparametricIdentifiabilityCausal2023} \\
     \cmidrule(l){2-3}
-    & Continuous-Time Latent Dynamics (SDEs) & \cite{yuanyuanwangDisentanglingContinuousTimeLatent2026, vincentguanIdentifyingDriftDiffusion2024, a.hasanIdentifyingLatentStochastic2022a, vincentguanGradientflowSDEsHave2025,carlremlingerConditionalLossDeep2021} \\
+     & I.E Structural \& functional constraints & \cite{liIdentificationTemporallyCausal2026, lachapelleNonparametricPartialDisentanglement2026, prashantDifferentiableCausalDiscovery2024, shichengfanMOSAICModuleDiscovery2026, minghaofuLearningGeneralCausal2025, ruichucaiCausalViewTime2025} \\
     \midrule
-    \textbf{2. Counterfactual \& Treatment Effect} & Diffusion-Based Counterfactuals & \cite{larslorchLatentCausalDiffusions2026, yutongxiaCausalTimeSeries2025, yifanduanCausalDecipheringInpainting2024, faveroSpatioTemporalConditionalDiffusion2026, xinwenliuPartiallyFunctionalDynamic2025, p.liFedCausalDiffDecoupledSynchronization2026, xuemingyanLacaDMLatentCausal2025, zhuGBTPLGraphConstrainedGenerative2026a, badreDesignIntegratedDriftaware2025, fengAdaDiffuserLatentAwareAdaptive2026} \\
+    \textbf{2. Counterfactual \& Treatment-Effect Estimation} & II.A Observed-data adjustment & \cite{xinwenliuPartiallyFunctionalDynamic2025, yoonGANITEEstimationIndividualized2018, faveroSpatioTemporalConditionalDiffusion2026, guoCounterfactualInferenceFramework2026a, yifanduanCausalDecipheringInpainting2024, wuCounterfactualGenerativeModels2024, singhMatchedSampleSelection2021} \\
     \cmidrule(l){2-3}
-    & Adversarial \& GAN-Enhanced Inference & \cite{norimatsuEncodeDecoderbasedGANEstimating2025, x.zhouVariationalGANEnhancedCausal2026, luoGenerativeDisentanglementRobust2026, kocaogluCausalGANLearningCausal2017, yoonGANITEEstimationIndividualized2018, shenWeaklySupervisedDisentangled2022} \\
+     & II.B Representation-based identification & \cite{bicaEstimatingCounterfactualTreatment2020, melnychukCausalTransformerEstimating2022, norimatsuEncodeDecoderbasedGANEstimating2025, wenkangjiangLearningLatentDynamical2026, luoGenerativeDisentanglementRobust2026, m.qiRobustDisentangledCounterfactual2026, wangMitigatingDataImbalance2025, reddyCounterfactualGenerationConfounding2022, tomasgarrigaCEPAEConditionalEntropyPenalized2026, gaoCausalDisentanglementSinglecell2025} \\
     \cmidrule(l){2-3}
-    & Variational Treatment Effect Estimators & \cite{wuCounterfactualGenerativeModels2024, tomasgarrigaCEPAEConditionalEntropyPenalized2026, m.qiRobustDisentangledCounterfactual2026, guoCounterfactualInferenceFramework2026a, wangMitigatingDataImbalance2025, gaoCausalDisentanglementSinglecell2025, dennisthummCausalMarketSimulators2025, gumucioAlgorithmicRecourseSequential2026, beckerExplainableNeuralNetwork2026, j.m.lopezalcarazExplainingTimeSeries2025, mohammadareebqaziGenerativeAIWorld2025, caoCausalawareDeepReinforcement2026, wenkangjiangLearningLatentDynamical2026} \\
+     & II.C Latent-confounder \& environment models & \cite{yutongxiaCausalTimeSeries2025, p.liFedCausalDiffDecoupledSynchronization2026, x.zhouVariationalGANEnhancedCausal2026} \\
+    \cmidrule(l){2-3}
+     & II.D Given structural mechanisms \& simulators & \cite{kocaogluCausalGANLearningCausal2017, sauerCounterfactualGenerativeNetworks2021, dennisthummCausalMarketSimulators2025, badreDesignIntegratedDriftaware2025, larslorchLatentCausalDiffusions2026, mohammadareebqaziGenerativeAIWorld2025} \\
     \midrule
-    \textbf{3. Static-Dynamic Disentanglement} & Evolving Domain Generalization & \cite{heLearningTimeAwareCausal2025, chenCaRiNGLearningTemporal2024a, lachapelleNonparametricPartialDisentanglement2026, dengDeepCausalLearning2026, minghaofuLearningGeneralCausal2025, zijianliNonstationaryTimeSeries2024, prakulsunilhiremathLearningNonlinearRegime2026} \\
+    \textbf{3. Adjacent Branches} & III.A Structure discovery & \cite{rahmatk.adesunkanmiRootCauseAnalysis2025, zhuGBTPLGraphConstrainedGenerative2026a} \\
     \cmidrule(l){2-3}
-    & Cross-Domain Disentanglement & \cite{spulerDisentanglingRegionalImpacts2026, changCausalDisentanglementBasedHidden2025} \\
+     & III.B Decision-making & \cite{yangCausalReinforcementLearning2025a, caoCausalawareDeepReinforcement2026, xuemingyanLacaDMLatentCausal2025, fengAdaDiffuserLatentAwareAdaptive2026, gumucioAlgorithmicRecourseSequential2026} \\
     \cmidrule(l){2-3}
-    & Spatio-Temporal \& Graph Causal Dynamics & \cite{zhaoGenerativeCausalInterpretation2023, rahmatk.adesunkanmiRootCauseAnalysis2025, yangCausalReinforcementLearning2025a} \\
+     & III.C Explanation \& attribution & \cite{j.m.lopezalcarazExplainingTimeSeries2025, beckerExplainableNeuralNetwork2026} \\
     \bottomrule
   \end{tabular*}
-\end{table*}
+\end{table}

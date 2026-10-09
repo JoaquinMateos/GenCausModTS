@@ -66,7 +66,9 @@ class CaseConfig:
 @dataclass
 class CaseResult:
     case: str
+    dataset: str
     method: str
+    seed: int
     epochs: int
     n_parameters: int
     final_loss: float
@@ -388,7 +390,9 @@ def run_case(
 
     return CaseResult(
         case=cfg.name,
+        dataset=cfg.name,
         method=type(model).__name__,
+        seed=seed,
         epochs=cfg.epochs,
         n_parameters=n_params,
         final_loss=final_loss,
@@ -457,7 +461,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run simple CRL benchmarks.")
     parser.add_argument("--quick", action="store_true", help="fewer epochs (smoke run)")
     parser.add_argument("--only", nargs="*", default=None, help="subset of case names")
-    parser.add_argument("--seeds", type=int, default=5, help="number of seeds")
+    parser.add_argument("--seeds", type=int, default=10, help="number of seeds")
     parser.add_argument("--out-dir", type=Path, default=Path("outputs"))
     parser.add_argument(
         "--device",

@@ -1,17 +1,23 @@
-"""Shared head-to-head CRL suites (Table~\\ref{tab:exp_crl}).
+"""Shared head-to-head CRL suites (Table~\\ref{tab:exp_crl}) and grid sweep.
 
 Trains the temporal CRL methods on a *common* benchmark so that methods from
-different sub-taxonomies are directly comparable within a block, and reports
-representation- and structural-recovery metrics (mean/std over seeds).
+different branches are directly comparable within a block, and reports
+representation- and structural-recovery metrics (mean/std over seeds). The
+``--grid`` mode expands the problem set to 18 commensurable NP/VAR
+configurations (latent dimension, observed dimension, graph sparsity and
+regime count), which gives Friedman/Nemenyi the sample size they need; the
+per-suite mode runs the three shared suites.
 
 Usage::
 
-    uv run python scripts/run_crl_shared.py --device cuda --suite npvar --seeds 5
+    uv run python scripts/run_crl_shared.py --device cuda --suite npvar --seeds 10
+    uv run python scripts/run_crl_shared.py --device cuda --grid --seeds 10
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import time
 from collections.abc import Callable
@@ -19,10 +25,13 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
 
 from gcmts.causal_representation_learning.base import BaseCausalRepresentationLearner
 from gcmts.causal_representation_learning.methods import (
+    CEGEN,
+    CITRIS,
     IVAE,
     LEAP,
     MOSAIC,
@@ -30,17 +39,28 @@ from gcmts.causal_representation_learning.methods import (
     TDRL,
 )
 from gcmts.core import SimpleTrainer, move_batch, save_training_report
-from gcmts.core.graph_ops import estimate_latent_adjacency
+from gcmts.core.graph_ops import edge_auprc, estimate_latent_adjacency, latent_permutation
 from gcmts.data.synthetic import (
     CartPoleGenerator,
     Causal3DIdentGenerator,
+    LinearSDEGenerator,
     TemporalNonlinearGenerator,
 )
+from gcmts.data.voronoi import VoronoiGenerator
 from gcmts.evaluation import BenchmarkTask, CrlBenchmarkRunner
-from gcmts.evaluation.metrics import SHDMetric, WSHDMetric
+from gcmts.evaluation.metrics import SHDMetric, TripletDistanceMetric
 from gcmts.evaluation.report import aggregate_rows, save_rows
+from gcmts.evaluation.stats import (
+    friedman_test,
+    metric_matrix,
+    nemenyi,
+    paired_wilcoxon_holm,
+    plot_cd_diagram,
+)
 
 logger = logging.getLogger("gcmts.crl_shared")
+
+MethodSpec = tuple[str, Callable[[], BaseCausalRepresentationLearner], int]
 
 
 @dataclass
@@ -99,19 +119,110 @@ SUITES: dict[str, Suite] = {
             seed=seed,
         ),
     ),
+    "voronoi": Suite(
+        name="voronoi",
+        observed_dim=6,
+        latent_dim=6,
+        horizon=16,
+        n_regimes=1,
+        make_generator=lambda seed: VoronoiGenerator(n_vars=5, horizon=16, seed=seed),
+    ),
+    "sde": Suite(
+        name="sde",
+        observed_dim=4,
+        latent_dim=4,
+        horizon=20,
+        n_regimes=1,
+        make_generator=lambda seed: LinearSDEGenerator(
+            observed_dim=4, horizon=20, seed=seed
+        ),
+    ),
+}
+
+# Suite B is intervention-conditioned, so the applicable representative is
+# CITRIS (I.D); the non-stationarity family is reported on Suites A.
+SUITE_METHODS = {
+    "voronoi": ["CITRIS"],
+    "sde": ["CEGEN"],
 }
 
 
-def build_methods(
-    suite: Suite,
-) -> list[tuple[str, Callable[[], BaseCausalRepresentationLearner], int]]:
+@dataclass
+class GridConfig:
+    name: str
+    latent_dim: int
+    observed_dim: int
+    sparsity: float
+    n_regimes: int
+    noise_std: float
+
+    def as_suite(self) -> Suite:
+        return Suite(
+            name=f"grid_{self.name}",
+            observed_dim=self.observed_dim,
+            latent_dim=self.latent_dim,
+            horizon=16,
+            n_regimes=self.n_regimes,
+            make_generator=lambda seed: TemporalNonlinearGenerator(
+                observed_dim=self.observed_dim,
+                latent_dim=self.latent_dim,
+                horizon=16,
+                max_lag=1,
+                n_regimes=self.n_regimes,
+                regime_mode="time",
+                mixing="linear",
+                adjacency_sparsity=self.sparsity,
+                noise_std=self.noise_std,
+                seed=seed,
+            ),
+        )
+
+
+def _grid_configs() -> list[GridConfig]:
+    """18 commensurable NP/VAR problems: d x D x sparsity, regimes/noise cycling."""
+    regimes_cycle = (2, 4, 8)
+    noise_cycle = (0.05, 0.1, 0.2)
+    configs: list[GridConfig] = []
+    for latent_index, latent_dim in enumerate((3, 5, 8)):
+        for multiplier_index, multiplier in enumerate((2, 3)):
+            for sparsity_index, sparsity in enumerate((0.2, 0.4, 0.6)):
+                n_regimes = regimes_cycle[(latent_index + sparsity_index) % 3]
+                noise_std = noise_cycle[(multiplier_index + sparsity_index) % 3]
+                configs.append(
+                    GridConfig(
+                        name=(
+                            f"d{latent_dim}_D{multiplier * latent_dim}"
+                            f"_s{int(sparsity * 10)}_r{n_regimes}"
+                        ),
+                        latent_dim=latent_dim,
+                        observed_dim=multiplier * latent_dim,
+                        sparsity=sparsity,
+                        n_regimes=n_regimes,
+                        noise_std=noise_std,
+                    )
+                )
+    return configs
+
+
+GRID_CONFIGS = _grid_configs()
+
+
+def build_methods(suite: Suite, *, epochs_scale: float = 1.0) -> list[MethodSpec]:
     d, r, D = suite.latent_dim, suite.n_regimes, suite.observed_dim
-    u = max(r, 2)  # unconditional suites still expose a small regime context
+    u = max(r, 1)  # stationary suites expose a constant, one-dimensional context
     fix = max(d - 2, 1)
     obs = 1
     dyn = max(d - fix - obs, 1)
+
+    def scale(value: int) -> int:
+        return max(int(value * epochs_scale), 200)
+
     return [
-        ("iVAE", lambda: IVAE(observed_dim=D, latent_dim=d, u_dim=u, obs_noise=0.1), 1500),
+        (
+            "iVAE",
+            lambda: IVAE(observed_dim=D, latent_dim=d, u_dim=u, obs_noise=0.1),
+            scale(1500),
+        ),
         (
             "LEAP",
             lambda: LEAP(
@@ -122,7 +233,7 @@ def build_methods(
                 kl_weight=0.01,
                 obs_noise=0.1,
             ),
-            2000,
+            scale(2000),
         ),
         (
             "TDRL",
@@ -135,34 +246,69 @@ def build_methods(
                 kl_weight=0.01,
                 obs_noise=0.1,
             ),
-            2000,
+            scale(2000),
         ),
         (
             "NCTRL",
-            lambda: NCTRL(observed_dim=D, latent_dim=d, n_regimes=u, kl_weight=0.01, obs_noise=0.1),
-            2000,
+            lambda: NCTRL(
+                observed_dim=D, latent_dim=d, n_regimes=u, kl_weight=0.01, obs_noise=0.1
+            ),
+            scale(2000),
         ),
         (
             "MOSAIC",
             lambda: MOSAIC(observed_dim=D, latent_dim=d, u_dim=u, kl_weight=0.1, obs_noise=0.1),
-            1200,
+            scale(1200),
         ),
+    ]
+
+
+def build_voronoi_methods(suite: Suite, epochs_scale: float = 1.0) -> list[MethodSpec]:
+    n_vars = suite.observed_dim - 1
+    return [
+        (
+            "CITRIS",
+            lambda: CITRIS(
+                observed_dim=suite.observed_dim,
+                n_vars=n_vars,
+                var_dim=1,
+                n_shared=1,
+            ),
+            max(int(2000 * epochs_scale), 200),
+        )
+    ]
+
+
+def build_sde_methods(suite: Suite, epochs_scale: float = 1.0) -> list[MethodSpec]:
+    """CEGEN operates in observation space (no mixing model), so it is the only
+    representative of the continuous-time SDE suite."""
+    return [
+        (
+            "CEGEN",
+            lambda: CEGEN(observed_dim=suite.observed_dim, n_regions=4),
+            max(int(800 * epochs_scale), 200),
+        )
     ]
 
 
 @dataclass
 class Row:
     case: str
+    dataset: str
     suite: str
     method: str
+    seed: int
     mcc: float
     r2_diag: float
     r2_sep: float
     dci: float
     shd: float | None
+    triplet: float | None
     forecast1: float
     forecast4: float
     seconds: float
+    auprc: float | None = None
+    w2: float | None = None
 
 
 def _slice_context(context: Any, time: int, new_time: int) -> dict[str, Any]:
@@ -190,6 +336,37 @@ def _persistence_mse(batch: Any, steps: int) -> float:
     time = batch.x.shape[1]
     last = batch.x[:, time - steps - 1 : time - steps]
     return float(((last.expand(-1, steps, -1) - batch.x[:, time - steps :]) ** 2).mean())
+
+
+def _triplet_score(
+    model: BaseCausalRepresentationLearner, batch: Any, max_lag: int = 1
+) -> float | None:
+    """Intervention isolation from consecutive latent pairs with known targets."""
+    if batch.context is None or "I" not in batch.context or batch.z is None:
+        return None
+    targets = batch.context["I"]
+    if targets.shape[-1] < 1:
+        return None
+    with torch.no_grad():
+        z_pred = model.encode(batch.x, batch.context)
+    before, after, target_index, truth = [], [], [], []
+    for step in range(max_lag, targets.shape[1]):
+        active = targets[:, step].sum(-1) == 1
+        if not bool(active.any()):
+            continue
+        index = targets[active, step].argmax(dim=-1)
+        before.append(z_pred[active, step - max_lag])
+        after.append(z_pred[active, step])
+        target_index.append(index)
+        truth.append(batch.z[active, step - max_lag])
+    if not before:
+        return None
+    prediction = {
+        "before": torch.cat(before, dim=0),
+        "after": torch.cat(after, dim=0),
+        "targets": torch.cat(target_index, dim=0),
+    }
+    return TripletDistanceMetric()(prediction, torch.cat(truth, dim=0)).value
 
 
 def _run(
@@ -228,6 +405,28 @@ def _run(
 
     resolved = trainer.resolve_device(model)
     batch = move_batch(generator.sample(2048), resolved)
+    if suite.name == "sde":
+        with torch.no_grad():
+            outputs = model.forward(batch)
+            extras = outputs.extras or {}
+            w2 = float(extras.get("w2", torch.tensor(float("nan"))))
+        return Row(
+            case=method,
+            dataset=suite.name,
+            suite=suite.name,
+            method=method,
+            seed=seed,
+            mcc=float("nan"),
+            r2_diag=float("nan"),
+            r2_sep=float("nan"),
+            dci=float("nan"),
+            shd=None,
+            triplet=None,
+            forecast1=_forecast_mse(model, batch, 1),
+            forecast4=_forecast_mse(model, batch, 4),
+            seconds=seconds,
+            w2=w2,
+        )
     task = BenchmarkTask(
         name=f"{suite.name}_{method}",
         model=model,
@@ -238,80 +437,158 @@ def _run(
     result = CrlBenchmarkRunner().run(task)
     scores = {m.name: m.value for m in result.metrics}
     shd: float | None = None
+    auprc: float | None = None
     if batch.adjacency is not None:
         with torch.no_grad():
             z_pred = model.encode(batch.x, batch.context)
         max_lag = int(getattr(generator, "max_lag", 1))
         adj_est = estimate_latent_adjacency(z_pred, max_lag=max_lag)
-        shd = SHDMetric()(adj_est, batch.adjacency).value
-        _ = WSHDMetric()  # available for future reporting
+        adjacency = batch.adjacency[..., -max_lag:].to(adj_est.device)
+        if batch.z is not None:
+            perm = latent_permutation(z_pred, batch.z)
+            adj_est = adj_est[perm][:, perm]
+        shd = SHDMetric()(adj_est, adjacency).value
+        auprc = edge_auprc(adj_est, adjacency)
+    triplet = _triplet_score(model, batch)
     forecast1 = _forecast_mse(model, batch, 1)
     forecast4 = _forecast_mse(model, batch, 4)
     return Row(
         case=method,
+        dataset=suite.name,
         suite=suite.name,
         method=method,
+        seed=seed,
         mcc=scores["mcc"],
         r2_diag=scores["r2_diag"],
         r2_sep=scores["r2_sep"],
         dci=scores["dci_disentanglement"],
         shd=shd,
+        triplet=triplet,
         forecast1=forecast1,
         forecast4=forecast4,
         seconds=seconds,
+        auprc=auprc,
     )
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Run shared CRL suites.")
-    parser.add_argument("--suite", default="npvar")
-    parser.add_argument("--device", default="auto")
-    parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--seeds", type=int, default=5)
-    parser.add_argument("--out-dir", type=Path, default=Path("outputs"))
-    args = parser.parse_args()
-
-    args.out_dir.mkdir(parents=True, exist_ok=True)
-    root = logging.getLogger()
-    root.setLevel(logging.INFO)
-    root.handlers = [
-        logging.FileHandler(args.out_dir / "crl_shared.log", mode="w"),
-        logging.StreamHandler(),
-    ]
-
-    suite = SUITES[args.suite]
-    methods = build_methods(suite)
-    rows: list[dict[str, Any]] = []
-    for seed in range(args.seeds):
-        for name, factory, epochs in methods:
-            row = _run(
-                suite,
-                name,
-                factory,
-                epochs,
-                seed,
-                args.device,
-                args.batch_size,
-                args.out_dir,
-                save_curves=(seed == 0),
-            )
-            rows.append(asdict(row))
+def _report_statistics(
+    rows: list[dict[str, Any]],
+    out_dir: Path,
+    *,
+    stem: str,
+    metrics: list[tuple[str, bool]],
+) -> dict[str, Any]:
+    """Pairwise Holm-corrected Wilcoxon + Friedman/Nemenyi with CD diagrams."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    summary: dict[str, Any] = {}
+    for metric, higher_is_better in metrics:
+        matrix, cases, problems = metric_matrix(rows, metric)
+        comparisons = paired_wilcoxon_holm(rows, metric)
+        entry: dict[str, Any] = {
+            "comparisons": [asdict(c) for c in comparisons],
+        }
+        logger.info(
+            "--- %s | %d cases | %d problems | pairwise Holm-corrected Wilcoxon ---",
+            metric,
+            len(cases),
+            len(problems),
+        )
+        for comparison in comparisons:
             logger.info(
-                "RESULT %s/%s seed=%d mcc=%.3f r2d=%.3f r2s=%.3f dci=%.3f shd=%s f1=%.3f f4=%.3f",
-                suite.name,
-                name,
-                seed,
-                row.mcc,
-                row.r2_diag,
-                row.r2_sep,
-                row.dci,
-                "n/a" if row.shd is None else f"{row.shd:.1f}",
-                row.forecast1,
-                row.forecast4,
+                "%-10s %-8s vs %-8s n=%d p=%.4g p_holm=%.4g%s",
+                metric,
+                comparison.case_a,
+                comparison.case_b,
+                comparison.n_pairs,
+                comparison.p_value,
+                comparison.p_holm,
+                " *" if comparison.significant else "",
             )
-    save_rows(rows, args.out_dir, stem=f"crl_shared_{suite.name}")
+        complete = matrix[~np.isnan(matrix).any(axis=1)]
+        if complete.shape[0] >= 2 and complete.shape[1] >= 3:
+            friedman = friedman_test(matrix)
+            posthoc = nemenyi(matrix, higher_is_better=higher_is_better)
+            entry["friedman"] = friedman
+            entry["nemenyi"] = {
+                "average_ranks": {
+                    case: float(rank)
+                    for case, rank in zip(cases, posthoc["average_ranks"].tolist(), strict=True)
+                },
+                "critical_difference": float(posthoc["critical_difference"]),
+                "n_problems": int(posthoc["n_problems"]),
+                "alpha": float(posthoc["alpha"]),
+            }
+            plot_cd_diagram(
+                {
+                    case: float(rank)
+                    for case, rank in zip(cases, posthoc["average_ranks"].tolist(), strict=True)
+                },
+                float(posthoc["critical_difference"]),
+                path=out_dir / f"cd_{stem}_{metric}.png",
+                title=f"{metric} ({'higher' if higher_is_better else 'lower'} is better)",
+            )
+            logger.info(
+                "Friedman %s: chi2=%.3f p=%.4g | Nemenyi CD=%.3f over N=%d",
+                metric,
+                friedman["statistic"],
+                friedman["p_value"],
+                posthoc["critical_difference"],
+                posthoc["n_problems"],
+            )
+        summary[metric] = entry
+    (out_dir / f"{stem}_stats.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    return summary
 
-    # Persistence / ridge-AR(1) reference rows on the same process.
+
+def _methods_for(suite: Suite, epochs_scale: float) -> list[MethodSpec]:
+    if suite.name == "voronoi":
+        return build_voronoi_methods(suite, epochs_scale)
+    if suite.name == "sde":
+        return build_sde_methods(suite, epochs_scale)
+    return build_methods(suite, epochs_scale=epochs_scale)
+
+
+def _log_rows(suite_name: str, method: str, seed: int, row: Row) -> None:
+    logger.info(
+        "RESULT %s/%s seed=%d mcc=%.3f r2d=%.3f r2s=%.3f dci=%.3f shd=%s triplet=%s f1=%.3f",
+        suite_name,
+        method,
+        seed,
+        row.mcc,
+        row.r2_diag,
+        row.r2_sep,
+        row.dci,
+        "n/a" if row.shd is None else f"{row.shd:.1f}",
+        "n/a" if row.triplet is None else f"{row.triplet:.3f}",
+        row.forecast1,
+    )
+
+
+def _log_aggregate(rows: list[dict[str, Any]], methods: list[str], seeds: int) -> None:
+    aggregated = aggregate_rows(rows)
+
+    def stat(case: str, metric: str) -> str:
+        if case not in aggregated or metric not in aggregated[case]:
+            return "--"
+        entry = aggregated[case][metric]
+        return f"{entry['mean']:.3f}±{entry['std']:.3f}"
+
+    logger.info("=== mean±std over %d seeds ===", seeds)
+    for name in methods:
+        logger.info(
+            "%-8s mcc=%s r2d=%s r2s=%s shd=%s triplet=%s f1=%s f4=%s",
+            name,
+            stat(name, "mcc"),
+            stat(name, "r2_diag"),
+            stat(name, "r2_sep"),
+            stat(name, "shd"),
+            stat(name, "triplet"),
+            stat(name, "forecast1"),
+            stat(name, "forecast4"),
+        )
+
+
+def _baselines(suite: Suite) -> None:
     from sklearn.linear_model import Ridge
 
     eval_batch = move_batch(suite.make_generator(0).sample(4096), torch.device("cpu"))
@@ -330,27 +607,134 @@ def main() -> int:
         ar_mse,
     )
 
-    aggregated = aggregate_rows(rows)
 
-    def stat(case: str, metric: str) -> str:
-        if case not in aggregated or metric not in aggregated[case]:
-            return "--"
-        entry = aggregated[case][metric]
-        return f"{entry['mean']:.3f}±{entry['std']:.3f}"
+def configure_logging(out_dir: Path) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.handlers = [
+        logging.FileHandler(out_dir / "crl_shared.log", mode="w"),
+        logging.StreamHandler(),
+    ]
 
-    logger.info("=== %s mean±std over %d seeds ===", suite.name, args.seeds)
-    for name, _, _ in methods:
-        logger.info(
-            "%-8s mcc=%s r2d=%s r2s=%s shd=%s f1=%s f4=%s",
-            name,
-            stat(name, "mcc"),
-            stat(name, "r2_diag"),
-            stat(name, "r2_sep"),
-            stat(name, "shd"),
-            stat(name, "forecast1"),
-            stat(name, "forecast4"),
-        )
+
+def run_suite(args: argparse.Namespace) -> int:
+    suite = SUITES[args.suite]
+    methods = _methods_for(suite, args.epochs_scale)
+    stem = f"crl_shared_{suite.name}"
+    rows: list[dict[str, Any]] = []
+    for seed in range(args.seeds):
+        for name, factory, epochs in methods:
+            row = _run(
+                suite,
+                name,
+                factory,
+                epochs,
+                seed,
+                args.device,
+                args.batch_size,
+                args.out_dir,
+                save_curves=(seed == 0),
+            )
+            rows.append(asdict(row))
+            _log_rows(suite.name, name, seed, row)
+            save_rows(rows, args.out_dir, stem=stem)
+    save_rows(rows, args.out_dir, stem=stem)
+    _log_aggregate(rows, [name for name, _, _ in methods], args.seeds)
+    if args.baselines:
+        _baselines(suite)
+    _report_statistics(
+        rows,
+        args.out_dir,
+        stem=stem,
+        metrics=[
+            ("mcc", True),
+            ("r2_diag", True),
+            ("r2_sep", False),
+            ("shd", False),
+            ("auprc", True),
+            ("triplet", False),
+            ("forecast1", False),
+            ("forecast4", False),
+        ],
+    )
     return 0
+
+
+def run_grid(args: argparse.Namespace) -> int:
+    rows: list[dict[str, Any]] = []
+    configs = GRID_CONFIGS
+    if args.configs:
+        wanted = set(args.configs)
+        configs = [config for config in configs if config.name in wanted]
+    if not configs:
+        logger.error("No grid configs selected; check --configs.")
+        return 1
+    stem = args.stem or "crl_shared_grid"
+    for seed in range(args.seeds):
+        for config in configs:
+            suite = config.as_suite()
+            methods = build_methods(suite, epochs_scale=args.epochs_scale)
+            if args.only:
+                methods = [m for m in methods if m[0] in set(args.only)]
+            for name, factory, epochs in methods:
+                row = _run(
+                    suite,
+                    name,
+                    factory,
+                    epochs,
+                    seed,
+                    args.device,
+                    args.batch_size,
+                    args.out_dir,
+                    save_curves=False,
+                )
+                row.dataset = config.name
+                rows.append(asdict(row))
+                _log_rows(config.name, name, seed, row)
+                save_rows(rows, args.out_dir, stem=stem)
+    save_rows(rows, args.out_dir, stem=stem)
+    method_names = [name for name, _, _ in build_methods(configs[0].as_suite())]
+    _log_aggregate(rows, method_names, args.seeds)
+    _report_statistics(
+        rows,
+        args.out_dir,
+        stem=stem,
+        metrics=[
+            ("mcc", True),
+            ("r2_diag", True),
+            ("r2_sep", False),
+            ("dci", True),
+            ("forecast1", False),
+            ("forecast4", False),
+        ],
+    )
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run shared CRL suites / grid.")
+    parser.add_argument("--suite", default="npvar", choices=sorted(SUITES))
+    parser.add_argument("--grid", action="store_true", help="run the 18-problem config sweep")
+    parser.add_argument("--device", default="auto")
+    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--seeds", type=int, default=10)
+    parser.add_argument("--only", nargs="*", default=None)
+    parser.add_argument("--configs", nargs="*", default=None, help="grid config names to run")
+    parser.add_argument("--stem", default=None, help="output stem for grid splits")
+    parser.add_argument(
+        "--epochs-scale",
+        type=float,
+        default=1.0,
+        help="multiply the per-method epoch budgets (grid runs use < 1 to fit the budget)",
+    )
+    parser.add_argument("--no-baselines", dest="baselines", action="store_false")
+    parser.add_argument("--out-dir", type=Path, default=Path("outputs"))
+    args = parser.parse_args()
+    configure_logging(args.out_dir)
+    if args.grid:
+        return run_grid(args)
+    return run_suite(args)
 
 
 if __name__ == "__main__":

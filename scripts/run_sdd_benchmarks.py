@@ -13,6 +13,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import time
 from collections.abc import Callable
@@ -26,6 +27,7 @@ from gcmts.core import SimpleTrainer, move_batch, save_training_report
 from gcmts.data.synthetic_sdd import MultiDomainGenerator
 from gcmts.evaluation.metrics import CDSMetric, MIGMetric
 from gcmts.evaluation.report import aggregate_rows, save_rows
+from gcmts.evaluation.stats import paired_wilcoxon_holm
 from gcmts.static_dynamic_disentanglement.base import BaseStaticDynamicDisentangler
 from gcmts.static_dynamic_disentanglement.methods import DANN, ERM, SYNC, VREx
 
@@ -58,6 +60,8 @@ class CaseResult:
     cds: float
     seconds: float
     device: str = "auto"
+    seed: int = -1
+    dataset: str = "multidomain"
 
 
 class _SplitGenerator:
@@ -197,6 +201,8 @@ def run_case(
         final_loss=history["loss"][-1] if history.get("loss") else float("nan"),
         seconds=seconds,
         device=str(resolved),
+        seed=seed,
+        dataset="multidomain",
         **scores,
     )
 
@@ -243,12 +249,35 @@ def configure_logging(out_dir: Path) -> None:
     ]
 
 
+def _report_stats(rows: list[dict[str, Any]], out_dir: Path) -> None:
+    """Holm-corrected paired Wilcoxon tests across methods for the key metrics."""
+    if not rows:
+        return
+    summary: dict[str, Any] = {}
+    logger.info("=== Holm-corrected paired Wilcoxon (paired by seed) ===")
+    for metric in ("ood_mse", "ood_mae", "domain_accuracy", "mig", "cds"):
+        comparisons = paired_wilcoxon_holm(rows, metric, seed_key="seed")
+        summary[metric] = [asdict(c) for c in comparisons]
+        for comparison in comparisons:
+            logger.info(
+                "%-16s %-10s vs %-10s n=%d p=%.4g p_holm=%.4g%s",
+                metric,
+                comparison.case_a,
+                comparison.case_b,
+                comparison.n_pairs,
+                comparison.p_value,
+                comparison.p_holm,
+                " *" if comparison.significant else "",
+            )
+    (out_dir / "sdd_stats.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run SDD benchmarks.")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--only", nargs="*", default=None)
-    parser.add_argument("--seeds", type=int, default=5, help="number of seeds")
+    parser.add_argument("--seeds", type=int, default=10, help="number of seeds")
     parser.add_argument("--out-dir", type=Path, default=Path("outputs"))
     args = parser.parse_args()
     configure_logging(args.out_dir)
@@ -263,6 +292,7 @@ def main() -> int:
                 seed=seed, save_curves=(seed == 0),
             )
             rows.append(asdict(result))
+            save_rows(rows, args.out_dir, stem="sdd_benchmarks")
     rows.append(asdict(oracle_result(args.out_dir)))
     save_rows(rows, args.out_dir, stem="sdd_benchmarks")
     logger.info(
@@ -285,6 +315,7 @@ def main() -> int:
             stat(metrics, "ood_mae"),
             stat(metrics, "mig"),
         )
+    _report_stats(rows, args.out_dir)
     return 0
 
 

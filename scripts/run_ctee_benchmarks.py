@@ -1,18 +1,22 @@
-"""Counterfactual / treatment-effect benchmarks on the harmonic oscillator.
+"""Counterfactual / treatment-effect benchmarks (harmonic + tumour-growth).
 
 Each representative estimator is trained on factual trajectories and evaluated
 against the generator's exact counterfactuals with PEHE, epsilon_ATE, CF MAE,
 MBE, MMD^2, and the three structural axioms (reconstruction, effectiveness,
-reversibility).
+reversibility). Two benchmarks with ground-truth counterfactuals are used: the
+damped harmonic oscillator and the tumour-growth simulator of Bica et al.
+(2020). Statistical tests are Holm-corrected paired Wilcoxon signed-rank tests
+on the per-seed rows.
 
 Usage::
 
-    uv run python scripts/run_ctee_benchmarks.py --device cuda
+    uv run python scripts/run_ctee_benchmarks.py --device cuda --seeds 10
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import time
 from collections.abc import Callable
@@ -23,6 +27,7 @@ from typing import Any
 import torch
 
 from gcmts.core import SimpleTrainer, move_batch, save_training_report
+from gcmts.data.semi_synthetic import TumourGrowthSimulator
 from gcmts.data.synthetic_effect import HarmonicOscillatorGenerator
 from gcmts.effect_estimation.base import BaseEffectEstimator
 from gcmts.effect_estimation.methods import CEPAE, CRN, GANITE, CaTSG
@@ -33,13 +38,93 @@ from gcmts.evaluation.metrics import (
     PEHEMetric,
 )
 from gcmts.evaluation.report import aggregate_rows, save_rows
+from gcmts.evaluation.stats import paired_wilcoxon_holm
 
 logger = logging.getLogger("gcmts.ctee")
+
+Generator = HarmonicOscillatorGenerator | TumourGrowthSimulator
+
+
+@dataclass
+class DatasetConfig:
+    name: str
+    observed_dim: int
+    treatment_dim: int
+    horizon: int
+    outcome_dim: int
+    make_generator: Callable[[int], Generator]
+
+
+DATASETS: dict[str, DatasetConfig] = {
+    "harmonic": DatasetConfig(
+        name="harmonic",
+        observed_dim=6,
+        treatment_dim=1,
+        horizon=24,
+        outcome_dim=0,
+        make_generator=lambda seed: HarmonicOscillatorGenerator(
+            n_units=3, observed_dim=6, horizon=24, seed=seed
+        ),
+    ),
+    "tumour": DatasetConfig(
+        name="tumour",
+        observed_dim=3,
+        treatment_dim=2,
+        horizon=15,
+        outcome_dim=0,
+        make_generator=lambda seed: TumourGrowthSimulator(horizon=15, seed=seed),
+    ),
+}
+
+# Representative methods per branch, matching the review's taxonomy:
+# GANITE (II.A observed-data adjustment), CRN (II.B balanced representation),
+# CEPAE (II.B disentangled entropy-penalised), CaTSG (II.C latent environments).
+METHODS: dict[str, tuple[Callable[[DatasetConfig], BaseEffectEstimator], int, str]] = {
+    "catsg": (
+        lambda d: CaTSG(
+            observed_dim=d.observed_dim,
+            treatment_dim=d.treatment_dim,
+            horizon=d.horizon,
+            n_steps=20,
+        ),
+        800,
+        "score-guided conditional diffusion (abduction via DDIM inversion)",
+    ),
+    "cepae": (
+        lambda d: CEPAE(
+            observed_dim=d.observed_dim,
+            treatment_dim=d.treatment_dim,
+            latent_dim=max(d.observed_dim, 4),
+        ),
+        500,
+        "variational autoencoder with adversarial conditional-entropy penalty",
+    ),
+    "crn": (
+        lambda d: CRN(
+            observed_dim=d.observed_dim,
+            treatment_dim=d.treatment_dim,
+            latent_dim=max(d.observed_dim, 4),
+            horizon=d.horizon,
+        ),
+        500,
+        "sequential latent-dynamics VAE (treatment enters the transition)",
+    ),
+    "ganite": (
+        lambda d: GANITE(
+            observed_dim=d.observed_dim,
+            treatment_dim=d.treatment_dim,
+            noise_dim=4,
+        ),
+        600,
+        "adversarial generator/discriminator with abducted noise",
+    ),
+}
 
 
 @dataclass
 class CaseConfig:
     name: str
+    dataset: DatasetConfig
     model_factory: Callable[[], BaseEffectEstimator]
     epochs: int
     note: str = ""
@@ -48,7 +133,9 @@ class CaseConfig:
 @dataclass
 class CaseResult:
     case: str
+    dataset: str
     method: str
+    seed: int
     epochs: int
     n_parameters: int
     final_loss: float
@@ -65,33 +152,25 @@ class CaseResult:
     device: str = "auto"
 
 
-def build_cases() -> list[CaseConfig]:
-    return [
-        CaseConfig(
-            name="catsg_harmonic",
-            model_factory=lambda: CaTSG(observed_dim=6, treatment_dim=1, horizon=24, n_steps=20),
-            epochs=800,
-            note="score-guided conditional diffusion (abduction via DDIM inversion)",
-        ),
-        CaseConfig(
-            name="cepae_harmonic",
-            model_factory=lambda: CEPAE(observed_dim=6, treatment_dim=1, latent_dim=4),
-            epochs=500,
-            note="variational autoencoder with adversarial conditional-entropy penalty",
-        ),
-        CaseConfig(
-            name="crn_harmonic",
-            model_factory=lambda: CRN(observed_dim=6, treatment_dim=1, latent_dim=6, horizon=24),
-            epochs=500,
-            note="sequential latent-dynamics VAE (treatment enters the transition)",
-        ),
-        CaseConfig(
-            name="ganite_harmonic",
-            model_factory=lambda: GANITE(observed_dim=6, treatment_dim=1, noise_dim=4),
-            epochs=600,
-            note="adversarial generator/discriminator with abducted noise",
-        ),
-    ]
+def build_cases(
+    datasets: list[str] | None = None, methods: list[str] | None = None
+) -> list[CaseConfig]:
+    cases: list[CaseConfig] = []
+    for dataset_name in datasets or list(DATASETS):
+        dataset = DATASETS[dataset_name]
+        for method_name, (factory, epochs, note) in METHODS.items():
+            if methods is not None and method_name not in methods:
+                continue
+            cases.append(
+                CaseConfig(
+                    name=f"{method_name}_{dataset_name}",
+                    dataset=dataset,
+                    model_factory=lambda d=dataset, f=factory: f(d),
+                    epochs=epochs,
+                    note=note,
+                )
+            )
+    return cases
 
 
 def _outcome(traj: torch.Tensor, dim: int) -> torch.Tensor:
@@ -99,7 +178,7 @@ def _outcome(traj: torch.Tensor, dim: int) -> torch.Tensor:
 
 
 def evaluate(
-    model: BaseEffectEstimator, generator: HarmonicOscillatorGenerator, device: torch.device
+    model: BaseEffectEstimator, generator: Generator, device: torch.device
 ) -> dict[str, float]:
     batch = move_batch(generator.sample(1024), device)
     action = batch.context["A"].to(device)
@@ -155,7 +234,7 @@ def run_case(
     logger.info("=" * 72)
     logger.info("CASE %s seed=%d | %s", cfg.name, seed, cfg.note)
     torch.manual_seed(seed)
-    generator = HarmonicOscillatorGenerator(n_units=3, observed_dim=6, horizon=24, seed=seed)
+    generator = cfg.dataset.make_generator(seed)
     model = cfg.model_factory()
     n_params = sum(p.numel() for p in model.parameters())
     exp_dir = out_dir / cfg.name
@@ -189,7 +268,9 @@ def run_case(
     )
     return CaseResult(
         case=cfg.name,
+        dataset=cfg.dataset.name,
         method=type(model).__name__,
+        seed=seed,
         epochs=cfg.epochs,
         n_parameters=n_params,
         final_loss=history["loss"][-1] if history.get("loss") else float("nan"),
@@ -209,16 +290,41 @@ def configure_logging(out_dir: Path) -> None:
     ]
 
 
+def _report_stats(rows: list[dict[str, Any]], out_dir: Path) -> None:
+    """Holm-corrected paired Wilcoxon tests per dataset for the key metrics."""
+    if not rows:
+        return
+    summary: dict[str, Any] = {}
+    logger.info("=== Holm-corrected paired Wilcoxon (paired by dataset, seed) ===")
+    for metric in ("pehe", "ate_error", "cf_mae"):
+        comparisons = paired_wilcoxon_holm(rows, metric, seed_key="seed")
+        summary[metric] = [asdict(c) for c in comparisons]
+        for comparison in comparisons:
+            logger.info(
+                "%-8s %-10s vs %-10s n=%d p=%.4g p_holm=%.4g%s",
+                metric,
+                comparison.case_a,
+                comparison.case_b,
+                comparison.n_pairs,
+                comparison.p_value,
+                comparison.p_holm,
+                " *" if comparison.significant else "",
+            )
+    (out_dir / "ctee_stats.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run CTEE benchmarks.")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--only", nargs="*", default=None)
-    parser.add_argument("--seeds", type=int, default=5, help="number of seeds")
+    parser.add_argument("--datasets", nargs="*", default=None)
+    parser.add_argument("--methods", nargs="*", default=None)
+    parser.add_argument("--seeds", type=int, default=10, help="number of seeds")
     parser.add_argument("--out-dir", type=Path, default=Path("outputs"))
     args = parser.parse_args()
     configure_logging(args.out_dir)
-    cases = build_cases()
+    cases = build_cases(args.datasets, args.methods)
     if args.only:
         cases = [c for c in cases if c.name in set(args.only)]
     rows: list[dict[str, Any]] = []
@@ -229,8 +335,12 @@ def main() -> int:
                 seed=seed, save_curves=(seed == 0),
             )
             rows.append(asdict(result))
+            # Incremental save: long runs remain analysable if interrupted.
+            save_rows(rows, args.out_dir, stem="ctee_benchmarks")
     save_rows(rows, args.out_dir, stem="ctee_benchmarks")
-    logger.info("%-18s %14s %14s %14s %14s", "case", "PEHE", "eATE", "CFMAE", "MBE")
+    logger.info(
+        "%-20s %14s %14s %14s %14s", "case", "PEHE", "eATE", "CFMAE", "MBE"
+    )
     aggregated = aggregate_rows(rows)
 
     def stat(metrics: dict[str, Any], name: str) -> str:
@@ -240,13 +350,14 @@ def main() -> int:
 
     for case, metrics in aggregated.items():
         logger.info(
-            "%-18s %14s %14s %14s %14s",
+            "%-20s %14s %14s %14s %14s",
             case,
             stat(metrics, "pehe"),
             stat(metrics, "ate_error"),
             stat(metrics, "cf_mae"),
             stat(metrics, "cf_mbe"),
         )
+    _report_stats(rows, args.out_dir)
     return 0
 
 
