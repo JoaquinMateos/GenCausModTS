@@ -24,6 +24,8 @@ __all__ = [
     "ExpFamilyPrior",
     "AffineCoupling",
     "RealNVP",
+    "CNNEncoder",
+    "CNNDecoder",
     "GradientReversal",
     "flatten_sequence",
     "unflatten_sequence",
@@ -309,6 +311,86 @@ class RealNVP(nn.Module):
         z, logdet = self.forward(x, cond)
         base = -0.5 * (z**2 + torch.log(torch.tensor(2 * torch.pi))).sum(dim=-1)
         return base + logdet
+
+
+class CNNEncoder(nn.Module):
+    """Convolutional encoder ``(B, C, H, W) -> (B, latent_dim)``.
+
+    Used by the Temporal Causal3DIdent image benchmark, where observations are
+    rendered frames rather than state vectors. Deterministic by default; the
+    output can be split into ``(mean, logvar)`` by a downstream method.
+    """
+
+    def __init__(
+        self,
+        in_channels: int = 3,
+        latent_dim: int = 16,
+        *,
+        channels: tuple[int, ...] = (32, 64, 128),
+        hidden_dim: int = 256,
+        activation: str = "silu",
+    ) -> None:
+        super().__init__()
+        act = _ACTIVATIONS[activation]
+        layers: list[nn.Module] = []
+        previous = in_channels
+        for width in channels:
+            layers.append(nn.Conv2d(previous, width, kernel_size=4, stride=2, padding=1))
+            layers.append(nn.GroupNorm(1, width))
+            layers.append(act())
+            previous = width
+        self.features = nn.Sequential(*layers)
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.head = MLP(previous, latent_dim, hidden_dims=(hidden_dim,), activation=activation)
+
+    def forward(self, x: Tensor) -> Tensor:
+        h = self.features(x)
+        h = self.pool(h).flatten(1)
+        return cast(Tensor, self.head(h))
+
+
+class CNNDecoder(nn.Module):
+    """Convolutional decoder ``(B, latent_dim) -> (B, C, image_size, image_size)``.
+
+    Inverse architecture of :class:`CNNEncoder`: a linear projection is reshaped
+    to a small spatial map and upsampled by transposed convolutions.
+    """
+
+    def __init__(
+        self,
+        latent_dim: int = 16,
+        out_channels: int = 3,
+        *,
+        image_size: int = 32,
+        channels: tuple[int, ...] = (128, 64, 32),
+        hidden_dim: int = 256,
+        activation: str = "silu",
+    ) -> None:
+        super().__init__()
+        act = _ACTIVATIONS[activation]
+        starting = image_size // (2 ** len(channels))
+        if starting < 1:
+            raise ValueError("image_size is too small for the decoder depth.")
+        self.image_size = image_size
+        self.starting = starting
+        self.project = MLP(latent_dim, channels[0] * starting * starting, hidden_dims=(hidden_dim,))
+        layers: list[nn.Module] = []
+        previous = channels[0]
+        for width in channels[1:]:
+            layers.append(
+                nn.ConvTranspose2d(previous, width, kernel_size=4, stride=2, padding=1)
+            )
+            layers.append(nn.GroupNorm(1, width))
+            layers.append(act())
+            previous = width
+        layers.append(
+            nn.ConvTranspose2d(previous, out_channels, kernel_size=4, stride=2, padding=1)
+        )
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, z: Tensor) -> Tensor:
+        h = self.project(z).reshape(z.shape[0], -1, self.starting, self.starting)
+        return cast(Tensor, self.layers(h))
 
 
 # ---------------------------------------------------------------------------

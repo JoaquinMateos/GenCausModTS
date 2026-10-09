@@ -9,12 +9,14 @@ re-exported here.
 from __future__ import annotations
 
 from itertools import permutations
-from typing import cast
 
+import numpy as np
 import torch
+from sklearn.linear_model import LassoLarsIC
+from sklearn.metrics import average_precision_score
 from torch import Tensor
 
-from gcmts.core.utils import lagged_adjacency_to_dag
+from gcmts.core.utils import hungarian_match, lagged_adjacency_to_dag
 
 __all__ = [
     "sample_dag",
@@ -23,7 +25,9 @@ __all__ = [
     "shd",
     "weighted_shd",
     "aligned_shd",
+    "latent_permutation",
     "estimate_latent_adjacency",
+    "edge_auprc",
     "topological_order",
     "lagged_adjacency_to_dag",
 ]
@@ -106,25 +110,71 @@ def weighted_shd(
     return float(((est != true).float() * weight).sum().item())
 
 
+def _sparse_lagged_coefficients(design: Tensor, target: Tensor, p: int) -> Tensor:
+    r"""Per-target sparse regression with debiasing on the selected support.
+
+    Follows the post-hoc graph-recovery protocol of TDRL and LEAP, which fit a
+    sparse predictor (LassoNet, hierarchical soft-thresholding) on the learned
+    latents and read the selected inputs off its support. We use the LassoLars
+    path with the BIC criterion (Zou, Hastie & Tibshirani, 2007), the standard
+    convex surrogate for that selection, and re-fit ordinary least squares on
+    the selected support to remove the :math:`\ell_1` shrinkage bias.
+
+    Both the design and each target are standardised column-wise first, so the
+    returned coefficients are scale-free and comparable across methods and
+    datasets (a fixed magnitude threshold is not meaningful otherwise).
+
+    Returns a ``(d * p, d)`` matrix whose entry ``(j * p + l, i)`` is the
+    coefficient of ``z_{j,t-1-l}`` in the regression for ``z_{i,t}``.
+    """
+    x_np = design.detach().cpu().double().numpy()
+    y_np = target.detach().cpu().double().numpy()
+    x_scale = x_np.std(axis=0, keepdims=True)
+    dead = x_scale.ravel() < 1e-8
+    x_np = (x_np - x_np.mean(axis=0, keepdims=True)) / np.where(dead, 1.0, x_scale)
+    x_np[:, dead] = 0.0
+    coefficients = np.zeros((x_np.shape[1], y_np.shape[1]), dtype=np.float64)
+    for i in range(y_np.shape[1]):
+        y = y_np[:, i]
+        scale = float(y.std())
+        if scale < 1e-8:
+            continue
+        y = (y - y.mean()) / scale
+        selector = LassoLarsIC(criterion="bic").fit(x_np, y)
+        support = np.flatnonzero(np.abs(selector.coef_) > 0.0)
+        if support.size == 0:
+            continue
+        debiased, *_ = np.linalg.lstsq(x_np[:, support], y, rcond=None)
+        coefficients[support, i] = debiased
+    return torch.from_numpy(coefficients).to(design.dtype)
+
+
 def estimate_latent_adjacency(
     z: Tensor,
     *,
     max_lag: int = 1,
-    threshold: float = 0.1,
+    threshold: float = 0.0,
     standardize: bool = True,
 ) -> Tensor:
-    """Fit a sparse lagged latent graph from trajectories by least squares.
+    """Recover a sparse lagged latent graph from trajectories.
 
-    This is the post-hoc protocol used by TDRL's paper ("we fit a sparse causal
-    graph on the learned latents"): regress ``z_t`` on ``z_{t-1:t-p}`` after
-    standardising each latent, then keep the coefficients whose magnitude exceeds
-    ``threshold``. The result is an ``(d, d, p)`` tensor where ``A[i, j, l] != 0``
-    means ``z_{i,t}`` depends on ``z_{j,t-1-l}``.
+    Post-hoc protocol of TDRL and LEAP (LassoNet on the learned latents): each
+    target latent ``z_{i,t}`` is regressed on all lagged latents
+    ``{z_{j,t-1-l}}`` after standardisation; the support is selected with a
+    BIC-penalised Lasso path and the coefficients are debiased by ordinary
+    least squares on that support. No untuned magnitude cutoff is applied by
+    default (``threshold=0``), because the generator edge weights are uniform
+    in ``(0, mechanism_scale)`` and a fixed cutoff silently deletes weak edges.
+
+    The result is an ``(d, d, p)`` tensor where ``A[i, j, l] != 0`` means
+    ``z_{i,t}`` depends on ``z_{j,t-1-l}``. Entries on the selected support
+    carry the debiased regression coefficient; everything else is exactly
+    zero.
 
     Args:
         z: latents of shape ``(B, T, d)``.
         max_lag: temporal lag ``p``.
-        threshold: absolute coefficient threshold on standardised latents.
+        threshold: optional extra magnitude cutoff applied after debiasing.
         standardize: center/scale each latent across batch and time first.
     """
     if z.ndim != 3:
@@ -140,14 +190,54 @@ def estimate_latent_adjacency(
         zc = (z - mean) / scale
     features = torch.stack(
         [zc[:, p - 1 - lag : time - 1 - lag, :] for lag in range(p)], dim=-1
-    )  # (B, T-p, d, p)
+    )  # (B, T-p, d, p); column index j * p + l
     design = features.reshape(-1, dim * p)
     target = zc[:, p:, :].reshape(-1, dim)
-    coef = torch.linalg.lstsq(design, target).solution  # (d*p, d)
-    adj = coef.T.reshape(dim, p, dim).permute(0, 2, 1).contiguous()  # (d, d, p)
+    coef = _sparse_lagged_coefficients(design, target, p)  # (d*p, d)
+    adj = coef.reshape(dim, p, dim).permute(2, 0, 1).contiguous()  # (d, d, p)
     if threshold > 0:
         adj = torch.where(adj.abs() > threshold, adj, torch.zeros_like(adj))
-    return cast(Tensor, adj.to(z.dtype))
+    return adj.to(z.dtype)
+
+
+def latent_permutation(z_pred: Tensor, z_true: Tensor) -> Tensor:
+    """Match predicted latent coordinates to ground-truth factors.
+
+    Returns ``perm`` of shape ``(d,)`` with ``perm[a]`` the predicted-latent
+    index assigned to true factor ``a``, obtained by Hungarian matching on the
+    absolute Pearson correlation matrix. TDRL and LEAP align structural errors
+    with exactly this assignment (the same one used by MCC), so applying it
+    before an SHD/WSHD/AUPRC comparison makes those metrics permutation
+    invariant without an exhaustive graph search.
+    """
+    if z_pred.shape[-1] != z_true.shape[-1]:
+        raise ValueError("Latent and ground-truth dimensions must match.")
+    pred = z_pred.reshape(-1, z_pred.shape[-1]).detach().cpu().float()
+    true = z_true.reshape(-1, z_true.shape[-1]).detach().cpu().float()
+    if pred.shape[0] != true.shape[0]:
+        raise ValueError("Latents and factors must share a sample axis.")
+    pred = (pred - pred.mean(0)) / (pred.std(0) + 1e-8)
+    true = (true - true.mean(0)) / (true.std(0) + 1e-8)
+    corr = (true.T @ pred) / pred.shape[0]
+    _, col = hungarian_match(-corr.abs())
+    return col.long()
+
+
+def edge_auprc(adj_est: Tensor, adj_true: Tensor, *, threshold: float = 1e-3) -> float:
+    """Threshold-agnostic edge recovery: average precision of edge scores.
+
+    Following CaDRe, structural recovery is reported both as a thresholded SHD
+    and as a ranking score: the absolute estimated coefficients are ranked
+    against the binarised ground-truth edges and scored with average precision
+    (area under the precision--recall curve). Unlike SHD this does not depend
+    on a binarisation cutoff. Returns ``nan`` when the ground truth has no
+    edges or is complete.
+    """
+    truth = (adj_true.abs() > threshold).reshape(-1).detach().cpu().numpy()
+    scores = adj_est.abs().reshape(-1).detach().cpu().numpy()
+    if truth.size == 0 or truth.all() or not truth.any():
+        return float("nan")
+    return float(average_precision_score(truth, scores))
 
 
 def aligned_shd(
@@ -160,24 +250,55 @@ def aligned_shd(
     """SHD/WSHD minimised over latent permutations.
 
     Latent-variable models recover their factors only up to a permutation, so a
-    raw comparison is meaningless; we align the estimated graph to the ground
-    truth by the permutation minimising the distance (exhaustive for ``d <= 7``,
-    identity fallback otherwise). ``weighted=True`` uses :func:`weighted_shd`.
+    raw comparison is meaningless. The exact minimum is found by exhaustive
+    enumeration for ``d <= 8``; for larger dimensions a deterministic
+    swap-based hill climb is used instead (exactness is traded for tractability
+    and the routine is documented accordingly). ``weighted=True`` uses
+    :func:`weighted_shd`. When the true latents are available, prefer aligning
+    once with :func:`latent_permutation`, which is the convention used by the
+    source methods and is also valid for ``d > 8``.
     """
     if adj_est.shape != adj_true.shape:
         raise ValueError("Adjacency matrices must share a shape.")
     dim = int(adj_est.shape[0])
-    perms = permutations(range(dim)) if dim <= 7 else [tuple(range(dim))]
-    best = float("inf")
-    for perm in perms:
+
+    def score(perm: tuple[int, ...]) -> float:
         index = torch.tensor(perm, device=adj_est.device)
         permuted = adj_est[index][:, index]
-        value = (
+        return (
             weighted_shd(permuted, adj_true, threshold=threshold)
             if weighted
             else float(shd(permuted, adj_true, threshold=threshold))
         )
-        best = min(best, value)
+
+    if dim <= 8:
+        return min(score(perm) for perm in permutations(range(dim)))
+
+    from scipy.optimize import quadratic_assignment
+
+    est_np = adj_est.abs().sum(-1).detach().cpu().numpy()
+    true_np = adj_true.abs().sum(-1).detach().cpu().numpy()
+    result = quadratic_assignment(
+        true_np, est_np, method="faq", options={"maximize": True, "rng": 0}
+    )
+    col = np.asarray(result.col_ind, dtype=int)
+    candidates = [
+        tuple(int(v) for v in col),
+        tuple(int(v) for v in np.argsort(col)),
+        tuple(range(dim)),
+    ]
+    best_perm = min(candidates, key=score)
+    best = score(best_perm)
+    improved = True
+    while improved:
+        improved = False
+        for i in range(dim):
+            for j in range(i + 1, dim):
+                candidate = list(best_perm)
+                candidate[i], candidate[j] = candidate[j], candidate[i]
+                value = score(tuple(candidate))
+                if value < best - 1e-12:
+                    best, best_perm, improved = value, tuple(candidate), True
     return best
 
 
