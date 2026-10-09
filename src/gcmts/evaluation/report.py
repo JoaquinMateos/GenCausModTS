@@ -11,7 +11,7 @@ import numpy as np
 
 __all__ = ["aggregate_rows", "save_rows", "paired_wilcoxon"]
 
-_NON_METRIC = {"epochs", "n_parameters", "seconds"}
+_NON_METRIC = {"epochs", "n_parameters", "seconds", "seed"}
 
 
 def paired_wilcoxon(

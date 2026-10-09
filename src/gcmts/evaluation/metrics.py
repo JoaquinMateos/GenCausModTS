@@ -14,7 +14,8 @@ from sklearn.metrics import r2_score
 from sklearn.model_selection import train_test_split
 from torch import Tensor
 
-from gcmts.core.graph_ops import aligned_shd
+from gcmts.core.graph_ops import aligned_shd, edge_auprc
+from gcmts.core.solvers import bures_w2
 from gcmts.core.utils import hungarian_match, mcc
 
 __all__ = [
@@ -29,11 +30,16 @@ __all__ = [
     "DCIInformativenessMetric",
     "SHDMetric",
     "WSHDMetric",
+    "EdgeAUPRCMetric",
+    "TripletDistanceMetric",
+    "TwoSampleDiscriminatorMetric",
     "PEHEMetric",
     "ATEMetric",
+    "PolicyRiskMetric",
     "CFMAEMetric",
     "MBEMetric",
     "MMD2Metric",
+    "JFTSDMetric",
     "OODMSEMetric",
     "DomainAccuracyMetric",
     "MIGMetric",
@@ -103,11 +109,16 @@ def _default_registry() -> MetricRegistry:
     reg.register(DCIInformativenessMetric())
     reg.register(SHDMetric())
     reg.register(WSHDMetric())
+    reg.register(EdgeAUPRCMetric())
+    reg.register(TripletDistanceMetric())
+    reg.register(TwoSampleDiscriminatorMetric())
     reg.register(PEHEMetric())
     reg.register(ATEMetric())
+    reg.register(PolicyRiskMetric())
     reg.register(CFMAEMetric())
     reg.register(MBEMetric())
     reg.register(MMD2Metric())
+    reg.register(JFTSDMetric())
     reg.register(OODMSEMetric())
     reg.register(DomainAccuracyMetric())
     reg.register(MIGMetric())
@@ -298,6 +309,141 @@ class WSHDMetric(Metric):
         return MetricResult(self.name, value, self.level, self.higher_is_better)
 
 
+class EdgeAUPRCMetric(Metric):
+    """Threshold-agnostic structural recovery: average precision of edge scores.
+
+    Ranks the absolute estimated edge coefficients against the binarised
+    ground-truth edges and returns the area under the precision--recall curve
+    (CaDRe's threshold-agnostic structural metric). Higher is better and
+    ``nan`` is returned when the ground truth has no edges or is complete.
+    Unlike :class:`SHDMetric` this metric does not search over permutations;
+    callers should apply the Hungarian assignment from
+    :func:`gcmts.core.graph_ops.latent_permutation` first, as the shared CRL
+    suites do.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("edge_auprc", "L1_structure", higher_is_better=True)
+
+    def __call__(self, prediction: Tensor, target: Tensor) -> MetricResult:
+        value = edge_auprc(prediction, target)
+        return MetricResult(self.name, value, self.level, self.higher_is_better)
+
+
+def _flatten_leading(tensor: Tensor) -> Tensor:
+    """Flatten every leading dimension into a single sample axis."""
+    if tensor.ndim < 2:
+        raise ValueError("Expected at least a sample and a feature dimension.")
+    return tensor.reshape(-1, tensor.shape[-1])
+
+
+def _covariance(x: Tensor) -> Tensor:
+    """Unbiased covariance of a ``(N, e)`` sample matrix."""
+    centered = x - x.mean(0, keepdim=True)
+    return (centered.T @ centered) / max(x.shape[0] - 1, 1)
+
+
+class TripletDistanceMetric(Metric):
+    r"""Triplet distance: isolation of an intervened factor.
+
+    For an intervention on factor ``a`` the *matched* latent coordinate
+    ``pi(a)`` should move, while every other latent coordinate stays fixed.
+    With ``d_self = |z_before_{pi(a)} - z_after_{pi(a)}|`` and
+    ``d_other = mean_{k != pi(a)} |z_before_k - z_after_k|`` the per-sample
+    score is ``d_other / (d_self + d_other)``: zero when the intervention is
+    perfectly isolated, about ``0.5`` when the change is spread uniformly
+    (chance). It is reported as a distance, matching the direction of the
+    source evaluation (CITRIS reports distances with optimum zero), and not as
+    the isolation ratio of the earlier implementation.
+
+    Inputs follow the CITRIS convention: ``prediction`` is a dictionary with
+    ``before`` and ``after`` latent tensors and an intervention-target tensor
+    ``targets`` (either an index vector ``(N,)`` or a binary multi-hot matrix
+    ``(N, K)``); ``target`` is the true factor tensor of the *factual* samples,
+    used only to match latent coordinates to causal variables (Hungarian
+    assignment on absolute correlations, valid up to permutation).
+    """
+
+    def __init__(self) -> None:
+        super().__init__("triplet", "L2_intervention", higher_is_better=False)
+
+    def __call__(self, prediction: dict[str, Tensor], target: Tensor) -> MetricResult:
+        before = _flatten_leading(prediction["before"])
+        after = _flatten_leading(prediction["after"])
+        targets = prediction["targets"].reshape(-1)
+        truth = _flatten_leading(target)
+        if before.shape != after.shape:
+            raise ValueError("'before' and 'after' latents must share a shape.")
+        if truth.shape[0] != before.shape[0]:
+            raise ValueError("Target factors and latents must share a sample axis.")
+
+        truth_std = (truth - truth.mean(0)) / (truth.std(0) + 1e-8)
+        pred_std = (before - before.mean(0)) / (before.std(0) + 1e-8)
+        corr = (truth_std.T @ pred_std) / truth.shape[0]
+        _, matched = hungarian_match(-corr.abs())
+        matched = matched.cpu()
+
+        if targets.ndim == 1 and targets.numel() == before.shape[0]:
+            index_tensor = targets.long()
+        else:
+            binary = prediction["targets"].reshape(before.shape[0], -1)
+            counts = binary.sum(dim=-1)
+            valid = counts == 1
+            index_tensor = binary.argmax(dim=-1)[valid]
+            before = before[valid]
+            after = after[valid]
+
+        delta = (after - before).abs()
+        scores = []
+        for row, variable in zip(delta, index_tensor.tolist(), strict=True):
+            coordinate = int(matched[variable].item())
+            d_self = float(row[coordinate].item())
+            others = [float(row[k].item()) for k in range(row.numel()) if k != coordinate]
+            d_other = float(np.mean(others)) if others else 0.0
+            scores.append(d_other / (d_self + d_other + 1e-8))
+        value = float(np.mean(scores)) if scores else float("nan")
+        return MetricResult(self.name, value, self.level, self.higher_is_better)
+
+
+class TwoSampleDiscriminatorMetric(Metric):
+    r"""Two-sample discriminator accuracy between real and generated samples.
+
+    A binary classifier (standardised logistic regression) is trained on a
+    random split of real interventional samples (``target``) versus generated
+    ones (``prediction``); the reported value is ``|accuracy - 0.5|``, which is
+    ``0`` when the two distributions are indistinguishable (the ideal, i.e.
+    accuracy at chance) and ``0.5`` when perfectly separable. Lower is better.
+    The paper reports this separability as the deviation of the discriminator
+    accuracy from ``50\%``.
+    """
+
+    def __init__(self, *, test_size: float = 0.5, seed: int = 0) -> None:
+        super().__init__("two_sample", "L2_intervention", higher_is_better=False)
+        self.test_size = test_size
+        self.seed = seed
+
+    def __call__(self, prediction: Tensor, target: Tensor) -> MetricResult:
+        from sklearn.linear_model import LogisticRegression
+
+        generated = _flatten_leading(prediction).detach().cpu().numpy()
+        real = _flatten_leading(target).detach().cpu().numpy()
+        n = min(generated.shape[0], real.shape[0])
+        if n < 20:
+            return MetricResult(self.name, float("nan"), self.level, self.higher_is_better)
+        generated, real = generated[:n], real[:n]
+        features = np.concatenate([real, generated], axis=0)
+        labels = np.concatenate([np.zeros(n), np.ones(n)], axis=0)
+        features = (features - features.mean(0)) / (features.std(0) + 1e-8)
+        x_train, x_test, y_train, y_test = train_test_split(
+            features, labels, test_size=self.test_size, random_state=self.seed, stratify=labels
+        )
+        classifier = LogisticRegression(max_iter=1000)
+        classifier.fit(x_train, y_train)
+        accuracy = float(classifier.score(x_test, y_test))
+        value = abs(accuracy - 0.5)
+        return MetricResult(self.name, value, self.level, self.higher_is_better)
+
+
 # --- Effect-estimation metrics -----------------------------------------------
 
 class PEHEMetric(Metric):
@@ -323,6 +469,35 @@ class ATEMetric(Metric):
         ate_true = target.mean().item()
         return MetricResult(
             self.name, abs(ate_pred - ate_true), self.level, self.higher_is_better
+        )
+
+
+class PolicyRiskMetric(Metric):
+    r"""Policy risk of the treatment rule induced by an estimated effect.
+
+    For a threshold rule :math:`\pi(x) = 1\{\hat\tau(x) > 0\}` the policy risk is
+    the expected outcome under that rule,
+    :math:`\mathbb E[Y(\pi(X))] = \frac1N\sum_i [\pi_i y_i(1) + (1-\pi_i)
+    y_i(0)]`, evaluated with the potential outcomes that the factual outcome and
+    its counterfactual expose. ``prediction`` is the estimated effect
+    :math:`\hat\tau` and ``target`` a dictionary with ``yf``, ``t`` and ``ycf``.
+    Lower is better (the objective is to minimise the expected outcome).
+    """
+
+    def __init__(self) -> None:
+        super().__init__("policy_risk", "L3_counterfactual", higher_is_better=False)
+
+    def __call__(self, prediction: Tensor, target: dict[str, Tensor]) -> MetricResult:
+        tau = prediction.reshape(-1)
+        factual = target["yf"].reshape(-1)
+        counterfactual = target["ycf"].reshape(-1)
+        treatment = target["t"].reshape(-1)
+        decision = (tau > 0).float()
+        effect_one = torch.where(treatment > 0, factual, counterfactual)
+        effect_zero = torch.where(treatment > 0, counterfactual, factual)
+        outcome = decision * effect_one + (1.0 - decision) * effect_zero
+        return MetricResult(
+            self.name, float(outcome.mean().item()), self.level, self.higher_is_better
         )
 
 
@@ -376,9 +551,36 @@ class MMD2Metric(Metric):
         return MetricResult(self.name, float(value), self.level, self.higher_is_better)
 
 
+class JFTSDMetric(Metric):
+    r"""Joint Fr\'echet time-series distance (J-FTSD).
+
+    ``||mu_r - mu_g||^2 + Tr(Sigma_r + Sigma_g - 2 (Sigma_r Sigma_g)^{1/2})``
+    between the Gaussian fits of the real and generated joint
+    trajectory--context embeddings (introduced by Narasimhan et al., 2024 and
+    adopted by CaTSG). Inputs are ``(N, e)`` joint embeddings; lower is better.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("jftsd", "L3_counterfactual", higher_is_better=False)
+
+    def __call__(self, prediction: Tensor, target: Tensor) -> MetricResult:
+        real = _flatten_leading(target).detach().float()
+        generated = _flatten_leading(prediction).detach().float()
+        n = min(real.shape[0], generated.shape[0])
+        real, generated = real[:n], generated[:n]
+        if n < 4:
+            return MetricResult(self.name, float("nan"), self.level, self.higher_is_better)
+        value = bures_w2(
+            real.mean(0, keepdim=True),
+            _covariance(real).unsqueeze(0),
+            generated.mean(0, keepdim=True),
+            _covariance(generated).unsqueeze(0),
+        )
+        return MetricResult(self.name, float(value.item()), self.level, self.higher_is_better)
+
+
 class OODMSEMetric(Metric):
     """Out-of-distribution mean squared error."""
-
     def __init__(self) -> None:
         super().__init__("ood_mse", "L1_generalisation", higher_is_better=False)
 
