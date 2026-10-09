@@ -233,7 +233,8 @@ class DANN(_BaseDisentangler):
     """Domain-adversarial outcome predictor.
 
     The representation used for the outcome is trained to be domain-invariant
-    (Ganin et al., 2015; the ``UDA`` sub-taxonomy). Because the causal factors
+    (Ganin et al., 2015; the ``UDA`` method of the static--dynamic sub-branch,
+    CRL I.B.2). Because the causal factors
     are invariant by construction and the spurious ones are domain-specific,
     invariance alone discards the shortcut and transfers to unseen domains.
     """

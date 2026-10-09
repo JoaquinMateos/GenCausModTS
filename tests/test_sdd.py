@@ -18,6 +18,17 @@ def test_multidomain_generator_shapes_and_domains():
     assert batch.outcome is not None and batch.outcome.shape == (16,)
 
 
+def test_multidomain_generator_stable_across_seeds():
+    for seed in range(10):
+        generator = MultiDomainGenerator(n_domains=5, observed_dim=8, horizon=12, seed=seed)
+        block = generator.causal_coeff[:, generator.static_dim :]
+        radius = float(torch.linalg.eigvals(block).abs().max())
+        assert radius <= 0.6 + 1e-5
+        batch = generator.sample(256, domains=[0, 1, 2, 3])
+        assert torch.isfinite(batch.x).all()
+        assert float(batch.x.std()) < 50.0
+
+
 def test_sdd_methods_forward_loss_and_prediction():
     generator = MultiDomainGenerator(n_domains=5, observed_dim=8, horizon=10, seed=0)
     batch = generator.sample(8)
