@@ -56,5 +56,8 @@ outputs_*/
 wandb/
 lightning_logs/
 
-# downloaded real datasets (see scripts/download_datasets.py)
+# downloaded / generated datasets (see scripts/download_datasets.py)
 data/real/
+data/semi_synthetic/
+data/generated/
+data/acic/

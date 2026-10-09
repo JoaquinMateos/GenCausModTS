@@ -35,6 +35,7 @@ dependencies = [
     "pandas>=2.2",
     "pydantic>=2.9",
     "matplotlib>=3.9",
+    "scikit-posthocs>=0.9",
 ]
 
 [project.optional-dependencies]

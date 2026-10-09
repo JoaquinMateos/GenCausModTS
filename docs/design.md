@@ -5,26 +5,45 @@ benchmark suite matching the review paper.
 
 ## 0. Status
 
-Core is implemented and all five **Identifiable CRL sub-taxonomies** are covered:
+Core is implemented and all five **CRL branches** are covered:
 
-| Sub-taxonomy | Method | Module | Notes |
+| Branch | Method | Module | Notes |
 | --- | --- | --- | --- |
-| Foundations | iVAE | `methods/ivae.py` | conditional prior `p(z\|u)` |
-| Temporal & Sequential | LEAP | `methods/leap.py` | temporal iVAE, causal-process prior |
-| Temporal & Sequential | TDRL | `methods/tdrl.py` | fix/changing/observation latent blocks |
-| Temporal & Sequential | NCTRL | `methods/nctrl.py` | HMM regimes, exact forward-algorithm marginalisation |
-| Temporal & Sequential | Slow Flows | `methods/slow_flows.py` | volume-preserving RealNVP + SFA prior |
-| Intervention-Conditioned | CITRIS | `methods/citris.py` | invertible AE + intervention prior + adversarial shared group |
-| Latent Hierarchical | MOSAIC | `methods/mosaic.py` | sparse additive decoder, ANOVA module supports |
-| Continuous-Time SDEs | CEGEN | `methods/cegen.py` | Deep Euler + conditional W2 (Bures) |
+| I.A Temporal structure | Slow Flows | `methods/slow_flows.py` | volume-preserving RealNVP + SFA prior |
+| I.A Temporal structure | CEGEN | `methods/cegen.py` | Deep Euler + conditional W2 (Bures) |
+| I.B Non-stationarity & environment shift | LEAP | `methods/leap.py` | temporal iVAE, causal-process prior |
+| I.B Non-stationarity & environment shift | TDRL | `methods/tdrl.py` | fix/changing/observation latent blocks |
+| I.B Non-stationarity & environment shift | NCTRL | `methods/nctrl.py` | HMM regimes, exact forward-algorithm marginalisation |
+| I.C Observed auxiliary variables | iVAE | `methods/ivae.py` | conditional prior `p(z\|u)` |
+| I.D Recorded interventions | CITRIS | `methods/citris.py` | invertible AE + intervention prior + adversarial shared group |
+| I.E Structural & functional constraints | MOSAIC | `methods/mosaic.py` | sparse additive decoder, ANOVA module supports |
 
 Run `uv run python scripts/taxonomy_coverage.py` to check coverage against the
-LaTeX taxonomy table (CRL: 5/5).
+LaTeX taxonomy table (CRL: 5/5 branches).
 
 Core building blocks: `core/backbones.py` (MLP, GaussianHead, ExpFamilyPrior,
-RealNVP, GradientReversal, context helpers), `core/graph_ops.py` (DAG sampling,
-NOTEARS acyclicity, SHD), `core/solvers.py` (Euler–Maruyama, Bures/W2),
-`core/trainer.py` (`SimpleTrainer` with logging).
+RealNVP, CNN encoder/decoder, GradientReversal, context helpers),
+`core/graph_ops.py` (DAG sampling, NOTEARS acyclicity, SHD),
+`core/solvers.py` (Euler–Maruyama, Bures/W2), `core/trainer.py`
+(`SimpleTrainer` with logging).
+
+Datasets with ground truth (rule R1): NP/VAR, CartPole, Causal3DIdent factor
+process, the Voronoi/Causal Pinball SCM (`data/voronoi.py`), the tumour-growth
+simulator (`data/semi_synthetic.py::TumourGrowthSimulator`), the IHDP
+loader (100 replications), the ACIC loader, and a differentiable
+Causal3DIdent image surrogate with known factors and interventions
+(`data/causal3dident.py`).
+
+Evaluation beyond mean/std: `evaluation/stats.py` implements Holm-corrected
+paired Wilcoxon tests, the Friedman omnibus test, the Nemenyi post-hoc test with
+critical difference and Demsar-style CD diagrams. The registry adds the
+intervention-recovery metrics `triplet` (isolation of an intervened factor) and
+`two_sample` (discriminator accuracy, target 50%).
+
+Benchmarks: `scripts/run_crl_shared.py` (shared suites + an 18-problem
+configuration grid with Friedman/Nemenyi reporting),
+`scripts/run_ctee_benchmarks.py` (harmonic + tumour, Holm-corrected tests),
+`scripts/run_sdd_benchmarks.py`, `scripts/make_paper_tables.py` (LaTeX tables).
 
 ## 0b. Simple benchmark results
 
@@ -83,8 +102,8 @@ gcmts/
 │   ├── base.py
 │   ├── methods/         # implemented: iVAE, LEAP, TDRL, NCTRL, SlowFlows,
 │   │                    #   CITRIS, MOSAIC, CEGEN
-│   │                    # planned: CtrlNS, IDOL, DMM, SNICA, iCITRIS,
-│   │                    #   hierarchical discovery, APPEX
+│   │                    # planned: CtrlNS, CaRiNG, IDOL, DMM, SNICA, iCITRIS,
+│   │                    #   diff. causal discovery/CHiLD, APPEX
 │   └── losses/          # (planned) ELBO, sparsity, contrastive
 ├── effect_estimation/
 │   ├── base.py
@@ -95,6 +114,8 @@ gcmts/
 │   ├── base.py
 │   ├── methods/         # SYNC, DAG-VAE, GCIM, UDA, CaDRe
 │   └── losses/          # MI penalties, domain-confusion, sparsity
+│                        # (the static--dynamic sub-branch, CRL I.B.2, plus
+│                        #  invariant-prediction baselines DANN/VREx/ERM)
 ├── data/
 │   ├── synthetic.py     # VAR/NP, Voronoi/Causal3DIdent-like, harmonic,
 │   │                    #   market/SDE simulators
@@ -144,16 +165,17 @@ Phase D — Statistical reporting:
 Done:
 - Core: `backbones.py`, `graph_ops.py`, `solvers.py`, `trainer.py`.
 - Methods iVAE, LEAP, TDRL, NCTRL, Slow Flows, CITRIS, MOSAIC and CEGEN, all
-  wired to `CrlBenchmarkRunner` (all five CRL sub-taxonomies covered).
+  wired to `CrlBenchmarkRunner` (all five CRL branches covered).
 - `data/synthetic.py` — nonlinear ICA, temporal nonlinear, interventional,
   TDRL/NCTRL models, slow-feature and linear-SDE generators.
 - Benchmark and taxonomy-coverage scripts; tests; mypy-strict and ruff clean.
 
 Next:
-1. Second representatives per sub-taxonomy: iCITRIS (instantaneous DAG), APPEX
-   (linear-SDE identification from snapshots), and a hierarchical method.
+1. Second representatives per branch: iCITRIS (instantaneous DAG, I.D), APPEX
+   (linear-SDE identification from snapshots, I.A), CaRiNG (non-invertible
+   mixing, I.A), and a hierarchical/structural method (I.E).
 2. Counterfactual and treatment-effect methods (paradigm II).
-3. Static-dynamic disentanglement methods (paradigm III).
+3. Static-dynamic disentanglement methods (CRL sub-branch I.B.2).
 4. Real-data loaders and CI-style regression tests.
 
 ## 6. Python 3.14 opportunities
