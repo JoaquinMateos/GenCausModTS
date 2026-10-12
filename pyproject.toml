@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A benchmark library for generative causal modelling of time series: identifiable causal representation learning, counterfactual and treatment-effect estimation, and static-dynamic disentanglement."
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.14"
+requires-python = ">=3.14,<3.15"
 authors = [
     { name = "Joaquín Mateos", email = "joaquin.mateos@uco.es" },
     { name = "Antonio R. Moya", email = "amoya@uco.es" },
@@ -50,6 +50,14 @@ dev = [
 docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
+]
+real = [
+    "xarray>=2024.1",
+    "netCDF4>=1.7",
+    "zarr>=2.18",
+    "anndata>=0.11",
+    "h5py>=3.11",
+    "nibabel>=5.3",
 ]
 
 [project.urls]
