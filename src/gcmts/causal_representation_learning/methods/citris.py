@@ -179,6 +179,11 @@ class CITRIS(BaseCausalRepresentationLearner):
         interventions = None
         if batch.context is not None and "I" in batch.context:
             interventions = batch.context["I"].to(x.device)
+            if interventions.ndim != 3 or interventions.shape[-1] != self.n_vars:
+                raise ValueError(
+                    "CITRIS expects intervention targets of shape (B, T, n_vars); "
+                    f"got {tuple(interventions.shape)} for n_vars={self.n_vars}."
+                )
 
         zeros = torch.zeros(dim, device=x.device, dtype=x.dtype)
         initial_log_prob = gaussian_logpdf(z_seq[:, 0], zeros, zeros)

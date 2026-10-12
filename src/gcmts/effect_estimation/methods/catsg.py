@@ -29,12 +29,13 @@ __all__ = ["CaTSG"]
 
 
 def _sinusoidal(positions: Tensor, dim: int) -> Tensor:
-    half = dim // 2
+    half = (dim + 1) // 2
     freqs = torch.exp(
         -math.log(10000.0) * torch.arange(half, device=positions.device) / max(half, 1)
     )
     angles = positions.float().unsqueeze(-1) * freqs.unsqueeze(0)
-    return torch.cat([angles.sin(), angles.cos()], dim=-1)
+    embedding = torch.cat([angles.sin(), angles.cos()], dim=-1)
+    return embedding[..., :dim]
 
 
 class CaTSG(BaseEffectEstimator):
@@ -148,6 +149,10 @@ class CaTSG(BaseEffectEstimator):
         )
 
     def forward(self, batch: Batch) -> dict[str, Tensor]:
+        if batch.x.shape[1] != self.horizon:
+            raise ValueError(
+                f"CaTSG was built for horizon={self.horizon} but received T={batch.x.shape[1]}."
+            )
         action = self._actions(batch)
         flat = batch.x.reshape(batch.x.shape[0], -1)
         step = torch.randint(0, self.n_steps, (flat.shape[0],), device=flat.device)

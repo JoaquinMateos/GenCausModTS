@@ -118,6 +118,8 @@ class SimpleTrainer(BaseTrainer):
         self.generator = (
             torch.Generator().manual_seed(seed) if seed is not None else None
         )
+        self.seed = seed
+        self._iterators: dict[int, Any] = {}
 
     def _build_scheduler(
         self, optimiser: torch.optim.Optimizer
@@ -177,6 +179,8 @@ class SimpleTrainer(BaseTrainer):
         device = self._device_for(model)
         model.to(device)
         model.train()
+        if self.seed is not None:
+            torch.manual_seed(self.seed)
         optimiser = torch.optim.Adam(
             model.parameters(), lr=self.lr, weight_decay=self.weight_decay
         )
@@ -215,7 +219,7 @@ class SimpleTrainer(BaseTrainer):
                 if not torch.isfinite(loss):
                     logger.warning("Non-finite loss at epoch %d; skipping step.", epoch)
                     optimiser.zero_grad(set_to_none=True)
-                    break
+                    continue
                 optimiser.zero_grad(set_to_none=True)
                 loss.backward()  # type: ignore[no-untyped-call]
                 if self.grad_clip is not None:
@@ -281,7 +285,16 @@ class SimpleTrainer(BaseTrainer):
             return _subset_batch(data, indices)
         if hasattr(data, "sample"):
             return cast(Batch, data.sample(self.batch_size))
-        batch = next(iter(data))
+        iterator = self._iterators.get(id(data))
+        if iterator is None:
+            iterator = iter(data)
+            self._iterators[id(data)] = iterator
+        try:
+            batch = next(iterator)
+        except StopIteration:
+            iterator = iter(data)
+            self._iterators[id(data)] = iterator
+            batch = next(iterator)
         if not isinstance(batch, Batch):
             raise TypeError("Data loader must yield gcmts.typing.Batch objects.")
         return batch

@@ -49,6 +49,14 @@ class DatasetSpec:
 DATASETS = {
     "etth1": DatasetSpec("etth1", "ETTh1.csv", horizon=24),
     "etth2": DatasetSpec("etth2", "ETTh2.csv", horizon=24),
+    "ettm1": DatasetSpec("ettm1", "ETTm1.csv", horizon=24, subsample=4),
+    "covid_policy": DatasetSpec("covid_policy", "covid_policy.csv", horizon=14),
+    "exchange_rate": DatasetSpec("exchange_rate", "exchange_rate.csv", horizon=24),
+    "solar_al": DatasetSpec("solar_al", "solar_al.csv", horizon=24, subsample=2),
+    "electricity": DatasetSpec("electricity", "electricity.csv", horizon=24),
+    "traffic": DatasetSpec("traffic", "traffic.csv", horizon=24),
+    "beijing_pm25": DatasetSpec("beijing_pm25", "beijing_pm25.csv", horizon=24),
+    "cesm2": DatasetSpec("cesm2", "cesm2.csv", horizon=8),
     "jena": DatasetSpec(
         "jena",
         "jena_climate_2009_2016.csv",

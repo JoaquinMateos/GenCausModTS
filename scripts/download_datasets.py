@@ -35,6 +35,31 @@ IHDP_FILES = [
     "ihdp_npci_1-100.train.npz",
     "ihdp_npci_1-100.test.npz",
 ]
+OXCGRT_URL = (
+    "https://raw.githubusercontent.com/OxCGRT/covid-policy-dataset/main/"
+    "data/OxCGRT_compact_national_v1.csv"
+)
+LALONDE_URL = "https://raw.githubusercontent.com/scunning1975/mixtape/master/nsw_mixtape.dta"
+NHEFS_URL = (
+    "https://raw.githubusercontent.com/BiomedSciAI/causallib/master/"
+    "causallib/datasets/data/nhefs/NHEFS.csv"
+)
+MTS_BASE = "https://raw.githubusercontent.com/laiguokun/multivariate-time-series-data/master"
+DENSE_SOURCES = {
+    "exchange_rate": ("exchange_rate/exchange_rate.txt.gz", 8),
+    "solar_al": ("solar-energy/solar_AL.txt.gz", 16),
+    "electricity": ("electricity/electricity.txt.gz", 16),
+    "traffic": ("traffic/traffic.txt.gz", 16),
+}
+PM25_URL = (
+    "https://archive.ics.uci.edu/ml/machine-learning-databases/00381/"
+    "PRSA_data_2010.1.1-2014.12.31.csv"
+)
+SCPERTURB_URL = (
+    "https://zenodo.org/records/13350497/files/NormanWeissman2019_filtered.h5ad?download=1"
+)
+CLIMATEBENCH_BASE = "https://zenodo.org/api/records/7064308/files"
+CLIMATEBENCH_FILES = ["test.tar.gz"]
 
 
 def _download(url: str, dest: Path) -> None:
@@ -42,7 +67,9 @@ def _download(url: str, dest: Path) -> None:
         print(f"exists  {dest}")
         return
     print(f"fetching {url}")
-    urllib.request.urlretrieve(url, dest)  # noqa: S310 (trusted, fixed URLs)
+    part = dest.with_name(dest.name + ".part")
+    urllib.request.urlretrieve(url, part)  # noqa: S310 (trusted, fixed URLs)
+    part.replace(dest)
     print(f"saved   {dest}")
 
 
@@ -58,6 +85,69 @@ def download_real(out: Path) -> None:
         with zipfile.ZipFile(jena_zip) as archive:
             archive.extractall(out)
         print(f"unzipped {jena_csv}")
+
+
+def download_effects(out: Path) -> None:
+    """Fetch the real effect-estimation cohorts (LaLonde RCT, NHEFS)."""
+    out.mkdir(parents=True, exist_ok=True)
+    _download(LALONDE_URL, out / "nsw_mixtape.dta")
+    _download(NHEFS_URL, out / "NHEFS.csv")
+
+
+def download_policy(out: Path) -> None:
+    """Fetch the Oxford policy tracker and materialise the daily COVID panel."""
+    from gcmts.data.real_panels import build_covid_panel
+
+    out.mkdir(parents=True, exist_ok=True)
+    raw = out / "OxCGRT_compact_national_v1.csv"
+    _download(OXCGRT_URL, raw)
+    panel = build_covid_panel(raw, out / "covid_policy.csv")
+    print(f"built   {panel}")
+
+
+def download_dense(out: Path) -> None:
+    """Fetch the small standard multivariate benchmarks and convert to CSV."""
+    from gcmts.data.real_formats import dense_text_to_csv, pm25_to_csv
+
+    out.mkdir(parents=True, exist_ok=True)
+    for name, (rel, max_channels) in DENSE_SOURCES.items():
+        raw = out / f"{name}.txt.gz"
+        _download(f"{MTS_BASE}/{rel}", raw)
+        panel = dense_text_to_csv(raw, out / f"{name}.csv", max_channels=max_channels)
+        print(f"built   {panel}")
+    raw = out / "PRSA_data_2010.1.1-2014.12.31.csv"
+    _download(PM25_URL, raw)
+    panel = pm25_to_csv(raw, out / "beijing_pm25.csv")
+    print(f"built   {panel}")
+
+
+def download_single_cell(out: Path) -> None:
+    """Fetch the standard Perturb-seq benchmark (Norman et al. 2019, scPerturb).
+
+    The harmonised scPerturb file carries the recorded perturbations in
+    ``obs['perturbation']``; it is the reference dataset for unseen-perturbation
+    shift prediction (L2, rule R1).
+    """
+    out.mkdir(parents=True, exist_ok=True)
+    _download(SCPERTURB_URL, out / "perturb_seq.h5ad")
+
+
+def download_climate(out: Path) -> None:
+    """Fetch ClimateBench v1.0 and build a spatio-temporal panel from ssp245."""
+    import tarfile
+
+    from gcmts.data.real_formats import climatebench_to_csv
+
+    out.mkdir(parents=True, exist_ok=True)
+    target = out / "climatebench"
+    target.mkdir(exist_ok=True)
+    for name in CLIMATEBENCH_FILES:
+        archive = out / name
+        _download(f"{CLIMATEBENCH_BASE}/{name}/content", archive)
+        with tarfile.open(archive) as handle:
+            handle.extractall(target, filter="data")
+    panel = climatebench_to_csv(target / "outputs_ssp245.nc", out / "cesm2.csv")
+    print(f"built   {panel}")
 
 
 def download_semi_synthetic(out: Path) -> None:
@@ -91,6 +181,31 @@ def generate_synthetic(root: Path) -> None:
         print(f"saved   {out / f'voronoi_seed{seed}.pt'}")
 
 
+def document_manual() -> None:
+    """Print the sources that need manual download or credentialed access."""
+    rows = [
+        ("weatherbench", "WeatherBench/ERA5", "github.com/pangeo-data/WeatherBench (TB-scale)",
+         "weatherbench.zarr"),
+        ("human36m", "Human3.6M", "vision.imar.ro/human3.6m (registration)", "human36m.npz"),
+        ("humaneva", "HumanEva-I", "vision.cs.brown.edu/humaneva (registration)", "humaneva.npz"),
+        ("mimic", "MIMIC-III/IV", "physionet.org/content/mimiciii (credentialed)",
+         "mimic_cohort.csv"),
+        ("ms_lesion", "MS lesion ISBI 2015",
+         "kaggle.com/datasets/marwa96/isbi-ms-dataset", "ms_lesion.nii.gz"),
+        ("oregon_rct", "Oregon Health Ins.",
+         "dataverse.harvard.edu/dataverse/oregon", "dataverse_files/Oregon/oregon_puf.zip"),
+        ("sutd_trafficqa", "SUTD-TrafficQA",
+         "github.com/SUTDCV/SUTD-TrafficQA (video)", "n/a"),
+    ]
+    print(
+        "\nDatasets NOT downloaded automatically (large, registered or credentialed)."
+        "\nPlace the file under data/real/ with the target name; the loader"
+        "\ngcmts.data.real_panels.load_real_dataset(name) then reads it:\n"
+    )
+    for name, label, source, target in rows:
+        print(f"  {name:14s} {label:20s} {source:44s} -> {target}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Download/generate benchmark datasets.")
     parser.add_argument(
@@ -101,9 +216,15 @@ def main() -> int:
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent / "data"
     download_real(root / "real")
+    download_effects(root / "real")
+    download_policy(root / "real")
+    download_dense(root / "real")
+    download_single_cell(root / "real")
+    download_climate(root / "real")
     download_semi_synthetic(root / "semi_synthetic")
     if args.generate:
         generate_synthetic(root)
+    document_manual()
     return 0
 
 

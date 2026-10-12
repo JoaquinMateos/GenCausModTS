@@ -123,7 +123,7 @@ class MOSAIC(BaseCausalRepresentationLearner):
 
     def encode(self, x: Tensor, context: dict[str, Tensor] | None = None) -> Tensor:
         x_flat, (batch, time) = flatten_sequence(x)
-        u = prepare_context(context, x_flat.shape[0])
+        u = prepare_context(context, x_flat.shape[0], n_classes=self.u_dim)
         mean, _ = self.encoder(self._condition(x_flat, u))
         return unflatten_sequence(mean, batch, time)
 
@@ -138,7 +138,7 @@ class MOSAIC(BaseCausalRepresentationLearner):
 
     def forward(self, batch: Batch) -> CausalRepresentationOutput:
         x_flat, (batch_size, time) = flatten_sequence(batch.x)
-        u = prepare_context(batch.context, x_flat.shape[0])
+        u = prepare_context(batch.context, x_flat.shape[0], n_classes=self.u_dim)
         q_mean, q_logvar = self.encoder(self._condition(x_flat, u))
         z = reparameterise(q_mean, q_logvar)
         importance = self.decoder.importance(z)

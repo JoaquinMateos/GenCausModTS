@@ -38,7 +38,9 @@ def _last_step_context(
     if context is None:
         return None
     return {
-        key: value[:, -1:] if (value.ndim == 3 and value.shape[1] == time) else value
+        key: value[:, -1:]
+        if (value.ndim in (2, 3) and value.shape[1] == time)
+        else value
         for key, value in context.items()
     }
 

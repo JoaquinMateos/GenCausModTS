@@ -430,20 +430,29 @@ def prepare_context(
     n: int,
     *,
     key: str = "u",
+    n_classes: int | None = None,
 ) -> Tensor | None:
     """Return a float context vector of shape ``(n, U)`` or ``None``.
 
     Integer/bool context entries are one-hot encoded; float entries are used
     as-is. Per-sample context ``(B, U)`` is repeated over ``T`` time steps to
-    match a flattened sequence of ``n = B * T`` rows.
+    match a flattened sequence of ``n = B * T`` rows. ``n_classes`` fixes the
+    one-hot width (required for a stable network input dimension when a batch
+    may not contain the largest class index); when omitted it is inferred from
+    the batch, which is only safe if every class is present.
     """
     if context is None or key not in context:
         return None
     value = context[key]
     if value.dtype in (torch.int64, torch.int32, torch.bool):
         flat = value.reshape(-1)
-        n_classes = int(flat.max().item()) + 1 if flat.numel() else 1
-        one_hot = torch.nn.functional.one_hot(flat.long(), n_classes).float()
+        width = n_classes if n_classes is not None else int(flat.max().item()) + 1
+        if flat.numel() and int(flat.max().item()) >= width:
+            raise ValueError(
+                f"Context contains class {int(flat.max().item())} but only "
+                f"{width} classes were declared."
+            )
+        one_hot = torch.nn.functional.one_hot(flat.long(), width).float()
         return _align_rows(one_hot, n)
     value = value.float()
     if value.ndim == 3:

@@ -91,7 +91,7 @@ class LEAP(BaseCausalRepresentationLearner):
 
     def encode(self, x: Tensor, context: dict[str, Tensor] | None = None) -> Tensor:
         x_flat, (batch, time) = flatten_sequence(x)
-        u = prepare_context(context, x_flat.shape[0])
+        u = prepare_context(context, x_flat.shape[0], n_classes=self.u_dim)
         mean, _ = self.encoder(self._condition(x_flat, u))
         return unflatten_sequence(mean, batch, time)
 
@@ -133,7 +133,7 @@ class LEAP(BaseCausalRepresentationLearner):
         batch, p, dim = z_past.shape
         features = z_past.reshape(batch, p * dim)
         if self.u_dim:
-            u = prepare_context(context, batch)
+            u = prepare_context(context, batch, n_classes=self.u_dim)
             if u is None:
                 raise ValueError("LEAP with u_dim>0 requires a context variable.")
             features = torch.cat([features, u], dim=-1)
@@ -142,7 +142,7 @@ class LEAP(BaseCausalRepresentationLearner):
 
     def forward(self, batch: Batch) -> CausalRepresentationOutput:
         x_flat, (batch_size, time) = flatten_sequence(batch.x)
-        u = prepare_context(batch.context, x_flat.shape[0])
+        u = prepare_context(batch.context, x_flat.shape[0], n_classes=self.u_dim)
         q_mean, q_logvar = self.encoder(self._condition(x_flat, u))
         z = reparameterise(q_mean, q_logvar)
         z_seq = unflatten_sequence(z, batch_size, time)

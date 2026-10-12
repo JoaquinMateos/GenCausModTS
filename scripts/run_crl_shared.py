@@ -37,9 +37,16 @@ from gcmts.causal_representation_learning.methods import (
     MOSAIC,
     NCTRL,
     TDRL,
+    CHiLD,
+    iCITRIS,
 )
 from gcmts.core import SimpleTrainer, move_batch, save_training_report
 from gcmts.core.graph_ops import edge_auprc, estimate_latent_adjacency, latent_permutation
+from gcmts.data.control import MountainCarGenerator, PendulumGenerator
+from gcmts.data.hierarchical import HierarchicalTemporalGenerator
+from gcmts.data.linear_processes import OUProcessGenerator, VARMAProcessGenerator
+from gcmts.data.lorenz import LorenzGenerator
+from gcmts.data.physics import PhysicsSCMGenerator
 from gcmts.data.synthetic import (
     CartPoleGenerator,
     Causal3DIdentGenerator,
@@ -48,6 +55,7 @@ from gcmts.data.synthetic import (
 )
 from gcmts.data.voronoi import VoronoiGenerator
 from gcmts.evaluation import BenchmarkTask, CrlBenchmarkRunner
+from gcmts.evaluation.benchmarks import crl_label
 from gcmts.evaluation.metrics import SHDMetric, TripletDistanceMetric
 from gcmts.evaluation.report import aggregate_rows, save_rows
 from gcmts.evaluation.stats import (
@@ -137,13 +145,100 @@ SUITES: dict[str, Suite] = {
             observed_dim=4, horizon=20, seed=seed
         ),
     ),
+    "lorenz": Suite(
+        name="lorenz",
+        observed_dim=6,
+        latent_dim=3,
+        horizon=16,
+        n_regimes=3,
+        make_generator=lambda seed: LorenzGenerator(
+            observed_dim=6, horizon=16, n_regimes=3, mixing="mlp", seed=seed
+        ),
+    ),
+    "npvar_hard": Suite(
+        name="npvar_hard",
+        observed_dim=8,
+        latent_dim=6,
+        horizon=16,
+        n_regimes=4,
+        make_generator=lambda seed: TemporalNonlinearGenerator(
+            observed_dim=8,
+            latent_dim=6,
+            horizon=16,
+            max_lag=1,
+            n_regimes=4,
+            regime_mode="time",
+            mixing="mlp",
+            noise_std=0.2,
+            seed=seed,
+        ),
+    ),
+    "child": Suite(
+        name="child",
+        observed_dim=4,
+        latent_dim=8,
+        horizon=12,
+        n_regimes=1,
+        make_generator=lambda seed: HierarchicalTemporalGenerator(
+            width=4, n_layers=2, horizon=12, observed_dim=4, seed=seed
+        ),
+    ),
 }
+
+# Physics, control and linear process families (Benchmarks A.6--A.17): each is a
+# temporal-family benchmark, so it uses the default method list.
+_PHYSICS_DIMS = {
+    "lorenz96": 5,
+    "pcl": 6,
+    "kuramoto": 6,
+    "lotka_volterra": 4,
+    "duffing": 2,
+    "fitzhugh_nagumo": 2,
+    "chua": 3,
+    "van_der_pol": 2,
+}
+for _system, _dim in _PHYSICS_DIMS.items():
+    SUITES[_system] = Suite(
+        name=_system,
+        observed_dim=2 * _dim,
+        latent_dim=_dim,
+        horizon=16,
+        n_regimes=3,
+        make_generator=lambda seed, s=_system, d=_dim: PhysicsSCMGenerator(
+            system=s, observed_dim=2 * d, horizon=16, n_regimes=3, seed=seed
+        ),
+    )
+SUITES["pendulum"] = Suite(
+    name="pendulum", observed_dim=4, latent_dim=2, horizon=16, n_regimes=3,
+    make_generator=lambda seed: PendulumGenerator(
+        observed_dim=4, horizon=16, n_regimes=3, seed=seed
+    ),
+)
+SUITES["mountain_car"] = Suite(
+    name="mountain_car", observed_dim=4, latent_dim=2, horizon=16, n_regimes=3,
+    make_generator=lambda seed: MountainCarGenerator(
+        observed_dim=4, horizon=16, n_regimes=3, seed=seed
+    ),
+)
+SUITES["varma"] = Suite(
+    name="varma", observed_dim=4, latent_dim=4, horizon=16, n_regimes=3,
+    make_generator=lambda seed: VARMAProcessGenerator(
+        latent_dim=4, observed_dim=4, horizon=16, n_regimes=3, seed=seed
+    ),
+)
+SUITES["ou"] = Suite(
+    name="ou", observed_dim=4, latent_dim=4, horizon=16, n_regimes=3,
+    make_generator=lambda seed: OUProcessGenerator(
+        latent_dim=4, observed_dim=4, horizon=16, n_regimes=3, seed=seed
+    ),
+)
 
 # Suite B is intervention-conditioned, so the applicable representative is
 # CITRIS (I.D); the non-stationarity family is reported on Suites A.
 SUITE_METHODS = {
-    "voronoi": ["CITRIS"],
+    "voronoi": ["CITRIS", "iCITRIS"],
     "sde": ["CEGEN"],
+    "child": ["CHiLD"],
 }
 
 
@@ -265,6 +360,7 @@ def build_methods(suite: Suite, *, epochs_scale: float = 1.0) -> list[MethodSpec
 
 def build_voronoi_methods(suite: Suite, epochs_scale: float = 1.0) -> list[MethodSpec]:
     n_vars = suite.observed_dim - 1
+    epochs = max(int(2000 * epochs_scale), 200)
     return [
         (
             "CITRIS",
@@ -274,7 +370,33 @@ def build_voronoi_methods(suite: Suite, epochs_scale: float = 1.0) -> list[Metho
                 var_dim=1,
                 n_shared=1,
             ),
-            max(int(2000 * epochs_scale), 200),
+            epochs,
+        ),
+        (
+            "iCITRIS",
+            lambda: iCITRIS(
+                observed_dim=suite.observed_dim,
+                n_vars=n_vars,
+                var_dim=1,
+                n_shared=1,
+                n_flow_layers=4,
+            ),
+            epochs,
+        ),
+    ]
+
+
+def build_child_methods(suite: Suite, epochs_scale: float = 1.0) -> list[MethodSpec]:
+    """CHiLD is the only representative of the hierarchical temporal suite."""
+    return [
+        (
+            "CHiLD",
+            lambda: CHiLD(
+                observed_dim=suite.observed_dim,
+                latent_dim=suite.observed_dim,
+                n_layers=2,
+            ),
+            max(int(1500 * epochs_scale), 200),
         )
     ]
 
@@ -315,7 +437,11 @@ def _slice_context(context: Any, time: int, new_time: int) -> dict[str, Any]:
     """Truncate per-timestep context tensors to match a shortened input window."""
     out: dict[str, Any] = {}
     for key, value in (context or {}).items():
-        out[key] = value[:, :new_time] if (value.ndim == 3 and value.shape[1] == time) else value
+        out[key] = (
+            value[:, :new_time]
+            if (value.ndim in (2, 3) and value.shape[1] == time)
+            else value
+        )
     return out
 
 
@@ -545,6 +671,8 @@ def _methods_for(suite: Suite, epochs_scale: float) -> list[MethodSpec]:
         return build_voronoi_methods(suite, epochs_scale)
     if suite.name == "sde":
         return build_sde_methods(suite, epochs_scale)
+    if suite.name == "child":
+        return build_child_methods(suite, epochs_scale)
     return build_methods(suite, epochs_scale=epochs_scale)
 
 
@@ -622,6 +750,13 @@ def run_suite(args: argparse.Namespace) -> int:
     suite = SUITES[args.suite]
     methods = _methods_for(suite, args.epochs_scale)
     stem = f"crl_shared_{suite.name}"
+    logger.info(
+        "=== %s | methods: %s | seeds: %d | epochs_scale: %.2f ===",
+        crl_label(suite.name),
+        ", ".join(name for name, _, _ in methods),
+        args.seeds,
+        args.epochs_scale,
+    )
     rows: list[dict[str, Any]] = []
     for seed in range(args.seeds):
         for name, factory, epochs in methods:

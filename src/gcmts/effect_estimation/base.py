@@ -25,7 +25,7 @@ import torch
 from torch import Tensor
 
 from gcmts.core.base import BaseModel
-from gcmts.typing import Batch, CounterfactualOutput
+from gcmts.typing import Batch, CausalLevel, CounterfactualOutput
 
 __all__ = ["BaseEffectEstimator"]
 
@@ -100,8 +100,11 @@ class BaseEffectEstimator(BaseModel):
         """
         outcomes = []
         for action in actions:
-            cf = self.counterfactual(batch, action)
-            y = cf.counterfactual if outcome_fn is None else outcome_fn(cf.counterfactual)
+            if self.causal_level() == CausalLevel.INTERVENTION:
+                y = self.intervene(batch, action)
+            else:
+                cf = self.counterfactual(batch, action)
+                y = cf.counterfactual if outcome_fn is None else outcome_fn(cf.counterfactual)
             outcomes.append(y.mean(0))
         return torch.stack(outcomes, dim=0)
 

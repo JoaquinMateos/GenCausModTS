@@ -101,7 +101,7 @@ class TDRL(BaseCausalRepresentationLearner):
 
     def encode(self, x: Tensor, context: dict[str, Tensor] | None = None) -> Tensor:
         x_flat, (batch, time) = flatten_sequence(x)
-        u = prepare_context(context, x_flat.shape[0])
+        u = prepare_context(context, x_flat.shape[0], n_classes=self.u_dim)
         if u is not None:
             x_flat = torch.cat([x_flat, u], dim=-1)
         mean, _ = self.encoder(x_flat)
@@ -121,7 +121,7 @@ class TDRL(BaseCausalRepresentationLearner):
         features = z_past.reshape(batch, p * dim)
         dyn_features = features
         if self.u_dim:
-            u = prepare_context(context, batch)
+            u = prepare_context(context, batch, n_classes=self.u_dim)
             if u is not None:
                 dyn_features = torch.cat([features, u], dim=-1)
         fix_mean, _ = self.fix_transition(features)
@@ -165,7 +165,7 @@ class TDRL(BaseCausalRepresentationLearner):
 
     def forward(self, batch: Batch) -> CausalRepresentationOutput:
         x_flat, (batch_size, time) = flatten_sequence(batch.x)
-        u = prepare_context(batch.context, x_flat.shape[0])
+        u = prepare_context(batch.context, x_flat.shape[0], n_classes=self.u_dim)
         encoder_input = torch.cat([x_flat, u], dim=-1) if u is not None else x_flat
         q_mean, q_logvar = self.encoder(encoder_input)
         z = reparameterise(q_mean, q_logvar)

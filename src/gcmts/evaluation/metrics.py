@@ -44,6 +44,12 @@ __all__ = [
     "DomainAccuracyMetric",
     "MIGMetric",
     "CDSMetric",
+    "PathF1Metric",
+    "SourceAccuracyMetric",
+    "StructuralViolationMetric",
+    "HypervolumeMetric",
+    "SparsityMetric",
+    "FaithfulnessMetric",
 ]
 
 
@@ -123,6 +129,12 @@ def _default_registry() -> MetricRegistry:
     reg.register(DomainAccuracyMetric())
     reg.register(MIGMetric())
     reg.register(CDSMetric())
+    reg.register(PathF1Metric())
+    reg.register(SourceAccuracyMetric())
+    reg.register(StructuralViolationMetric())
+    reg.register(HypervolumeMetric())
+    reg.register(SparsityMetric())
+    reg.register(FaithfulnessMetric())
     return reg
 
 
@@ -646,6 +658,151 @@ class MIGMetric(Metric):
             normalised = np.sort(row / total)[::-1]
             gaps.append(float(normalised[0] - normalised[1]) if normalised.size > 1 else 0.0)
         return MetricResult(self.name, float(np.mean(gaps)), self.level, self.higher_is_better)
+
+
+# --- Adjacent-branch metrics (III.A structure discovery) ---------------------
+
+def _valid_nodes(row: Tensor) -> set[int]:
+    return {int(v) for v in row.reshape(-1).tolist() if int(v) >= 0}
+
+
+class PathF1Metric(Metric):
+    """Node-set F1 between a predicted and a ground-truth propagation path.
+
+    ``prediction`` and ``target`` are dictionaries with a ``paths`` tensor of
+    shape ``(N, L)`` (``-1`` marks padding). The score is the mean over
+    instances of the F1 between the predicted and true node sets.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("path_f1", "L1_structure", higher_is_better=True)
+
+    def __call__(self, prediction: dict[str, Tensor], target: dict[str, Tensor]) -> MetricResult:
+        predicted = prediction["paths"]
+        truth = target["paths"]
+        scores = []
+        for row_pred, row_true in zip(predicted, truth, strict=True):
+            pred_set, true_set = _valid_nodes(row_pred), _valid_nodes(row_true)
+            if not pred_set and not true_set:
+                scores.append(1.0)
+                continue
+            overlap = len(pred_set & true_set)
+            precision = overlap / len(pred_set) if pred_set else 0.0
+            recall = overlap / len(true_set) if true_set else 0.0
+            f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+            scores.append(f1)
+        return MetricResult(self.name, float(np.mean(scores)), self.level, self.higher_is_better)
+
+
+class SourceAccuracyMetric(Metric):
+    """Accuracy of the localised source node; inputs are dictionary ``sources``."""
+
+    def __init__(self) -> None:
+        super().__init__("source_accuracy", "L1_structure", higher_is_better=True)
+
+    def __call__(self, prediction: dict[str, Tensor], target: dict[str, Tensor]) -> MetricResult:
+        pred = prediction["sources"].reshape(-1)
+        true = target["sources"].reshape(-1)
+        accuracy = (pred == true).float().mean().item()
+        return MetricResult(self.name, float(accuracy), self.level, self.higher_is_better)
+
+
+class StructuralViolationMetric(Metric):
+    """Fraction of predicted path transitions that violate the given graph.
+
+    ``prediction`` is a dictionary with ``paths`` ``(N, L)``; ``target`` is a
+    dictionary with the ``graph`` ``(D, D)``. Lower is better.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("structural_violation", "L1_structure", higher_is_better=False)
+
+    def __call__(self, prediction: dict[str, Tensor], target: dict[str, Tensor]) -> MetricResult:
+        paths = prediction["paths"]
+        graph = target["graph"]
+        allowed = (graph + graph.T) > 0
+        violations, total = 0, 0
+        for row in paths:
+            nodes = [int(v) for v in row.tolist() if int(v) >= 0]
+            for a, b in zip(nodes[:-1], nodes[1:], strict=True):
+                total += 1
+                if not bool(allowed[a, b]):
+                    violations += 1
+        value = violations / total if total else 0.0
+        return MetricResult(self.name, float(value), self.level, self.higher_is_better)
+
+
+# --- Adjacent-branch metrics (III.B decision-making) -------------------------
+
+class HypervolumeMetric(Metric):
+    r"""Hypervolume of a Pareto front relative to a reference point.
+
+    ``prediction`` is an ``(N, m)`` set of objective vectors; ``target`` is a
+    dictionary with a ``reference`` vector ``(m,)`` (default all zeros). For
+    ``m >= 2`` the hypervolume is estimated by Monte-Carlo sampling in the
+    bounding box ``[min, reference]``. Higher is better.
+    """
+
+    def __init__(self, *, n_samples: int = 20000, seed: int = 0) -> None:
+        super().__init__("hypervolume", "L2_decision", higher_is_better=True)
+        self.n_points = n_samples
+        self.seed = seed
+
+    def __call__(self, prediction: Tensor, target: dict[str, Tensor]) -> MetricResult:
+        front = prediction.reshape(prediction.shape[0], -1).detach().cpu()
+        reference = target["reference"].reshape(-1).detach().cpu()
+        lower = front.min(dim=0).values
+        scale = (reference - lower).clamp(min=1e-8)
+        generator = torch.Generator().manual_seed(self.seed)
+        samples = lower + torch.rand(self.n_points, front.shape[1], generator=generator) * scale
+        dominated = torch.zeros(self.n_points, dtype=torch.bool)
+        for point in front:
+            dominated |= (samples >= point).all(dim=1)
+        box = float(torch.prod(scale))
+        value = box * float(dominated.float().mean())
+        return MetricResult(self.name, value, self.level, self.higher_is_better)
+
+
+class SparsityMetric(Metric):
+    """Evenness of a Pareto front across objectives (lower is better)."""
+
+    def __init__(self) -> None:
+        super().__init__("sparsity", "L2_decision", higher_is_better=False)
+
+    def __call__(self, prediction: Tensor, target: Any = None) -> MetricResult:
+        front = prediction.reshape(prediction.shape[0], -1).detach()
+        ordered = front.sort(dim=0).values
+        gaps = (ordered[1:] - ordered[:-1]).abs()
+        value = float(gaps.std(dim=0).mean().item()) if front.shape[0] > 1 else 0.0
+        return MetricResult(self.name, value, self.level, self.higher_is_better)
+
+
+# --- Adjacent-branch metrics (III.C explanation) -----------------------------
+
+class FaithfulnessMetric(Metric):
+    """Alignment of attributions with ground-truth causal concepts.
+
+    ``prediction`` is an ``(N, C)`` attribution matrix; ``target`` is a
+    dictionary with ``causal_concepts`` (indices). The score is the mean
+    attribution on causal concepts minus that on non-causal ones (higher is
+    better; a faithful explanation concentrates attribution on the causal
+    concepts).
+    """
+
+    def __init__(self) -> None:
+        super().__init__("faithfulness", "L3_explanation", higher_is_better=True)
+
+    def __call__(self, prediction: Tensor, target: dict[str, Tensor]) -> MetricResult:
+        attributions = prediction.reshape(prediction.shape[0], -1).detach()
+        causal = [int(c) for c in target["causal_concepts"].reshape(-1).tolist()]
+        all_concepts = set(range(attributions.shape[1]))
+        non_causal = sorted(all_concepts - set(causal))
+        causal_mean = attributions[:, causal].mean().item() if causal else 0.0
+        non_causal_mean = (
+            attributions[:, non_causal].mean().item() if non_causal else 0.0
+        )
+        value = causal_mean - non_causal_mean
+        return MetricResult(self.name, float(value), self.level, self.higher_is_better)
 
 
 DEFAULT_REGISTRY = _default_registry()

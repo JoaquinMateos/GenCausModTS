@@ -33,14 +33,17 @@ import torch
 from scipy.spatial.distance import cdist
 
 from gcmts.core import SimpleTrainer, move_batch, save_training_report
+from gcmts.data.real_panels import load_lalonde, load_nhefs, load_oregon
 from gcmts.data.semi_synthetic import (
     ACICLoader,
     IHDPGenerator,
     IHDPLoader,
     IHDPReplication,
 )
+from gcmts.data.static_effect import STATIC_CATE_BENCHMARKS, StaticCateLoader
 from gcmts.effect_estimation.base import BaseEffectEstimator
 from gcmts.effect_estimation.methods import CEPAE, CRN, GANITE, CaTSG
+from gcmts.evaluation.benchmarks import CTEE_REAL_BENCHMARKS
 from gcmts.evaluation.metrics import PolicyRiskMetric
 from gcmts.evaluation.report import aggregate_rows, save_rows
 from gcmts.evaluation.stats import paired_wilcoxon_holm
@@ -48,6 +51,15 @@ from gcmts.evaluation.stats import paired_wilcoxon_holm
 logger = logging.getLogger("gcmts.ctee_static")
 
 Replication = IHDPReplication
+
+# Real effect cohorts: only the marginal (ATE) effect is exposed, so individual
+# metrics (PEHE, policy risk) are undefined and reported as n/a.
+REAL_COHORTS: dict[str, tuple[str, Callable[[Path], object]]] = {
+    "lalonde_rct": ("nsw_mixtape.dta", load_lalonde),
+    "oregon_rct": ("dataverse_files/Oregon/oregon_puf.zip", load_oregon),
+    "nhefs": ("NHEFS.csv", load_nhefs),
+}
+_REFERENCE_ATE: dict[str, float] = {}
 
 METHODS: dict[str, tuple[Callable[[IHDPGenerator], BaseEffectEstimator], int, str]] = {
     "catsg": (
@@ -97,6 +109,23 @@ def _load_replication(dataset: str, index: int, directory: Path) -> Replication:
         test_file = directory / "ihdp_npci_1-100.test.npz"
         loader = IHDPLoader(train_file, test_file)
         return loader.replication(index, split="test")
+    if dataset in STATIC_CATE_BENCHMARKS:
+        loader = StaticCateLoader(dataset, replications=index + 1, seed=0)
+        return loader.load()[index]
+    if dataset in REAL_COHORTS:
+        filename, cohort_loader = REAL_COHORTS[dataset]
+        cohort = cohort_loader(directory / filename)
+        _REFERENCE_ATE[dataset] = cohort.reference_ate
+        n = cohort.y.shape[0]
+        nan = np.full(n, np.nan, dtype=np.float64)
+        return Replication(
+            x=cohort.x.astype(np.float32),
+            t=cohort.t.astype(np.int64),
+            yf=cohort.y.astype(np.float32),
+            ycf=nan,
+            mu0=nan,
+            mu1=nan,
+        )
     loader = ACICLoader(directory)
     names = sorted(
         p for p in directory.iterdir() if p.is_dir() and (p / "x.csv").exists()
@@ -136,8 +165,14 @@ def _tau_from_model(
 
 
 def _metrics(
-    tau_hat: np.ndarray, replication: Replication
+    tau_hat: np.ndarray, replication: Replication, *, reference_ate: float | None = None
 ) -> dict[str, float]:
+    if reference_ate is not None:
+        return {
+            "pehe": float("nan"),
+            "ate_error": float(abs(np.mean(tau_hat) - reference_ate)),
+            "policy_risk": float("nan"),
+        }
     tau_true = replication.mu1 - replication.mu0
     pehe = float(np.sqrt(np.mean((tau_hat - tau_true) ** 2)))
     ate_error = float(abs(np.mean(tau_hat) - np.mean(tau_true)))
@@ -225,7 +260,7 @@ def run_replication(
             save_training_report(history, exp_dir, title=f"{method_name}_{dataset}")
         resolved = trainer.resolve_device(model)
         tau_hat, _ = _tau_from_model(model, test_generator, resolved)
-        metrics = _metrics(tau_hat, replication)
+        metrics = _metrics(tau_hat, replication, reference_ate=_REFERENCE_ATE.get(dataset))
         logger.info(
             "RESULT %s_%s rep=%d pehe=%.3f ate=%.3f risk=%.3f (%.1fs)",
             method_name,
@@ -253,7 +288,7 @@ def run_replication(
         ("nearest_neighbour", _nearest_neighbour),
     ):
         tau_hat = estimator(train_generator, test_generator)
-        metrics = _metrics(tau_hat, replication)
+        metrics = _metrics(tau_hat, replication, reference_ate=_REFERENCE_ATE.get(dataset))
         logger.info(
             "RESULT %s_%s rep=%d pehe=%.3f ate=%.3f risk=%.3f (baseline)",
             baseline_name,
@@ -312,7 +347,11 @@ def _report_stats(rows: list[dict[str, Any]], out_dir: Path, dataset: str) -> No
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run static CTEE benchmarks.")
-    parser.add_argument("--dataset", choices=["ihdp", "acic"], default="ihdp")
+    parser.add_argument(
+        "--dataset",
+        choices=["ihdp", "acic", *STATIC_CATE_BENCHMARKS, *CTEE_REAL_BENCHMARKS],
+        default="ihdp",
+    )
     parser.add_argument("--data-dir", type=Path, default=None)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--batch-size", type=int, default=256)
@@ -320,9 +359,14 @@ def main() -> int:
     parser.add_argument("--replications", type=int, default=100)
     parser.add_argument("--out-dir", type=Path, default=Path("outputs"))
     args = parser.parse_args()
-    data_dir = args.data_dir or (
-        Path("data/semi_synthetic") if args.dataset == "ihdp" else Path("data/acic")
-    )
+    if args.data_dir is not None:
+        data_dir = args.data_dir
+    elif args.dataset == "ihdp":
+        data_dir = Path("data/semi_synthetic")
+    elif args.dataset in REAL_COHORTS:
+        data_dir = Path("data/real")
+    else:
+        data_dir = Path("data/acic")
     configure_logging(args.out_dir, args.dataset)
     methods = args.methods or list(METHODS)
     rows: list[dict[str, Any]] = []

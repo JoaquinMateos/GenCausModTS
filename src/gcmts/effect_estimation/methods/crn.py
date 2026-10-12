@@ -125,6 +125,10 @@ class CRN(BaseEffectEstimator):
         )
 
     def forward(self, batch: Batch) -> dict[str, Tensor]:
+        if batch.x.shape[1] != self.horizon:
+            raise ValueError(
+                f"CRN was built for horizon={self.horizon} but received T={batch.x.shape[1]}."
+            )
         action = self._actions(batch)
         mean, logvar = self.encoder(batch.x.reshape(batch.x.shape[0], -1))
         state = mean + torch.randn_like(mean) * torch.exp(0.5 * logvar)

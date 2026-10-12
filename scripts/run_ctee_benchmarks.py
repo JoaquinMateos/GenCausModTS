@@ -27,10 +27,11 @@ from typing import Any
 import torch
 
 from gcmts.core import SimpleTrainer, move_batch, save_training_report
+from gcmts.data.sem_effect import TimeVaryingSEMGenerator
 from gcmts.data.semi_synthetic import TumourGrowthSimulator
 from gcmts.data.synthetic_effect import HarmonicOscillatorGenerator
 from gcmts.effect_estimation.base import BaseEffectEstimator
-from gcmts.effect_estimation.methods import CEPAE, CRN, GANITE, CaTSG
+from gcmts.effect_estimation.methods import CEPAE, CRN, GANITE, CaTSG, WuIPTW
 from gcmts.evaluation.metrics import (
     CFMAEMetric,
     MBEMetric,
@@ -73,6 +74,16 @@ DATASETS: dict[str, DatasetConfig] = {
         horizon=15,
         outcome_dim=0,
         make_generator=lambda seed: TumourGrowthSimulator(horizon=15, seed=seed),
+    ),
+    "linear_sem": DatasetConfig(
+        name="linear_sem",
+        observed_dim=6,
+        treatment_dim=1,
+        horizon=20,
+        outcome_dim=0,
+        make_generator=lambda seed: TimeVaryingSEMGenerator(
+            n_covariates=4, horizon=20, seed=seed
+        ),
     ),
 }
 
@@ -117,6 +128,15 @@ METHODS: dict[str, tuple[Callable[[DatasetConfig], BaseEffectEstimator], int, st
         ),
         600,
         "adversarial generator/discriminator with abducted noise",
+    ),
+    "wu_iptw": (
+        lambda d: WuIPTW(
+            observed_dim=d.observed_dim,
+            treatment_dim=d.treatment_dim,
+            latent_dim=max(d.observed_dim, 4),
+        ),
+        500,
+        "IPTW-reweighted conditional VAE (g-formula pseudo-population)",
     ),
 }
 

@@ -32,10 +32,13 @@ from gcmts.causal_representation_learning.methods import (
     MOSAIC,
     NCTRL,
     TDRL,
+    CHiLD,
     SlowFlows,
+    iCITRIS,
 )
 from gcmts.core import SimpleTrainer, move_batch, save_training_report
 from gcmts.core.graph_ops import estimate_latent_adjacency
+from gcmts.data.hierarchical import HierarchicalTemporalGenerator
 from gcmts.data.synthetic import (
     InterventionalTemporalGenerator,
     LinearSDEGenerator,
@@ -148,6 +151,26 @@ def build_cases(quick: bool) -> list[CaseConfig]:
             ),
             epochs=int(400 * scale),
             note="intervention-conditioned temporal process",
+        ),
+        CaseConfig(
+            name="icitris_instantaneous",
+            model_factory=lambda: iCITRIS(
+                observed_dim=5, n_vars=2, var_dim=2, n_shared=1, n_flow_layers=4
+            ),
+            generator_factory=lambda seed: InterventionalTemporalGenerator(
+                n_vars=2, var_dim=2, n_shared=1, horizon=12, seed=seed
+            ),
+            epochs=int(600 * scale),
+            note="instantaneous + lagged interventional SCM (iCITRIS)",
+        ),
+        CaseConfig(
+            name="child_hierarchical",
+            model_factory=lambda: CHiLD(observed_dim=4, latent_dim=4, n_layers=2),
+            generator_factory=lambda seed: HierarchicalTemporalGenerator(
+                width=4, n_layers=2, horizon=12, observed_dim=4, seed=seed
+            ),
+            epochs=int(600 * scale),
+            note="two-layer hierarchical temporal process (CHiLD)",
         ),
         CaseConfig(
             name="tdrl_modular",

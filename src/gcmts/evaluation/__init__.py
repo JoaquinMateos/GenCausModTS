@@ -8,6 +8,12 @@ from gcmts.evaluation.benchmark import (
     DisentanglementBenchmarkRunner,
     EffectBenchmarkRunner,
 )
+from gcmts.evaluation.benchmarks import (
+    CRL_BENCHMARKS,
+    CTEE_BENCHMARKS,
+    crl_label,
+    ctee_label,
+)
 from gcmts.evaluation.metrics import DEFAULT_REGISTRY, MetricRegistry
 from gcmts.evaluation.report import aggregate_rows, paired_wilcoxon, save_rows
 from gcmts.evaluation.stats import (
@@ -20,6 +26,10 @@ from gcmts.evaluation.stats import (
 )
 
 __all__ = [
+    "CRL_BENCHMARKS",
+    "CTEE_BENCHMARKS",
+    "crl_label",
+    "ctee_label",
     "BenchmarkResult",
     "BenchmarkRunner",
     "BenchmarkTask",

@@ -39,13 +39,22 @@ IMPLEMENTED: dict[str, str] = {
     "CITRIS": "lippeCITRISCausalIdentifiability2022",
     "MOSAIC": "shichengfanMOSAICModuleDiscovery2026",
     "CEGEN": "carlremlingerConditionalLossDeep2021",
+    # Observed auxiliary variables (I.C.2) and recorded interventions (I.D.2).
+    "CHiLD": "zijianliIdentifiabilityHierarchicalTemporal2025",
+    "iCITRIS": "lippeCausalRepresentationLearning2023",
     # Counterfactual & treatment-effect estimation (Paradigm II).
     "GANITE": "yoonGANITEEstimationIndividualized2018",
     "CRN": "bicaEstimatingCounterfactualTreatment2020",
     "CEPAE": "tomasgarrigaCEPAEConditionalEntropyPenalized2026",
     "CaTSG": "yutongxiaCausalTimeSeries2025",
+    "Wu-IPTW": "wuCounterfactualGenerativeModels2024",
+    "CausalGAN": "kocaogluCausalGANLearningCausal2017",
     # Static--dynamic sub-branch (I.B.2).
     "SYNC": "heLearningTimeAwareCausal2025",
+    # Adjacent branches (Paradigm III).
+    "GBTPL": "zhuGBTPLGraphConstrainedGenerative2026a",
+    "LacaDM": "xuemingyanLacaDMLatentCausal2025",
+    "CausalConceptTS": "j.m.lopezalcarazExplainingTimeSeries2025",
 }
 _KEY_TO_METHOD = {key: name for name, key in IMPLEMENTED.items()}
 
