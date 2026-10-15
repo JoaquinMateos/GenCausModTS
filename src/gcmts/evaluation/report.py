@@ -4,14 +4,29 @@ from __future__ import annotations
 
 import csv
 import json
+import os
+import time as _time
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-__all__ = ["aggregate_rows", "save_rows", "paired_wilcoxon"]
+__all__ = ["aggregate_rows", "save_rows", "paired_wilcoxon", "wall_seconds"]
 
 _NON_METRIC = {"epochs", "n_parameters", "seconds", "seed"}
+
+
+def wall_seconds(start: float) -> float:
+    """Wall-clock seconds since ``start`` (a ``time.perf_counter()`` reading).
+
+    Returns ``NaN`` when ``GCMTS_TIMING=0``. Use that to suppress the per-run
+    ``seconds`` field when many workers run concurrently on one machine: their
+    wall-clock times are then inflated by CPU contention and are no longer
+    comparable across methods, or to a sequential run on an idle machine.
+    """
+    if os.environ.get("GCMTS_TIMING", "1") == "0":
+        return float("nan")
+    return _time.perf_counter() - start
 
 
 def paired_wilcoxon(
