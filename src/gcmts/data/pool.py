@@ -61,15 +61,28 @@ class PooledGenerator(BaseDataGenerator):
         *,
         resample_seed: int = 0,
     ) -> None:
-        self.generator = generator
+        self.generator: BaseDataGenerator | None = generator
         self.pool_size = max(int(pool_size), 1)
         self.observed_dim = generator.observed_dim
         self.horizon = generator.horizon
         self._pool: Batch | None = None
         self._rng = torch.Generator().manual_seed(resample_seed)
 
+    @classmethod
+    def from_batch(cls, batch: Batch, *, resample_seed: int = 0) -> PooledGenerator:
+        """Wrap an already-materialised pool (e.g. loaded from disk)."""
+        instance = cls.__new__(cls)
+        instance.generator = None
+        instance.pool_size = int(batch.x.shape[0])
+        instance.observed_dim = int(batch.x.shape[-1])
+        instance.horizon = int(batch.x.shape[1])
+        instance._pool = batch
+        instance._rng = torch.Generator().manual_seed(resample_seed)
+        return instance
+
     def _ensure_pool(self) -> Batch:
         if self._pool is None:
+            assert self.generator is not None
             self._pool = cast(Batch, self.generator.sample(self.pool_size))
         return self._pool
 

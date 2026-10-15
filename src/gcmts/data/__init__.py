@@ -47,6 +47,14 @@ from gcmts.data.synthetic import (
 )
 from gcmts.data.synthetic_effect import HarmonicOscillatorGenerator
 from gcmts.data.synthetic_sdd import EvolvingDomainGenerator, MultiDomainGenerator
+from gcmts.data.synthetic_store import (
+    DatasetRecord,
+    dataset_exists,
+    dataset_path,
+    load_dataset,
+    read_manifest,
+    save_dataset,
+)
 from gcmts.data.voronoi import VoronoiGenerator
 
 __all__ = [
@@ -73,6 +81,12 @@ __all__ = [
     "PhysicsSCMGenerator",
     "PooledGenerator",
     "PendulumGenerator",
+    "DatasetRecord",
+    "save_dataset",
+    "load_dataset",
+    "dataset_path",
+    "dataset_exists",
+    "read_manifest",
     "MountainCarGenerator",
     "VARMAProcessGenerator",
     "OUProcessGenerator",

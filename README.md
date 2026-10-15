@@ -483,6 +483,56 @@ uv run python scripts/run_crl_shared.py --suite voronoi --device cuda --seeds 10
 Results from a pooled run are **not comparable** to a standard run and must be
 reported separately (see `gcmts/data/pool.py`).
 
+### Materialising the synthetic data once (persistent pools)
+
+The CRL benchmarks are CPU-bound because the runners generate trajectories on
+the fly. You can instead materialise the **fixed synthetic process** once — a
+train pool plus a *disjoint* held-out eval pool per `(suite, seed)` — and train
+from it. This preserves the protocol's invariant ("fixed seed schedules so that
+the latent variables, mechanisms, mixing map and graph are identical across
+methods") and additionally fixes the exact trajectories across methods.
+
+Generate everything (this deletes any previous generation first):
+
+```bash
+cd gcmts
+uv run python scripts/generate_synthetic_data.py --clean --seeds 10
+# include the 18-problem grid too (larger; more disk)
+uv run python scripts/generate_synthetic_data.py --clean --seeds 10 --with-grid
+```
+
+- Writes `data/synthetic/<suite>/seed_NN.pt` (train + eval pools) and
+  `data/synthetic/manifest.json` (sizes, generator, dims, `sha256`) for audit.
+- `--clean` removes `data/synthetic` first, so stale generations never linger.
+- Defaults: `--train-size 65536`, `--eval-size 4096`. A pool is **finite**: over
+  one run each trajectory is seen about `steps × batch_size / train_size` times,
+  unlike the standard fresh-sampling protocol. Raise `--train-size` to move
+  closer to fresh sampling, at the cost of disk/time.
+- Progress is written to `data/synthetic/generate_progress.json`.
+
+Now run the whole benchmark from those pools:
+
+```bash
+uv run python scripts/run_full_benchmark.py \
+    --device cuda --jobs 8 --seeds 10 --with-grid \
+    --data-source pool --dataset-dir data/synthetic
+```
+
+`--data-source pool` makes each CRL step load its `(suite, seed)` pool, train by
+resampling it, and evaluate on the disjoint eval pool; a **missing pool aborts
+that step** with a message telling you to run the generator. Coverage today is
+the **CRL shared suites and the grid**; CTEE temporal, SDD and the adjacent
+branches still sample fresh (they are a small share of the runtime).
+
+> **Protocol note.** `--data-source pool` is a *different protocol* from the
+> default `fresh` runs — training data is a finite fixed set shared across
+> methods rather than freshly drawn each step — so pool runs must be reported
+> separately, or adopted as the protocol and **every** number regenerated. The
+> default is `--data-source fresh`.
+
+Per-step cost drops from ~`data` + GPU to `pool-index` + GPU (e.g. Voronoi from
+~2.9 h to ~11 min per run), so the run becomes GPU-bound and finishes far sooner.
+
 ### Benchmark results
 
 Each method is trained on the synthetic benchmark matching its assumptions;

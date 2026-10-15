@@ -54,6 +54,7 @@ from gcmts.data.synthetic import (
     LinearSDEGenerator,
     TemporalNonlinearGenerator,
 )
+from gcmts.data.synthetic_store import dataset_path, load_dataset
 from gcmts.data.voronoi import VoronoiGenerator
 from gcmts.evaluation import BenchmarkTask, CrlBenchmarkRunner
 from gcmts.evaluation.benchmarks import crl_label
@@ -68,6 +69,7 @@ from gcmts.evaluation.stats import (
     plot_cd_diagram,
 )
 from gcmts.evaluation.tracking import StepTracker
+from gcmts.typing import Batch
 
 logger = logging.getLogger("gcmts.crl_shared")
 
@@ -498,6 +500,27 @@ def _triplet_score(
     return TripletDistanceMetric()(prediction, torch.cat(truth, dim=0)).value
 
 
+def _load_pool(dataset_dir: Path, suite_name: str, seed: int) -> tuple[Any, Batch, int]:
+    """Load a persisted ``(train, eval)`` pool for ``(suite, seed)``.
+
+    Raises with an actionable message when the file is missing, so
+    ``--data-source pool`` never silently falls back to fresh sampling.
+    """
+    path = dataset_path(dataset_dir, suite_name, seed)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Missing synthetic dataset {path}. Generate it first with "
+            "`uv run python scripts/generate_synthetic_data.py --seeds ... "
+            f"--suites {suite_name}` (or run with --data-source fresh)."
+        )
+    train, eval_batch, meta = load_dataset(path)
+    return (
+        PooledGenerator.from_batch(train, resample_seed=seed),
+        eval_batch,
+        int(meta.get("max_lag", 1)),
+    )
+
+
 def _run(
     suite: Suite,
     method: str,
@@ -510,11 +533,18 @@ def _run(
     save_curves: bool,
     tracker: StepTracker | None = None,
     pool_size: int = 0,
+    train_data: Any = None,
+    eval_batch: Batch | None = None,
+    max_lag_override: int | None = None,
 ) -> Row:
-    torch.manual_seed(seed)
-    generator = suite.make_generator(seed)
-    if pool_size:
-        generator = PooledGenerator(generator, pool_size, resample_seed=seed)
+    if train_data is None:
+        torch.manual_seed(seed)
+        source: Any = suite.make_generator(seed)
+        if pool_size:
+            source = PooledGenerator(source, pool_size, resample_seed=seed)
+    else:
+        # Pre-materialised fixed pool (see scripts/generate_synthetic_data.py).
+        source = train_data
     model = factory()
     trainer = SimpleTrainer(
         max_epochs=epochs,
@@ -530,7 +560,7 @@ def _run(
         val_every=20,
     )
     start = time.perf_counter()
-    history = trainer.fit(model, generator)
+    history = trainer.fit(model, source)
     seconds = wall_seconds(start)
     if save_curves:
         exp = out_dir / f"shared_{suite.name}_{method}"
@@ -539,7 +569,8 @@ def _run(
             tracker.log_curves(method, history)
 
     resolved = trainer.resolve_device(model)
-    batch = move_batch(generator.sample(2048), resolved)
+    raw_eval = eval_batch if eval_batch is not None else source.sample(2048)
+    batch = move_batch(raw_eval, resolved)
     if suite.name == "sde":
         with torch.no_grad():
             outputs = model.forward(batch)
@@ -576,7 +607,9 @@ def _run(
     if batch.adjacency is not None:
         with torch.no_grad():
             z_pred = model.encode(batch.x, batch.context)
-        max_lag = int(getattr(generator, "max_lag", 1))
+        max_lag = max_lag_override if max_lag_override is not None else int(
+            getattr(source, "max_lag", 1)
+        )
         adj_est = estimate_latent_adjacency(z_pred, max_lag=max_lag)
         adjacency = batch.adjacency[..., -max_lag:].to(adj_est.device)
         if batch.z is not None:
@@ -789,6 +822,10 @@ def run_suite(args: argparse.Namespace) -> int:
         progress=progress,
     )
     for seed in range(args.seeds):
+        if args.data_source == "pool":
+            train_data, eval_batch, ds_max_lag = _load_pool(args.dataset_dir, suite.name, seed)
+        else:
+            train_data = eval_batch = ds_max_lag = None
         for name, factory, epochs in methods:
             row = _run(
                 suite,
@@ -802,6 +839,9 @@ def run_suite(args: argparse.Namespace) -> int:
                 save_curves=(seed == 0),
                 tracker=step,
                 pool_size=args.pool_size,
+                train_data=train_data,
+                eval_batch=eval_batch,
+                max_lag_override=ds_max_lag,
             )
             rows.append(asdict(row))
             _log_rows(suite.name, name, seed, row)
@@ -890,6 +930,10 @@ def run_grid(args: argparse.Namespace) -> int:
             methods = build_methods(suite, epochs_scale=args.epochs_scale)
             if args.only:
                 methods = [m for m in methods if m[0] in set(args.only)]
+            if args.data_source == "pool":
+                train_data, eval_batch, ds_max_lag = _load_pool(args.dataset_dir, suite.name, seed)
+            else:
+                train_data = eval_batch = ds_max_lag = None
             for name, factory, epochs in methods:
                 row = _run(
                     suite,
@@ -902,6 +946,9 @@ def run_grid(args: argparse.Namespace) -> int:
                     args.out_dir,
                     save_curves=False,
                     pool_size=args.pool_size,
+                    train_data=train_data,
+                    eval_batch=eval_batch,
+                    max_lag_override=ds_max_lag,
                 )
                 row.dataset = config.name
                 rows.append(asdict(row))
@@ -967,6 +1014,19 @@ def main() -> int:
             "and resample minibatches instead of drawing fresh data each step "
             "(results are not comparable to a standard run)"
         ),
+    )
+    parser.add_argument(
+        "--data-source", choices=("fresh", "pool"), default="fresh",
+        help=(
+            "training data source: 'fresh' draws new SCM trajectories each step "
+            "(standard protocol); 'pool' loads the persisted fixed dataset for "
+            "(suite, seed) from --dataset-dir (finite-pool protocol; see "
+            "scripts/generate_synthetic_data.py)"
+        ),
+    )
+    parser.add_argument(
+        "--dataset-dir", type=Path, default=Path("data/synthetic"),
+        help="root of the persisted synthetic pools used with --data-source pool",
     )
     parser.add_argument(
         "--epochs-scale",

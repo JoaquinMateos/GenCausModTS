@@ -114,6 +114,7 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
                 f"CRL {crl_label(suite)}",
                 [py, "scripts/run_crl_shared.py", "--device", device, "--suite", suite,
                  "--seeds", str(seeds), "--epochs-scale", str(epochs_scale),
+                 "--data-source", args.data_source, "--dataset-dir", str(args.dataset_dir),
                  "--out-dir", "outputs_shared"],
                 progress=_progress("outputs_shared", f"crl_shared_{suite}"),
             )
@@ -188,6 +189,7 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
                     "CRL 18-problem grid",
                     [py, "scripts/run_crl_shared.py", "--device", device, "--grid",
                      "--seeds", str(seeds), "--epochs-scale", str(epochs_scale),
+                     "--data-source", args.data_source, "--dataset-dir", str(args.dataset_dir),
                      "--out-dir", "outputs_shared"],
                     progress=_progress("outputs_shared", "crl_shared_grid"),
                 )
@@ -200,7 +202,9 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
                         [py, "scripts/run_crl_shared.py", "--device", device, "--grid",
                          "--shard-index", str(index), "--shard-total", str(args.grid_shards),
                          "--stem", stem, "--seeds", str(seeds),
-                         "--epochs-scale", str(epochs_scale), "--out-dir", "outputs_shared"],
+                         "--epochs-scale", str(epochs_scale),
+                         "--data-source", args.data_source, "--dataset-dir", str(args.dataset_dir),
+                         "--out-dir", "outputs_shared"],
                         progress=_progress("outputs_shared", stem),
                     )
                 )
@@ -475,6 +479,19 @@ def main() -> int:
     parser.add_argument(
         "--grid-shards", type=int, choices=(1, 2), default=2,
         help="split the 18-problem grid into 1 or 2 balanced shards (default: 2)",
+    )
+    parser.add_argument(
+        "--data-source", choices=("fresh", "pool"), default="fresh",
+        help=(
+            "CRL training data: 'fresh' draws new SCM trajectories each step "
+            "(standard protocol); 'pool' loads persisted fixed datasets from "
+            "--dataset-dir (finite-pool protocol; generate with "
+            "scripts/generate_synthetic_data.py)"
+        ),
+    )
+    parser.add_argument(
+        "--dataset-dir", type=Path, default=Path("data/synthetic"),
+        help="root of the persisted synthetic pools used with --data-source pool",
     )
     args = parser.parse_args()
 
