@@ -113,9 +113,15 @@ reports this, and `CrlBenchmarkRunner` / `EffectBenchmarkRunner` /
 - **Evaluation at the right level** — a metric registry (`MCC`, `R²_diag`,
   `SHD`, `PEHE`, `ATE`, `CF MAE`, `OOD MSE`, …) plus benchmark runners.
 - **Logging trainer** — `SimpleTrainer` with deterministic batching, device
-  selection (CPU/CUDA/MPS), gradient clipping, linear warmup + cosine decay
-  (`cosine`/`plateau`/`step`/`none`), held-out validation monitoring with early
-  stopping, and per-epoch history.
+  selection (CPU/CUDA/MPS), gradient clipping, a budget-free adaptive schedule
+  (linear warm-up then validation-plateau decay) plus the fixed-budget
+  `cosine`/`plateau`/`step`/`none` options, very permissive early stopping with
+  optional best-weight restoration, exponential moving average of the weights,
+  optional CUDA mixed precision (`torch.autocast` + `GradScaler`), KL warm-up
+  (`beta` annealing) for the VAE methods, and per-epoch history.
+- **Statistics** — Holm-corrected paired Wilcoxon tests, Friedman/Nemenyi
+  rankings with critical-difference diagrams, and reproducible percentile
+  **bootstrap confidence intervals** for every reported mean.
 - **Training curves** — `save_training_report` writes `history.json`/`.csv` and
   a loss/terms/learning-rate figure to `outputs/<experiment>/`.
 - **Typed and tested** — `mypy --strict` and `ruff` clean; a `pytest` suite
@@ -325,7 +331,7 @@ uv run python scripts/generate_synthetic_data.py --clean --seeds 10 --with-grid
 
 # Phase 2 (GPU): train every experiment from the pools
 uv run python scripts/run_full_benchmark.py \
-    --device cuda --seeds 10 --with-grid --data-source pool --jobs 4
+    --device cuda --seeds 10 --with-grid --data-source pool --jobs 4 --gpus 1
 ```
 
 Phase 1 writes one `data/synthetic/<suite>/seed_XX.pt` per `(suite, seed)` plus a
@@ -362,14 +368,16 @@ eighteen-problem statistics grid.
 The models are small and, under the default fresh protocol, the cost is
 dominated by CPU-side data generation, so the orchestrator runs the independent
 steps in a bounded pool of worker processes that share the GPU (`--jobs N`,
-default auto; `--jobs 1` restores strictly-sequential behaviour). On multi-GPU
-hosts `--gpus 0,1` pins the steps to GPUs round-robin.
+default auto; `--jobs 1` restores strictly-sequential behaviour). `--gpus` takes
+a comma-separated list of CUDA device ids, applied to each worker through
+`CUDA_VISIBLE_DEVICES`; it **defaults to `1`** (the second device), so pass
+`--gpus 0` on a single-GPU host or `--gpus 0,1` on a two-GPU host (round-robin),
+or `--gpus ""` to inherit the environment unchanged.
 
 With `--data-source pool` the data bottleneck is gone and each worker is
 GPU-driven. Every worker still opens its **own CUDA context** (~0.5 GB on a
-Turing card), so on an 11 GB RTX 2080 Ti keep `--jobs` modest (2–4) and use
-`--gpus 0` to pin all steps to a single device; `--jobs 1` is the safest on a
-small card.
+Turing card), so on an 11 GB RTX 2080 Ti keep `--jobs` modest (2–4) and pin all
+steps to one device with `--gpus 1`; `--jobs 1` is the safest on a small card.
 
 Because parallel workers contend for the CPU, per-run wall-clock times (`Time
 (s)` in the tables) are recorded as `--` unless you run with `--jobs 1`. The
@@ -439,6 +447,82 @@ without changing the numbers: `GCMTS_PREFETCH` overlaps batch preparation with
 compute, `GCMTS_LIGHT_BATCH` copies only what training reads to the GPU, and
 `GCMTS_PROFILE` prints the phase profile. For a further speedup increase
 `--batch-size` (and `steps_per_epoch`) so each kernel does more work per launch.
+
+### Training schedule and early stopping
+
+These small models converge in a few dozen epochs, so the historical fixed
+cosine over a 1500–2000-epoch budget spends most of its time on a flat plateau
+(the training-curve "cliff then flat line"). Two changes address this, both
+**on by default in the CRL runners** and configurable per run:
+
+- `--scheduler adaptive` (default): linear warm-up, then decay the learning rate
+  whenever the validation loss stops improving. It needs **no known epoch
+  budget**, so it behaves sensibly however long you train.
+- `--early-stopping-patience 300` (default): stop after that many epochs without
+  a (very small, `1e-4` relative) validation improvement. It is deliberately
+  **permissive** — it only fires on a genuine plateau, so results match a full
+  run while ~8× less compute is spent. Pass `0` to disable.
+- `--restore-best-weights` (optional): return the validation-best weights rather
+  than the final ones.
+
+```bash
+# default: adaptive schedule + permissive early stopping
+uv run python scripts/run_crl_shared.py --device cuda --suite npvar --seeds 10
+
+# exact legacy behaviour (fixed cosine, no early stopping)
+uv run python scripts/run_crl_shared.py --device cuda --suite npvar --seeds 10 \
+    --scheduler cosine --early-stopping-patience 0
+
+# enable permissive early stopping for *any* runner without editing it
+GCMTS_EARLY_STOPPING_PATIENCE=300 uv run python scripts/run_ctee_benchmarks.py --device cuda
+```
+
+`scripts/run_full_benchmark.py` forwards `--scheduler`,
+`--early-stopping-patience`, `--restore-best-weights`, `--amp`, `--ema-decay`
+and `--kl-warmup-epochs` to the CRL steps. Note these change the reported
+numbers relative to a pure-`cosine` run, so keep one recipe for the whole paper
+and state which was used.
+
+### Other training techniques
+
+Three standard techniques from the deep-learning toolbox are available and
+opt-in; each targets a known weakness of this benchmark:
+
+- **Exponential moving average of the weights** (`--ema-decay 0.99`, or
+  `GCMTS_EMA_DECAY`). Averaging the iterates of a network is a cheap regulariser:
+  the averaged weights are far less sensitive to the last noisy optimisation
+  steps than the final iterate, so validation and test metrics are more stable
+  and the ten-seed dispersion shrinks. When enabled, validation is scored with
+  the averaged weights and the returned model *is* the average
+  (`gcmts.core.ema.EMA`).
+- **KL warm-up / `beta` annealing** (`--kl-warmup-epochs K`). The VAE-based CRL
+  methods (iVAE, LEAP, TDRL, NCTRL, CHiLD, MOSAIC) often lock into a
+  reconstruction-only regime in the first epochs and then sit on the plateau
+  discussed above. Ramping the KL weight linearly from 0 to its configured value
+  over `K` epochs lets the encoder first fit the data and then regularise, which
+  is the standard remedy for posterior collapse and a precondition for
+  identifiability. The trainer anneals any model exposing `kl_weight`.
+- **CUDA mixed precision** (`--amp`, or `GCMTS_AMP`). Wraps the forward/loss in
+  `torch.autocast(float16)` and scales the backward with a `GradScaler`. On
+  Turing tensor cores this helps when the kernels are large; with the ~50k
+  parameter models used here the kernels are too small for tensor cores and AMP
+  is *slightly slower* (measured), so it is off by default and worth switching on
+  only for larger models, wider MLPs or bigger batches.
+
+```bash
+# EMA + KL warm-up + adaptive schedule + permissive early stopping
+uv run python scripts/run_crl_shared.py --device cuda --suite npvar --seeds 10 \
+    --ema-decay 0.99 --kl-warmup-epochs 50
+
+# the same switches are accepted by the orchestrator
+uv run python scripts/run_full_benchmark.py --device cuda --seeds 10 --with-grid \
+    --gpus 1 --ema-decay 0.99 --kl-warmup-epochs 50
+```
+
+Every reported mean is accompanied by a deterministic percentile **bootstrap
+95% confidence interval** (`gcmts.evaluation.stats.bootstrap_ci`), logged next to
+the Wilcoxon block and written to `<stem>_stats.json`; this closes the
+"bootstrap confidence intervals are pending" item of the roadmap.
 
 ### Running on a remote GPU (e.g. RTX 2080 Ti)
 
@@ -521,6 +605,9 @@ The design and roadmap are documented in [`docs/design.md`](docs/design.md).
 - `uv.lock` is committed so environments can be reconstructed.
 - Benchmark scripts log every run to `outputs/`.
 - The evaluation computes only metrics whose ground truth exists (rules R1–R3).
+- Every reported mean carries a deterministic percentile bootstrap 95%
+  confidence interval, logged and written alongside the Holm-corrected
+  Wilcoxon and Friedman/Nemenyi results.
 
 ---
 
@@ -529,8 +616,8 @@ The design and roadmap are documented in [`docs/design.md`](docs/design.md).
 - **Under-tuned methods.** TDRL and NCTRL are above chance but below their
   papers' reported ranges; further architecture/tuning work is needed.
 - **Statistical protocol.** The shared suites and the configuration grid run
-  with ten seeds and report Holm-corrected Wilcoxon plus Friedman/Nemenyi tests;
-  bootstrap confidence intervals and a tagged release with a DOI are pending.
+  with ten seeds and report Holm-corrected Wilcoxon plus Friedman/Nemenyi tests
+  and bootstrap confidence intervals; a tagged release with a DOI is pending.
 - **Pending methods.** iCITRIS, APPEX, and the adjacent-branch methods
   (structure discovery, decision-making, explanation) are not implemented.
 - **Pending benchmarks.** The SDE suite in the shared comparison and the

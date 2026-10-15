@@ -14,6 +14,8 @@ from gcmts.evaluation.metrics import (
     TwoSampleDiscriminatorMetric,
 )
 from gcmts.evaluation.stats import (
+    bootstrap_case_cis,
+    bootstrap_ci,
     friedman_test,
     load_rows,
     metric_matrix,
@@ -80,6 +82,26 @@ def test_plot_cd_diagram_writes_file(tmp_path: Path) -> None:
     path = tmp_path / "cd.png"
     plot_cd_diagram(ranks, 1.5, path=path, title="unit test")
     assert path.exists() and path.stat().st_size > 0
+
+
+def test_bootstrap_ci_brackets_mean_and_is_deterministic() -> None:
+    values = [float(v) for v in np.linspace(0.0, 1.0, 21)]
+    ci = bootstrap_ci(values, n_boot=2000, rng_seed=1)
+    assert ci.mean == pytest.approx(0.5)
+    assert ci.low < ci.mean < ci.high
+    assert ci.n == 21
+    # Same seed gives the same interval; different seed can move it.
+    assert bootstrap_ci(values, n_boot=2000, rng_seed=1) == ci
+    assert bootstrap_ci([1.0], n_boot=100) == bootstrap_ci([1.0], n_boot=100)
+    empty = bootstrap_ci([])
+    assert empty.n == 0 and np.isnan(empty.mean)
+
+
+def test_bootstrap_case_cis_per_case() -> None:
+    cis = bootstrap_case_cis(_rows(), "mcc")
+    assert set(cis) == {"A", "B", "C"}
+    # B is a constant +0.5 shift of A, so their intervals do not overlap.
+    assert cis["B"].low > cis["A"].high
 
 
 def test_load_rows_roundtrip(tmp_path: Path) -> None:

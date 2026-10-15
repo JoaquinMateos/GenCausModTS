@@ -105,6 +105,18 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
     device = args.device
     seeds = args.seeds
     epochs_scale = args.epochs_scale
+    trainer_args = [
+        "--scheduler", args.scheduler,
+        "--early-stopping-patience", str(args.early_stopping_patience),
+    ]
+    if args.restore_best_weights:
+        trainer_args.append("--restore-best-weights")
+    if args.amp:
+        trainer_args.append("--amp")
+    if args.ema_decay > 0:
+        trainer_args += ["--ema-decay", str(args.ema_decay)]
+    if args.kl_warmup_epochs > 0:
+        trainer_args += ["--kl-warmup-epochs", str(args.kl_warmup_epochs)]
     steps: list[Step] = []
     for suite in CRL_SUITES:
         if args.suites and suite not in args.suites:
@@ -115,6 +127,7 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
                 [py, "scripts/run_crl_shared.py", "--device", device, "--suite", suite,
                  "--seeds", str(seeds), "--epochs-scale", str(epochs_scale),
                  "--data-source", args.data_source, "--dataset-dir", str(args.dataset_dir),
+                 *trainer_args,
                  "--out-dir", "outputs_shared"],
                 progress=_progress("outputs_shared", f"crl_shared_{suite}"),
             )
@@ -190,6 +203,7 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
                     [py, "scripts/run_crl_shared.py", "--device", device, "--grid",
                      "--seeds", str(seeds), "--epochs-scale", str(epochs_scale),
                      "--data-source", args.data_source, "--dataset-dir", str(args.dataset_dir),
+                     *trainer_args,
                      "--out-dir", "outputs_shared"],
                     progress=_progress("outputs_shared", "crl_shared_grid"),
                 )
@@ -204,6 +218,7 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
                          "--stem", stem, "--seeds", str(seeds),
                          "--epochs-scale", str(epochs_scale),
                          "--data-source", args.data_source, "--dataset-dir", str(args.dataset_dir),
+                         *trainer_args,
                          "--out-dir", "outputs_shared"],
                         progress=_progress("outputs_shared", stem),
                     )
@@ -455,10 +470,10 @@ def main() -> int:
         ),
     )
     parser.add_argument(
-        "--gpus", default="",
+        "--gpus", default="1",
         help=(
             "comma-separated GPU ids to pin steps to round-robin, "
-            "e.g. '0' or '0,1' (default: inherit)"
+            "e.g. '0' or '0,1' (default: '1'; pass '' to inherit the environment)"
         ),
     )
     parser.add_argument(
@@ -492,6 +507,31 @@ def main() -> int:
     parser.add_argument(
         "--dataset-dir", type=Path, default=Path("data/synthetic"),
         help="root of the persisted synthetic pools used with --data-source pool",
+    )
+    parser.add_argument(
+        "--scheduler", default="adaptive",
+        choices=("cosine", "adaptive", "plateau", "step", "none"),
+        help="CRL learning-rate schedule (default: adaptive; 'cosine' = legacy)",
+    )
+    parser.add_argument(
+        "--early-stopping-patience", type=int, default=300,
+        help="CRL epochs without improvement before stopping; 0 disables (default 300)",
+    )
+    parser.add_argument(
+        "--restore-best-weights", action="store_true",
+        help="restore the validation-best weights when a CRL run stops early",
+    )
+    parser.add_argument(
+        "--amp", action="store_true",
+        help="enable CUDA automatic mixed precision for the CRL steps",
+    )
+    parser.add_argument(
+        "--ema-decay", type=float, default=0.0,
+        help="EMA decay for the CRL weights (0 disables; e.g. 0.99)",
+    )
+    parser.add_argument(
+        "--kl-warmup-epochs", type=int, default=0,
+        help="beta warm-up epochs for the CRL VAE methods (0 disables)",
     )
     args = parser.parse_args()
 

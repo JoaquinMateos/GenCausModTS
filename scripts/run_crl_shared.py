@@ -62,6 +62,7 @@ from gcmts.evaluation.metrics import SHDMetric, TripletDistanceMetric
 from gcmts.evaluation.progress import ProgressTracker
 from gcmts.evaluation.report import aggregate_rows, save_rows, wall_seconds
 from gcmts.evaluation.stats import (
+    bootstrap_case_cis,
     friedman_test,
     metric_matrix,
     nemenyi,
@@ -536,6 +537,12 @@ def _run(
     train_data: Any = None,
     eval_batch: Batch | None = None,
     max_lag_override: int | None = None,
+    scheduler: str = "cosine",
+    early_stopping_patience: int | None = None,
+    restore_best_weights: bool = False,
+    amp: bool = False,
+    ema_decay: float | None = None,
+    kl_warmup_epochs: int = 0,
 ) -> Row:
     if train_data is None:
         torch.manual_seed(seed)
@@ -560,9 +567,15 @@ def _run(
         device=device,
         seed=seed,
         grad_clip=1.0,
-        scheduler="cosine",
+        scheduler=scheduler,
         val_size=512,
         val_every=20,
+        early_stopping_patience=early_stopping_patience,
+        early_stopping_min_delta_ratio=1e-4,
+        restore_best_weights=restore_best_weights,
+        amp=amp,
+        ema_decay=ema_decay,
+        kl_warmup_epochs=kl_warmup_epochs,
     )
     resolved = trainer.resolve_device(model)
     # Keep a persisted pool resident on the training device so the per-step
@@ -662,8 +675,10 @@ def _report_statistics(
     for metric, higher_is_better in metrics:
         matrix, cases, problems = metric_matrix(rows, metric)
         comparisons = paired_wilcoxon_holm(rows, metric)
+        cis = bootstrap_case_cis(rows, metric)
         entry: dict[str, Any] = {
             "comparisons": [asdict(c) for c in comparisons],
+            "bootstrap_ci": {case: asdict(ci) for case, ci in cis.items()},
         }
         logger.info(
             "--- %s | %d cases | %d problems | pairwise Holm-corrected Wilcoxon ---",
@@ -671,6 +686,16 @@ def _report_statistics(
             len(cases),
             len(problems),
         )
+        for case, ci in cis.items():
+            logger.info(
+                "%-10s %-8s mean=%.4f 95%% CI [%.4f, %.4f] (n=%d)",
+                metric,
+                case,
+                ci.mean,
+                ci.low,
+                ci.high,
+                ci.n,
+            )
         for comparison in comparisons:
             logger.info(
                 "%-10s %-8s vs %-8s n=%d p=%.4g p_holm=%.4g%s",
@@ -852,6 +877,12 @@ def run_suite(args: argparse.Namespace) -> int:
                 train_data=train_data,
                 eval_batch=eval_batch,
                 max_lag_override=ds_max_lag,
+                scheduler=args.scheduler,
+                early_stopping_patience=args.early_stopping_patience or None,
+                restore_best_weights=args.restore_best_weights,
+                amp=args.amp,
+                ema_decay=args.ema_decay or None,
+                kl_warmup_epochs=args.kl_warmup_epochs,
             )
             rows.append(asdict(row))
             _log_rows(suite.name, name, seed, row)
@@ -959,6 +990,12 @@ def run_grid(args: argparse.Namespace) -> int:
                     train_data=train_data,
                     eval_batch=eval_batch,
                     max_lag_override=ds_max_lag,
+                    scheduler=args.scheduler,
+                    early_stopping_patience=args.early_stopping_patience or None,
+                    restore_best_weights=args.restore_best_weights,
+                    amp=args.amp,
+                    ema_decay=args.ema_decay or None,
+                    kl_warmup_epochs=args.kl_warmup_epochs,
                 )
                 row.dataset = config.name
                 rows.append(asdict(row))
@@ -1043,6 +1080,44 @@ def main() -> int:
         type=float,
         default=1.0,
         help="multiply the per-method epoch budgets (grid runs use < 1 to fit the budget)",
+    )
+    parser.add_argument(
+        "--scheduler", default="adaptive",
+        choices=("cosine", "adaptive", "plateau", "step", "none"),
+        help=(
+            "learning-rate schedule: 'adaptive' (default) linearly warms up then "
+            "decays on a validation-loss plateau, so it needs no known epoch "
+            "budget; 'cosine' is the historical fixed-budget schedule"
+        ),
+    )
+    parser.add_argument(
+        "--early-stopping-patience", type=int, default=300,
+        help=(
+            "stop after this many epochs without a (very small) validation-loss "
+            "improvement; 0 disables early stopping (default: 300, permissive)"
+        ),
+    )
+    parser.add_argument(
+        "--restore-best-weights", action="store_true",
+        help="restore the validation-best weights when training stops",
+    )
+    parser.add_argument(
+        "--amp", action="store_true",
+        help="train under CUDA automatic mixed precision (fp16) with a GradScaler",
+    )
+    parser.add_argument(
+        "--ema-decay", type=float, default=0.0,
+        help=(
+            "decay for an exponential moving average of the weights, evaluated "
+            "and returned as the final model (0 disables; e.g. 0.99)"
+        ),
+    )
+    parser.add_argument(
+        "--kl-warmup-epochs", type=int, default=0,
+        help=(
+            "linearly ramp each VAE method's KL weight from 0 to its configured "
+            "value over this many epochs (beta warm-up; 0 disables)"
+        ),
     )
     parser.add_argument("--no-baselines", dest="baselines", action="store_false")
     parser.add_argument("--out-dir", type=Path, default=Path("outputs"))

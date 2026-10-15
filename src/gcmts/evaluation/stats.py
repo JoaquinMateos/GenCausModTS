@@ -29,7 +29,10 @@ from typing import Any, cast
 import numpy as np
 
 __all__ = [
+    "BootstrapCI",
     "Comparison",
+    "bootstrap_ci",
+    "bootstrap_case_cis",
     "load_rows",
     "paired_wilcoxon_holm",
     "metric_matrix",
@@ -70,6 +73,65 @@ class Comparison:
     p_value: float
     p_holm: float
     significant: bool
+
+
+@dataclass(frozen=True)
+class BootstrapCI:
+    """Percentile bootstrap confidence interval for a mean."""
+
+    mean: float
+    low: float
+    high: float
+    n: int
+    alpha: float
+
+
+def bootstrap_ci(
+    values: Sequence[float],
+    *,
+    alpha: float = 0.05,
+    n_boot: int = 10_000,
+    rng_seed: int = 0,
+) -> BootstrapCI:
+    """Percentile bootstrap CI for the mean of ``values`` (non-finite dropped).
+
+    Resampling is deterministic for a given ``rng_seed`` so reported intervals
+    are reproducible. Fewer than two finite values yields a degenerate interval
+    at the point estimate.
+    """
+    array = np.asarray([value for value in values if value is not None], dtype=float)
+    array = array[np.isfinite(array)]
+    if array.size == 0:
+        return BootstrapCI(float("nan"), float("nan"), float("nan"), 0, alpha)
+    mean = float(array.mean())
+    if array.size < 2:
+        return BootstrapCI(mean, mean, mean, int(array.size), alpha)
+    rng = np.random.default_rng(rng_seed)
+    indices = rng.integers(0, array.size, size=(max(int(n_boot), 1), array.size))
+    means = array[indices].mean(axis=1)
+    low, high = np.percentile(means, [100.0 * alpha / 2.0, 100.0 * (1.0 - alpha / 2.0)])
+    return BootstrapCI(mean, float(low), float(high), int(array.size), alpha)
+
+
+def bootstrap_case_cis(
+    rows: Sequence[Mapping[str, Any]],
+    metric: str,
+    *,
+    case_key: str = "case",
+    alpha: float = 0.05,
+    n_boot: int = 10_000,
+    rng_seed: int = 0,
+) -> dict[str, BootstrapCI]:
+    """Per-case bootstrap CIs for ``metric`` over the rows written by ``save_rows``."""
+    grouped: dict[str, list[float]] = {}
+    for row in rows:
+        if row.get(metric) is None or row.get(case_key) is None:
+            continue
+        grouped.setdefault(str(row[case_key]), []).append(float(row[metric]))
+    return {
+        case: bootstrap_ci(values, alpha=alpha, n_boot=n_boot, rng_seed=rng_seed + index)
+        for index, (case, values) in enumerate(sorted(grouped.items()))
+    }
 
 
 def load_rows(path: str | Path) -> list[dict[str, Any]]:

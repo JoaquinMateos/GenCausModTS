@@ -32,6 +32,11 @@ class BaseModel(ABC, nn.Module):
         self.observed_dim = observed_dim
         self._latent_dim = latent_dim
 
+    #: Weight of the KL term for VAE-style objectives, when the model has one.
+    #: ``SimpleTrainer`` may use it to warm the KL term up (beta annealing);
+    #: ``None`` means the model has no annealable KL term.
+    kl_weight: float | None = None
+
     @property
     def latent_dim(self) -> int | None:
         """Latent dimension; subclasses may override this property."""
