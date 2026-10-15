@@ -36,6 +36,15 @@ def main() -> int:
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--json", type=Path, default=None, help="also write the profile here")
+    parser.add_argument(
+        "--data-source", choices=("fresh", "pool"), default="fresh",
+        help="profile the fresh-sampling path (default) or the persisted pool path",
+    )
+    parser.add_argument(
+        "--dataset-dir", type=Path, default=Path("data/synthetic"),
+        help="root of the persisted synthetic pools used with --data-source pool",
+    )
+    parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -52,8 +61,14 @@ def main() -> int:
             return 2
     name, factory, _ = methods[0]
 
-    torch.manual_seed(0)
-    generator = suite.make_generator(0)
+    if args.data_source == "pool":
+        train_data, _eval_batch, _max_lag = shared._load_pool(
+            args.dataset_dir, suite.name, args.seed
+        )
+        torch.manual_seed(args.seed)
+    else:
+        torch.manual_seed(args.seed)
+        train_data = suite.make_generator(args.seed)
     model = factory()
     trainer = SimpleTrainer(
         max_epochs=args.epochs,
@@ -62,15 +77,17 @@ def main() -> int:
         steps_per_epoch=15,
         log_every=0,
         device=args.device,
-        seed=0,
+        seed=args.seed,
         grad_clip=1.0,
         scheduler="cosine",
         val_size=512,
         val_every=20,
         profile=True,
     )
+    if isinstance(train_data, shared.PooledGenerator):
+        train_data.to(trainer.resolve_device(model))
     print(f"Profiling {suite.name}/{name} for {args.epochs} epochs (batch {args.batch_size})...")
-    trainer.fit(model, generator)
+    trainer.fit(model, train_data)
     if trainer.profiler is not None:
         profile = trainer.profiler.as_dict()
         if args.json is not None:

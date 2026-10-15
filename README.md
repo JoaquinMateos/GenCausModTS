@@ -308,267 +308,176 @@ surrogate with known factors and interventions lives in
 
 ## Benchmarks
 
-```bash
-uv run python scripts/download_datasets.py                  # real + IHDP archives
-uv run python scripts/download_datasets.py --generate       # materialise Voronoi tensors
-uv run python scripts/run_crl_benchmarks.py --device cuda   # per-method sanity check
-uv run python scripts/run_crl_shared.py --suite npvar --device cuda --seeds 10
-uv run python scripts/run_crl_shared.py --grid --device cuda --seeds 10
-uv run python scripts/run_ctee_benchmarks.py --device cuda --seeds 10
-uv run python scripts/run_sdd_benchmarks.py --device cuda --seeds 10
-uv run python scripts/make_paper_tables.py                  # LaTeX tables from JSON
-```
+The suite trains every method under one protocol on synthetic processes that
+expose causal ground truth, then writes the paper's LaTeX tables. A single
+orchestrator drives all of it.
 
-The whole suite — every benchmark family plus the LaTeX tables — is driven by
-one orchestrator:
+### Generate once, then train (recommended on a GPU server)
+
+The default protocol draws a **fresh** batch on the CPU at every optimisation
+step, which leaves the GPU waiting. The faster, otherwise result-neutral setup is
+to materialise each synthetic process **once** — on any CPU box, no GPU needed —
+and then train on the GPU from those fixed pools:
 
 ```bash
-uv run python scripts/run_full_benchmark.py --device cuda --seeds 10          # everything
-uv run python scripts/run_full_benchmark.py --soft --device cuda             # smoke run
+# Phase 1 (one-off, deterministic, no GPU needed): write the train/eval pools
+uv run python scripts/generate_synthetic_data.py --clean --seeds 10 --with-grid
+
+# Phase 2 (GPU): train every experiment from the pools
+uv run python scripts/run_full_benchmark.py \
+    --device cuda --seeds 10 --with-grid --data-source pool --jobs 4
 ```
 
-These runs train small models whose cost is dominated by CPU-side data
-generation, so a single process leaves the GPU almost entirely idle. The
-orchestrator therefore dispatches the independent benchmark steps to a bounded
-pool of worker processes that share the GPU (`--jobs N`; default auto from the
-CPU count, `--jobs 1` restores the original strictly-sequential behaviour):
+Phase 1 writes one `data/synthetic/<suite>/seed_XX.pt` per `(suite, seed)` plus a
+`synthetic/manifest.json` audit record (sizes, hashes, generator, `max_lag`).
+Copy that directory to the GPU server if you generate it elsewhere. `--clean`
+wipes a previous generation first; `--train-size` (default 65536) controls the
+pool size (larger is closer to fresh sampling). `run_crl_shared.py` then loads
+each pool, keeps it **resident on the GPU**, trains by resampling it, and
+evaluates on a **disjoint** held-out pool.
+
+Because the training set is finite and fixed, pool runs are a **different and
+finite-sample protocol** from the default fresh runs and must be reported
+separately. Pool mode currently covers the CRL shared suites and the
+eighteen-problem grid (the bulk of the run); the CTEE, SDD, adjacent and real
+families still sample fresh and remain CPU-bound — that is expected.
+
+Results land under `outputs/` and `outputs_shared/` (per-run rows as JSON/CSV,
+aggregates, Holm-corrected Wilcoxon tests, Friedman/Nemenyi summaries and CD
+diagrams), the LaTeX tables in `../latex/pic/experiments/`, and each step's
+logs in `outputs/logs/`.
+
+### A minimal run
 
 ```bash
-uv run python scripts/run_full_benchmark.py --device cuda --seeds 10 --jobs 8
+uv run python scripts/download_datasets.py                        # one-off: fetch datasets
+uv run python scripts/run_full_benchmark.py --soft --device cuda  # ~minutes smoke run
 ```
 
-On multi-GPU hosts `--gpus 0,1` pins steps round-robin via
-`CUDA_VISIBLE_DEVICES`; the 18-problem grid is split into two balanced shards by
-default (`--grid-shards 1` disables this). Every step writes exactly the same
-files as a sequential run, and each step's stdout/stderr is captured under
-`outputs/logs/`.
+Use `--suites ...` for a subset and `--with-grid` to include the
+eighteen-problem statistics grid.
 
-Because concurrent steps contend for CPU, their wall-clock `seconds` are no
-longer comparable to a sequential run: the orchestrator therefore records
-per-run timings as unavailable (the `Time (s)` column renders `--`) unless you
-pass `--keep-timing`. To produce the `Time (s)` column for the paper, run once
-with `--jobs 1` on an idle machine; thread counts are left untouched by default
-(`--threads 0`) so the *metrics* stay numerically identical to a sequential run.
+### Parallelism and timing
 
-### Progress and ClearML tracking
+The models are small and, under the default fresh protocol, the cost is
+dominated by CPU-side data generation, so the orchestrator runs the independent
+steps in a bounded pool of worker processes that share the GPU (`--jobs N`,
+default auto; `--jobs 1` restores strictly-sequential behaviour). On multi-GPU
+hosts `--gpus 0,1` pins the steps to GPUs round-robin.
 
-#### Terminal progress
+With `--data-source pool` the data bottleneck is gone and each worker is
+GPU-driven. Every worker still opens its **own CUDA context** (~0.5 GB on a
+Turing card), so on an 11 GB RTX 2080 Ti keep `--jobs` modest (2–4) and use
+`--gpus 0` to pin all steps to a single device; `--jobs 1` is the safest on a
+small card.
 
-Every benchmark process writes a `<stem>_progress.json` file (`done/total`,
-elapsed, ETA) next to its results. When `rich` is installed the orchestrator
-renders a live dashboard from those files — one bar per step plus an overall
-count and approximate remaining time — and falls back to a periodic plain log
-otherwise (`--no-dashboard`, `--dashboard-interval`).
+Because parallel workers contend for the CPU, per-run wall-clock times (`Time
+(s)` in the tables) are recorded as `--` unless you run with `--jobs 1`. The
+**metrics are unaffected** and identical to a sequential run.
 
-#### ClearML (optional web UI)
+### Progress
 
-Install the extra once:
+Each step writes a `<stem>_progress.json` file (`done/total`, elapsed, ETA) next
+to its results. With `rich` installed the orchestrator renders a live dashboard
+from those files — one bar per step, overall runs done/left, and an approximate
+remaining time — and otherwise falls back to a plain periodic summary.
+
+### Track runs in the ClearML web app
+
+[ClearML](https://clear.ml) provides a browsable web UI for the run. The hosted
+service at **app.clear.ml** needs no server of your own.
+
+**1. Get credentials.** Sign in at <https://app.clear.ml> (EU:
+<https://app.eu.clear.ml>, APAC: <https://app.apac.clear.ml>), open
+**Settings → Workspace → Create new credentials**, and copy the snippet.
+
+**2. Configure the machine.** Install the extra and log in once — the wizard
+writes `~/clearml.conf`:
 
 ```bash
-uv sync --extra tracking        # adds rich + clearml
+uv sync --extra tracking
+uv run --extra tracking clearml-init      # paste the API host, access key, secret key
 ```
 
-**1. Have a server.** Use an existing ClearML instance, or self-host one on the
-same box as the benchmark (the official Docker stack):
+**3. Run with tracking** (the `--extra` flag makes the packages available to the
+worker processes too):
 
 ```bash
-git clone https://github.com/allegroai/clearml-server.git
-cd clearml-server
-docker compose up -d            # API :8008, Web :8080, Files :8081
+uv run --extra tracking python scripts/run_full_benchmark.py --device cuda --seeds 10 --with-grid
 ```
 
-**2. Point the code at it.** The easiest way is the interactive wizard, which
-writes `~/clearml.conf` for you:
+**4. Watch it online.** Open <https://app.clear.ml> → project **GenCausModTS**.
+Each benchmark step becomes one task, with per-run metrics as charts and the
+training curves.
 
-```bash
-uv run --extra tracking clearml-init
-# Prompts for the API server, Web server and Files server, then for credentials.
-```
+Set `GCMTS_CLEARML_PROJECT` to rename the project, or `GCMTS_CLEARML=0` to
+disable tracking. If ClearML or the network is unavailable, tracking is a no-op
+and the benchmark still runs.
 
-Get credentials from the web UI: open the Web server, sign in, then
-**Settings → Workspace → Create new credentials** (copy the generated snippet).
-For non-interactive/remote runs you can export the standard variables instead
-of using `clearml-init`:
+### GPU utilisation and how to read it
 
-```bash
-export CLEARML_API_HOST=http://localhost:8008
-export CLEARML_WEB_HOST=http://localhost:8080
-export CLEARML_FILES_HOST=http://localhost:8081
-export CLEARML_API_ACCESS_KEY=...
-export CLEARML_API_SECRET_KEY=...
-# optional
-export GCMTS_CLEARML_PROJECT=GenCausModTS
-```
-
-**3. Run** (the `--extra` flag keeps the tracking packages available to the
-subprocess workers):
-
-```bash
-uv run --extra tracking python scripts/run_full_benchmark.py \
-    --device cuda --seeds 10 --jobs 8
-```
-
-You then get **one task per benchmark step** (e.g. `Benchmark A.1: …`,
-`CTEE static IHDP`, `CRL grid crl_shared_grid_a`) under the project, with each
-run's metrics as scalars (`series = method`, `iteration = seed`), every task's
-progress percentage, and seed-0 training curves.
-
-#### Can `your-server` be `localhost`?
-
-Yes — but note *which machine* resolves each host, because the three URLs are
-used by different clients:
-
-| Variable | Used by | `localhost` means |
-| --- | --- | --- |
-| `CLEARML_API_HOST` / `CLEARML_FILES_HOST` | the Python process (benchmark box) | the box running the benchmark |
-| `CLEARML_WEB_HOST` | your **browser** | the browser's machine |
-
-So `localhost` is correct **when the ClearML server runs on the same machine as
-the benchmark process**. Common cases:
-
-- **Server and benchmark on the same CUDA box.** Use `localhost` for all three.
-  If you open the UI from your laptop, tunnel the web port over SSH:
-  ```bash
-  ssh -N -L 8080:localhost:8080 -L 8008:localhost:8008 you@cuda-box
-  # then browse http://localhost:8080 locally
-  ```
-- **Server on your laptop, benchmark on the CUDA box.** `localhost` won't work
-  for the benchmark process: set `CLEARML_API_HOST`/`CLEARML_FILES_HOST` to the
-  laptop's LAN address (e.g. `http://192.168.1.20:8008`) and make ports 8008/8081
-  reachable from the box.
-- **Server on a third host.** Use its hostname for all three variables.
-
-#### If ClearML is unavailable
-
-Tracking is a no-op when the `clearml` package is missing, when the API host is
-unreachable (a 2 s TCP probe runs first), or when you set `GCMTS_CLEARML=0`;
-the benchmark keeps running. To run detached from any server and upload later,
-set `GCMTS_CLEARML_OFFLINE=1` and use `clearml-task`/`clearml-agent` to sync.
-
-### Data path and performance tuning
-
-Most suites are **CPU-bound**: each step regenerates its batch on the CPU
-(Python loops over `horizon × latent_dim`), which is far costlier than the tiny
-model step, so the GPU idles. Measure the split first, per suite:
+Under the fresh protocol each step regenerates its batch on the CPU, so the GPU
+idles and `nvidia-smi`'s instantaneous *Volatile GPU-Util* looks low (often
+single digits on an idle box). `scripts/profile_training.py` prints the per-step
+time split (`data`, `forward`, `loss`, `backward`, `optim`, `sync`) and accepts
+`--data-source pool`, so you can contrast the two paths:
 
 ```bash
 uv run python scripts/profile_training.py --suite npvar --method iVAE --device cuda
-uv run python scripts/profile_training.py --suite voronoi --method CITRIS --device cuda --json p.json
-```
-
-It prints the mean/median time and share of each phase (`data`, `forward`,
-`loss`, `backward`, `optim`, `sync`). Three results-neutral options can be
-enabled through the environment (honoured by every script via `SimpleTrainer`):
-
-```bash
-export GCMTS_PREFETCH=1     # generate the next batch on a background thread, overlapping compute
-export GCMTS_LIGHT_BATCH=1  # copy only x/context to the GPU during training (skip z/adjacency/...)
-export GCMTS_PROFILE=1      # print a phase profile at the end of each fit
-```
-
-These are **result-neutral**: the batches and the RNG sequence are unchanged
-(verified in `tests/test_data_path.py`). Gains are modest for the tiny-MLP
-suites (a few percent) because generation, not the host-to-device copy, is the
-bottleneck.
-
-For a genuinely large throughput win there is an explicitly **protocol-changing**
-mode: pre-generate a fixed pool of trajectories once and resample minibatches
-from it (this removes ~all per-step generation — e.g. Voronoi drops from ~21 ms
-to ~0.3 ms per step — but the data seen each step is no longer freshly drawn):
-
-```bash
-uv run python scripts/run_crl_shared.py --suite voronoi --device cuda --seeds 10 --pool-size 65536
-```
-
-Results from a pooled run are **not comparable** to a standard run and must be
-reported separately (see `gcmts/data/pool.py`).
-
-### Materialising the synthetic data once (persistent pools)
-
-The CRL benchmarks are CPU-bound because the runners generate trajectories on
-the fly. You can instead materialise the **fixed synthetic process** once — a
-train pool plus a *disjoint* held-out eval pool per `(suite, seed)` — and train
-from it. This preserves the protocol's invariant ("fixed seed schedules so that
-the latent variables, mechanisms, mixing map and graph are identical across
-methods") and additionally fixes the exact trajectories across methods.
-
-Generate everything (this deletes any previous generation first):
-
-```bash
-cd gcmts
-uv run python scripts/generate_synthetic_data.py --clean --seeds 10
-# include the 18-problem grid too (larger; more disk)
-uv run python scripts/generate_synthetic_data.py --clean --seeds 10 --with-grid
-```
-
-- Writes `data/synthetic/<suite>/seed_NN.pt` (train + eval pools) and
-  `data/synthetic/manifest.json` (sizes, generator, dims, `sha256`) for audit.
-- `--clean` removes `data/synthetic` first, so stale generations never linger.
-- Defaults: `--train-size 65536`, `--eval-size 4096`. A pool is **finite**: over
-  one run each trajectory is seen about `steps × batch_size / train_size` times,
-  unlike the standard fresh-sampling protocol. Raise `--train-size` to move
-  closer to fresh sampling, at the cost of disk/time.
-- Progress is written to `data/synthetic/generate_progress.json`.
-
-Now run the whole benchmark from those pools:
-
-```bash
-uv run python scripts/run_full_benchmark.py \
-    --device cuda --jobs 8 --seeds 10 --with-grid \
+uv run python scripts/profile_training.py --suite npvar --method iVAE --device cuda \
     --data-source pool --dataset-dir data/synthetic
 ```
 
-`--data-source pool` makes each CRL step load its `(suite, seed)` pool, train by
-resampling it, and evaluate on the disjoint eval pool; a **missing pool aborts
-that step** with a message telling you to run the generator. Coverage today is
-the **CRL shared suites and the grid**; CTEE temporal, SDD and the adjacent
-branches still sample fresh (they are a small share of the runtime).
+The pool path removes the `data` term and roughly doubles throughput, but note
+that these are **small models** (≈50k parameters): each step is a ~2 ms kernel
+burst, so the loop is latency-bound and Util still plateaus (~60–70%) even when
+perfectly fed. That is expected, not a bug — read the phase profile or
+`nvidia-smi dmon -s u` over time rather than a single instantaneous sample.
 
-> **Protocol note.** `--data-source pool` is a *different protocol* from the
-> default `fresh` runs — training data is a finite fixed set shared across
-> methods rather than freshly drawn each step — so pool runs must be reported
-> separately, or adopted as the protocol and **every** number regenerated. The
-> default is `--data-source fresh`.
+Three result-neutral switches, off by default and honoured by every script, help
+without changing the numbers: `GCMTS_PREFETCH` overlaps batch preparation with
+compute, `GCMTS_LIGHT_BATCH` copies only what training reads to the GPU, and
+`GCMTS_PROFILE` prints the phase profile. For a further speedup increase
+`--batch-size` (and `steps_per_epoch`) so each kernel does more work per launch.
 
-Per-step cost drops from ~`data` + GPU to `pool-index` + GPU (e.g. Voronoi from
-~2.9 h to ~11 min per run), so the run becomes GPU-bound and finishes far sooner.
+### Running on a remote GPU (e.g. RTX 2080 Ti)
 
-### Benchmark results
+- **Install.** `cd gcmts && uv sync --extra tracking` (Python 3.14). Verify the
+  GPU is visible and usable before a long run:
+  `uv run python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"`.
+  Turing (`sm_75`) needs a torch wheel that still ships that arch; if
+  `--device cuda` falls back to CPU, reinstall torch for a CUDA version that
+  supports it.
+- **Generate on either box.** Phase 1 is CPU-only, so generate on the server or
+  locally and copy `data/synthetic/` over.
+- **Launch under `tmux`/`nohup`.** The orchestrator writes results incrementally
+  (`*_progress.json`, per-run rows, `outputs/logs/`), so a dropped SSH session
+  does not lose the run. Add `2>&1 | tee outputs/run.log` to keep the console.
+- **Monitor.** `watch -n1 nvidia-smi` or `nvidia-smi dmon -s u` for utilisation;
+  a live dashboard is rendered when `rich` is installed.
+- **Restart safely.** `--data-source pool` refuses to run when a pool is
+  missing (it never silently falls back to fresh), so the pool generation is a
+  hard prerequisite.
 
-Each method is trained on the synthetic benchmark matching its assumptions;
-input/output shapes are validated and the aggregate results are written to
-`outputs/crl_benchmarks.{log,json,csv}`. The shared suites (NP/VAR, CartPole,
-Causal3DIdent, Voronoi) and the 18-problem grid are written to
-`outputs_shared/`, together with Holm-corrected Wilcoxon tests,
-Friedman/Nemenyi summaries and CD diagrams. Per-experiment training histories,
-model checkpoints, and training-curve figures (`training_curves.png/pdf`) are
-written to `outputs/<case>/`.
+### Determinism
 
-Preliminary results (`--batch-size 256`, single seed; RTX 3050):
+Every run seeds the model and the batch sampler from `--seeds`, in **both** the
+fresh and pool paths, so two runs with the same seed reproduce exactly (verify
+with `--seeds 1`). Pool runs differ from fresh runs only in the data protocol,
+never in model initialisation.
 
-| Case | Method | MCC | R²_diag | CPU s | GPU s |
-| --- | --- | ---: | ---: | ---: | ---: |
-| `ivae_linear` | IVAE | 0.646 | 0.427 | 55.7 | 61.9 |
-| `ivae_nonlinear` | IVAE | 0.416 | 0.221 | 42.0 | 50.4 |
-| `leap_temporal` | LEAP | 0.286 | 0.125 | 109.3 | 38.7 |
-| `slow_flows` | Slow Flows | 0.996 | 0.992 | 178.5 | 55.5 |
-| `citris_interventional` | CITRIS | 0.711 | 0.526 | 144.8 | 68.4 |
-| `tdrl_modular` | TDRL | 0.197 | 0.061 | 190.6 | 73.0 |
-| `nctrl_regimes` | NCTRL | 0.402 | 0.189 | 220.1 | 118.0 |
-| `mosaic_modules` | MOSAIC | 0.409 | 0.220 | 182.7 | 138.0 |
-| `cegen_sde` | CEGEN | W2 0.0014 | — | 125.2 | 114.7 |
+### Results
 
-Metrics are internally consistent (`R²_diag ≈ MCC²`). Slow Flows and CITRIS
-recover strongly; iVAE, NCTRL and MOSAIC are moderate; TDRL is weaker but above
-chance. CEGEN operates in observation space and is scored by its conditional W²
-loss. On GPU the suite is ≈1.7× faster at batch 256.
+Each method is trained on the synthetic process matching its assumptions and is
+scored with metrics that match the causal claim it makes (representation
+recovery, individual and marginal effects, invariance, ...). The comparative
+protocol uses ten seeds (mean±std), Holm-corrected paired Wilcoxon tests, and a
+Friedman/Nemenyi ranking of the CRL methods over an eighteen-problem
+configuration grid.
 
-These single-seed numbers are the implementation sanity check. The comparative
-protocol uses ten seeds: on NP/VAR no pairwise representation difference
-survives Holm correction, the forecast columns separate LEAP/NCTRL from
-iVAE/TDRL/MOSAIC, and the CRL methods are ranked over an eighteen-problem
-configuration grid with Friedman/Nemenyi tests (see `outputs_shared/` and
-`scripts/make_paper_tables.py`).
+Everything is written to `outputs/` and `outputs_shared/`, and
+`scripts/make_paper_tables.py` turns the raw rows into the LaTeX tables and
+critical-difference diagrams under `../latex/pic/experiments/`.
 
 ---
 

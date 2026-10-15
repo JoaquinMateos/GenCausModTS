@@ -545,6 +545,11 @@ def _run(
     else:
         # Pre-materialised fixed pool (see scripts/generate_synthetic_data.py).
         source = train_data
+    # Re-seed immediately before building the model so that weight initialisation
+    # is a deterministic function of ``seed`` in *both* data paths. The pool path
+    # skips ``make_generator`` and would otherwise initialise from the ambient
+    # RNG, making pool runs non-reproducible and incomparable to fresh runs.
+    torch.manual_seed(seed)
     model = factory()
     trainer = SimpleTrainer(
         max_epochs=epochs,
@@ -559,6 +564,12 @@ def _run(
         val_size=512,
         val_every=20,
     )
+    resolved = trainer.resolve_device(model)
+    # Keep a persisted pool resident on the training device so the per-step
+    # host->device copy disappears. This is numerically identical to feeding a
+    # CPU pool: only the index draw changes, and that still uses the CPU RNG.
+    if isinstance(source, PooledGenerator):
+        source.to(resolved)
     start = time.perf_counter()
     history = trainer.fit(model, source)
     seconds = wall_seconds(start)
@@ -568,7 +579,6 @@ def _run(
         if tracker is not None:
             tracker.log_curves(method, history)
 
-    resolved = trainer.resolve_device(model)
     raw_eval = eval_batch if eval_batch is not None else source.sample(2048)
     batch = move_batch(raw_eval, resolved)
     if suite.name == "sde":
