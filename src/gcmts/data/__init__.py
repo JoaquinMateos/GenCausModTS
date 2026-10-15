@@ -10,6 +10,7 @@ from gcmts.data.linear_processes import OUProcessGenerator, VARMAProcessGenerato
 from gcmts.data.lorenz import LorenzGenerator
 from gcmts.data.multi_objective import MultiObjectiveMDPGenerator
 from gcmts.data.physics import PhysicsSCMGenerator
+from gcmts.data.pool import PooledGenerator
 from gcmts.data.propagation import PropagationGenerator
 from gcmts.data.real import RealTimeSeries, RealTSGenerator
 from gcmts.data.real_formats import (
@@ -70,6 +71,7 @@ __all__ = [
     "TimeVaryingSEMGenerator",
     "LorenzGenerator",
     "PhysicsSCMGenerator",
+    "PooledGenerator",
     "PendulumGenerator",
     "MountainCarGenerator",
     "VARMAProcessGenerator",

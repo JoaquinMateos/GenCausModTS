@@ -3,7 +3,8 @@
 from gcmts.core import backbones, graph_ops, solvers
 from gcmts.core.base import BaseModel, BaseTrainer
 from gcmts.core.history import plot_training_curves, save_history, save_training_report
-from gcmts.core.trainer import SimpleTrainer, move_batch
+from gcmts.core.profiling import PhaseProfiler
+from gcmts.core.trainer import TRAIN_BATCH_KEYS, SimpleTrainer, move_batch
 from gcmts.core.tscm import LTSCM, TSCM
 from gcmts.core.utils import (
     hungarian_match,
@@ -16,6 +17,8 @@ __all__ = [
     "BaseModel",
     "BaseTrainer",
     "SimpleTrainer",
+    "PhaseProfiler",
+    "TRAIN_BATCH_KEYS",
     "move_batch",
     "TSCM",
     "LTSCM",

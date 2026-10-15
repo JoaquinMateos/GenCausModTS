@@ -2,40 +2,117 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
+import os
+import queue
+import threading
 from collections import defaultdict
+from collections.abc import Callable
 from typing import Any, cast
 
 import torch
 from torch import Tensor
 
 from gcmts.core.base import BaseModel, BaseTrainer
+from gcmts.core.profiling import PhaseProfiler
 from gcmts.typing import Batch
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["SimpleTrainer"]
+__all__ = ["SimpleTrainer", "move_batch"]
+
+#: Keys the training losses actually read (all CRL and effect methods use only
+#: ``x`` and ``context``); everything else is evaluation-only.
+TRAIN_BATCH_KEYS = frozenset({"x", "context"})
 
 
-def move_batch(batch: Batch, device: torch.device) -> Batch:
-    """Move every tensor in a :class:`Batch` to ``device`` in place."""
-    batch.x = batch.x.to(device)
-    if batch.z is not None:
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "0").strip().lower() not in {"", "0", "false", "no"}
+
+
+def _null_phase(name: str) -> contextlib.AbstractContextManager[None]:
+    return contextlib.nullcontext()
+
+
+def move_batch(
+    batch: Batch, device: torch.device, *, keys: frozenset[str] | None = None
+) -> Batch:
+    """Move every tensor in a :class:`Batch` to ``device`` in place.
+
+    ``keys`` restricts the move to a subset of fields (e.g.
+    :data:`TRAIN_BATCH_KEYS`), so evaluation-only tensors (``z``, ``adjacency``,
+    ``outcome``, ...) need not be copied during training.
+    """
+
+    def want(name: str) -> bool:
+        return keys is None or name in keys
+
+    if want("x"):
+        batch.x = batch.x.to(device)
+    if batch.z is not None and want("z"):
         batch.z = batch.z.to(device)
-    if batch.mask is not None:
+    if batch.mask is not None and want("mask"):
         batch.mask = batch.mask.to(device)
-    if batch.context is not None:
+    if batch.context is not None and want("context"):
         batch.context = {k: v.to(device) for k, v in batch.context.items()}
-    if batch.adjacency is not None:
+    if batch.adjacency is not None and want("adjacency"):
         batch.adjacency = batch.adjacency.to(device)
-    if batch.counterfactual is not None:
+    if batch.counterfactual is not None and want("counterfactual"):
         batch.counterfactual = batch.counterfactual.to(device)
-    if batch.outcome is not None:
+    if batch.outcome is not None and want("outcome"):
         batch.outcome = batch.outcome.to(device)
-    if batch.domain is not None:
+    if batch.domain is not None and want("domain"):
         batch.domain = batch.domain.to(device)
     return batch
+
+
+class _BatchPrefetcher:
+    """Generate training batches on a background thread.
+
+    Data generation is CPU-bound and dominates the step for most suites, while
+    the model step is small; producing batch ``i+1`` while step ``i`` runs hides
+    the compute behind generation. The worker is the only caller of the sampler,
+    so the RNG sequence (and therefore the training data) is unchanged.
+    """
+
+    def __init__(self, draw: Callable[[], Batch], *, depth: int = 2) -> None:
+        self._draw = draw
+        self._queue: queue.Queue[Batch | None] = queue.Queue(maxsize=max(depth, 1))
+        self._stop = threading.Event()
+        self._error: BaseException | None = None
+        self._thread = threading.Thread(target=self._run, name="gcmts-prefetch", daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        try:
+            while not self._stop.is_set():
+                batch = self._draw()
+                while not self._stop.is_set():
+                    try:
+                        self._queue.put(batch, timeout=0.2)
+                        break
+                    except queue.Full:
+                        continue
+        except BaseException as error:  # noqa: BLE001 - propagated via next()
+            self._error = error
+            with contextlib.suppress(queue.Full):
+                self._queue.put(None, timeout=0.2)
+
+    def next(self) -> Batch:
+        batch = self._queue.get()
+        if batch is None:
+            raise self._error or RuntimeError("batch prefetcher stopped unexpectedly")
+        return batch
+
+    def close(self) -> None:
+        self._stop.set()
+        with contextlib.suppress(queue.Empty):
+            while True:
+                self._queue.get_nowait()
+        self._thread.join(timeout=2.0)
+
 
 
 def _subset_batch(batch: Batch, indices: Tensor) -> Batch:
@@ -79,6 +156,13 @@ class SimpleTrainer(BaseTrainer):
         val_every: evaluate the validation batch every ``val_every`` epochs.
         early_stopping_patience: stop if validation loss does not improve for
             this many epochs (``None`` disables).
+        prefetch: generate the next training batch on a background thread while
+            the current step runs (results-neutral; defaults to ``GCMTS_PREFETCH``).
+        light_batch: copy only ``x`` and ``context`` to the device during
+            training, skipping evaluation-only tensors (defaults to
+            ``GCMTS_LIGHT_BATCH``).
+        profile: record per-phase step timings (defaults to ``GCMTS_PROFILE``);
+            intended for short diagnostic runs only.
     """
 
     def __init__(
@@ -99,6 +183,9 @@ class SimpleTrainer(BaseTrainer):
         val_size: int = 0,
         val_every: int = 1,
         early_stopping_patience: int | None = None,
+        prefetch: bool | None = None,
+        light_batch: bool | None = None,
+        profile: bool = False,
     ) -> None:
         super().__init__(max_epochs=max_epochs, device=device)
         if scheduler not in {"cosine", "plateau", "step", "none"}:
@@ -115,10 +202,14 @@ class SimpleTrainer(BaseTrainer):
         self.val_size = val_size
         self.val_every = max(1, val_every)
         self.early_stopping_patience = early_stopping_patience
+        self.prefetch = _env_flag("GCMTS_PREFETCH") if prefetch is None else prefetch
+        self.light_batch = _env_flag("GCMTS_LIGHT_BATCH") if light_batch is None else light_batch
+        self.profile = profile or _env_flag("GCMTS_PROFILE")
         self.generator = (
             torch.Generator().manual_seed(seed) if seed is not None else None
         )
         self.seed = seed
+        self.profiler: PhaseProfiler | None = None
         self._iterators: dict[int, Any] = {}
 
     def _build_scheduler(
@@ -198,7 +289,7 @@ class SimpleTrainer(BaseTrainer):
 
         logger.info(
             "Training %s on %s for %d epochs (%d steps/epoch, batch=%d, "
-            "scheduler=%s, val=%s, device=%s)",
+            "scheduler=%s, val=%s, device=%s, prefetch=%s, light_batch=%s)",
             type(model).__name__,
             type(train_data).__name__,
             self.max_epochs,
@@ -207,61 +298,101 @@ class SimpleTrainer(BaseTrainer):
             self.scheduler_name,
             val_batch is not None,
             device,
+            self.prefetch,
+            self.light_batch,
         )
 
-        for epoch in range(self.max_epochs):
-            terms: dict[str, list[float]] = defaultdict(list)
-            for _ in range(self.steps_per_epoch):
-                batch = move_batch(self._draw_batch(train_data), device)
-                outputs = model.forward(batch)
-                losses = model.loss(outputs, batch)
-                loss = losses["loss"]
-                if not torch.isfinite(loss):
-                    logger.warning("Non-finite loss at epoch %d; skipping step.", epoch)
-                    optimiser.zero_grad(set_to_none=True)
-                    continue
-                optimiser.zero_grad(set_to_none=True)
-                loss.backward()  # type: ignore[no-untyped-call]
-                if self.grad_clip is not None:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), self.grad_clip)
-                optimiser.step()
-                if per_step_scheduler and scheduler is not None:
-                    scheduler.step()
-                for name, value in losses.items():
-                    terms[name].append(float(value.detach().cpu()))
+        profiler = PhaseProfiler(enabled=self.profile, device=device)
+        self.profiler = profiler
+        phase = profiler.phase if self.profile else _null_phase
+        move_keys = TRAIN_BATCH_KEYS if self.light_batch else None
 
-            for name, values in terms.items():
-                history[name].append(sum(values) / len(values))
+        self._iterators.pop(id(train_data), None)
+        prefetcher: _BatchPrefetcher | None = None
+        if self.prefetch:
+            prefetcher = _BatchPrefetcher(lambda: self._draw_batch(train_data))
 
-            val_loss: float | None = None
-            if val_batch is not None:
-                if epoch % self.val_every == 0 or epoch == self.max_epochs - 1:
-                    val_loss = self._evaluate(model, val_batch)["loss"]
-                history["val_loss"].append(
-                    float("nan") if val_loss is None else val_loss
-                )
-            history["lr"].append(optimiser.param_groups[0]["lr"])
+        def draw() -> Batch:
+            return prefetcher.next() if prefetcher is not None else self._draw_batch(train_data)
 
-            if scheduler is not None and not per_step_scheduler:
-                if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                    scheduler.step(val_loss if val_loss is not None else history["loss"][-1])
-                else:
-                    scheduler.step()
+        try:
+            for epoch in range(self.max_epochs):
+                terms: dict[str, list[float]] = defaultdict(list)
+                for _ in range(self.steps_per_epoch):
+                    with phase("data"):
+                        batch = move_batch(draw(), device, keys=move_keys)
+                    with phase("forward"):
+                        outputs = model.forward(batch)
+                    with phase("loss"):
+                        losses = model.loss(outputs, batch)
+                        loss = losses["loss"]
+                    if not torch.isfinite(loss):
+                        logger.warning("Non-finite loss at epoch %d; skipping step.", epoch)
+                        optimiser.zero_grad(set_to_none=True)
+                        profiler.end_step()
+                        continue
+                    with phase("backward"):
+                        optimiser.zero_grad(set_to_none=True)
+                        loss.backward()  # type: ignore[no-untyped-call]
+                        if self.grad_clip is not None:
+                            torch.nn.utils.clip_grad_norm_(model.parameters(), self.grad_clip)
+                    with phase("optim"):
+                        optimiser.step()
+                        if per_step_scheduler and scheduler is not None:
+                            scheduler.step()
+                    with phase("sync"):
+                        names = list(losses)
+                        try:
+                            values = torch.stack(
+                                [losses[name].detach() for name in names]
+                            ).cpu().tolist()
+                        except (RuntimeError, TypeError):
+                            values = [float(losses[name].detach().cpu()) for name in names]
+                        for name, value in zip(names, values, strict=True):
+                            terms[name].append(float(value))
+                    profiler.end_step()
 
-            if self.log_every and (epoch % self.log_every == 0 or epoch == self.max_epochs - 1):
-                summary = ", ".join(f"{k}={v[-1]:.4f}" for k, v in history.items() if v)
-                logger.info("epoch %d/%d | %s", epoch + 1, self.max_epochs, summary)
+                for name, values in terms.items():
+                    history[name].append(sum(values) / len(values))
 
-            if self.early_stopping_patience is not None and val_loss is not None:
-                if val_loss < best_val - 1e-6:
-                    best_val = val_loss
-                    stale = 0
-                else:
-                    stale += 1
-                    if stale >= self.early_stopping_patience:
-                        logger.info("Early stopping at epoch %d.", epoch + 1)
-                        break
+                val_loss: float | None = None
+                if val_batch is not None:
+                    if epoch % self.val_every == 0 or epoch == self.max_epochs - 1:
+                        val_loss = self._evaluate(model, val_batch)["loss"]
+                    history["val_loss"].append(
+                        float("nan") if val_loss is None else val_loss
+                    )
+                history["lr"].append(optimiser.param_groups[0]["lr"])
 
+                if scheduler is not None and not per_step_scheduler:
+                    if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                        scheduler.step(
+                            val_loss if val_loss is not None else history["loss"][-1]
+                        )
+                    else:
+                        scheduler.step()
+
+                if self.log_every and (
+                    epoch % self.log_every == 0 or epoch == self.max_epochs - 1
+                ):
+                    summary = ", ".join(f"{k}={v[-1]:.4f}" for k, v in history.items() if v)
+                    logger.info("epoch %d/%d | %s", epoch + 1, self.max_epochs, summary)
+
+                if self.early_stopping_patience is not None and val_loss is not None:
+                    if val_loss < best_val - 1e-6:
+                        best_val = val_loss
+                        stale = 0
+                    else:
+                        stale += 1
+                        if stale >= self.early_stopping_patience:
+                            logger.info("Early stopping at epoch %d.", epoch + 1)
+                            break
+        finally:
+            if prefetcher is not None:
+                prefetcher.close()
+
+        if self.profile:
+            profiler.report(title=f"{type(model).__name__} step profile")
         return dict(history)
 
     def predict(self, model: BaseModel, data: Any) -> Tensor | dict[str, Tensor]:
