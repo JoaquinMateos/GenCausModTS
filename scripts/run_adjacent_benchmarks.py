@@ -44,7 +44,9 @@ from gcmts.evaluation.metrics import (
     SparsityMetric,
     StructuralViolationMetric,
 )
-from gcmts.evaluation.report import aggregate_rows, save_rows
+from gcmts.evaluation.progress import ProgressTracker
+from gcmts.evaluation.report import aggregate_rows, save_rows, wall_seconds
+from gcmts.evaluation.tracking import StepTracker
 from gcmts.explanation.methods import CausalConceptTS
 from gcmts.structure_discovery.methods import GBTPL
 
@@ -62,9 +64,9 @@ def _train(model: Any, generator: Any, epochs: int, device: str, seed: int) -> f
         seed=seed,
         device=device,
     )
-    start = time.time()
+    start = time.perf_counter()
     trainer.fit(model, generator)
-    return time.time() - start
+    return wall_seconds(start)
 
 
 def _gbtpl(device: str, epochs: int, seed: int) -> dict[str, float]:
@@ -147,12 +149,27 @@ def main() -> int:
 
     methods = args.methods or list(METHODS)
     rows: list[dict[str, Any]] = []
+    progress = ProgressTracker(
+        args.out_dir / "adjacent_benchmarks_progress.json",
+        "Adjacent branches + II.D",
+        len(methods) * args.seeds,
+    ).start()
+    step = StepTracker.start(
+        name="Adjacent branches + II.D",
+        params={"methods": list(methods), "seeds": args.seeds, "epochs": args.epochs},
+        tags=["adjacent"],
+        progress=progress,
+    )
     for name in methods:
         for seed in range(args.seeds):
             metrics = METHODS[name](args.device, args.epochs, seed)
             row = {"case": name, "method": name, "seed": seed, **metrics}
             rows.append(row)
             logger.info("%s seed=%d %s", name, seed, {k: round(v, 4) for k, v in metrics.items()})
+            progress.advance()
+            step.log_run(method=name, iteration=seed, metrics=metrics)
+    progress.finish()
+    step.close()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     save_rows(rows, args.out_dir, stem="adjacent_benchmarks")

@@ -50,7 +50,9 @@ from gcmts.data.synthetic import (
 )
 from gcmts.evaluation import BenchmarkTask, CrlBenchmarkRunner
 from gcmts.evaluation.metrics import SHDMetric, WSHDMetric
-from gcmts.evaluation.report import aggregate_rows, save_rows
+from gcmts.evaluation.progress import ProgressTracker
+from gcmts.evaluation.report import aggregate_rows, save_rows, wall_seconds
+from gcmts.evaluation.tracking import StepTracker
 
 logger = logging.getLogger("gcmts.benchmarks")
 
@@ -307,7 +309,7 @@ def run_case(
     )
     start = time.perf_counter()
     history = trainer.fit(model, generator)
-    seconds = time.perf_counter() - start
+    seconds = wall_seconds(start)
     final_loss = history["loss"][-1] if history.get("loss") else float("nan")
 
     if save_curves:
@@ -510,9 +512,21 @@ def main() -> int:
             return 2
     rows: list[dict[str, Any]] = []
     last_results: list[CaseResult] = []
+    progress = ProgressTracker(
+        args.out_dir / "crl_benchmarks_progress.json",
+        "CRL sanity (matching-benchmark)",
+        args.seeds * len(cases),
+    ).start()
+    step = StepTracker.start(
+        name="CRL sanity (matching-benchmark)",
+        params={"seeds": args.seeds, "cases": [c.name for c in cases], "quick": args.quick},
+        tags=["crl", "sanity"],
+        progress=progress,
+    )
     for seed in range(args.seeds):
-        last_results = [
-            run_case(
+        last_results = []
+        for cfg in cases:
+            result = run_case(
                 cfg,
                 device=args.device,
                 batch_size=args.batch_size,
@@ -520,9 +534,26 @@ def main() -> int:
                 seed=seed,
                 save_curves=(seed == 0),
             )
-            for cfg in cases
-        ]
-        rows.extend(asdict(r) for r in last_results)
+            last_results.append(result)
+            rows.append(asdict(result))
+            progress.advance()
+            step.log_run(
+                method=result.method,
+                iteration=seed,
+                params={"case": result.case},
+                metrics={
+                    "mcc": result.mcc,
+                    "r2_matched": result.r2_matched,
+                    "r2_sep": result.r2_sep,
+                    "dci_disentanglement": result.dci_disentanglement,
+                    "shd": result.shd,
+                    "wshd": result.wshd,
+                    "recon_mse": result.recon_mse,
+                    "w2": result.w2,
+                },
+            )
+    progress.finish()
+    step.close()
 
     print_table(last_results)
     save_rows(rows, args.out_dir, stem="crl_benchmarks")

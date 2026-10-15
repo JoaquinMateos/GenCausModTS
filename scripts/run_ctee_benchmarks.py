@@ -38,8 +38,10 @@ from gcmts.evaluation.metrics import (
     MMD2Metric,
     PEHEMetric,
 )
-from gcmts.evaluation.report import aggregate_rows, save_rows
+from gcmts.evaluation.progress import ProgressTracker
+from gcmts.evaluation.report import aggregate_rows, save_rows, wall_seconds
 from gcmts.evaluation.stats import paired_wilcoxon_holm
+from gcmts.evaluation.tracking import StepTracker
 
 logger = logging.getLogger("gcmts.ctee")
 
@@ -273,7 +275,7 @@ def run_case(
     )
     start = time.perf_counter()
     history = trainer.fit(model, generator)
-    seconds = time.perf_counter() - start
+    seconds = wall_seconds(start)
     if save_curves:
         save_training_report(history, exp_dir, title=f"{cfg.name} ({type(model).__name__})")
         model.save(exp_dir / "model.pt")
@@ -348,6 +350,17 @@ def main() -> int:
     if args.only:
         cases = [c for c in cases if c.name in set(args.only)]
     rows: list[dict[str, Any]] = []
+    progress = ProgressTracker(
+        args.out_dir / "ctee_benchmarks_progress.json",
+        "CTEE temporal",
+        args.seeds * len(cases),
+    ).start()
+    step = StepTracker.start(
+        name="CTEE temporal",
+        params={"seeds": args.seeds, "cases": [c.name for c in cases]},
+        tags=["ctee", "temporal"],
+        progress=progress,
+    )
     for seed in range(args.seeds):
         for cfg in cases:
             result = run_case(
@@ -357,6 +370,24 @@ def main() -> int:
             rows.append(asdict(result))
             # Incremental save: long runs remain analysable if interrupted.
             save_rows(rows, args.out_dir, stem="ctee_benchmarks")
+            progress.advance()
+            step.log_run(
+                method=result.method,
+                iteration=seed,
+                params={"dataset": result.dataset},
+                metrics={
+                    "pehe": result.pehe,
+                    "ate_error": result.ate_error,
+                    "cf_mae": result.cf_mae,
+                    "cf_mbe": result.cf_mbe,
+                    "mmd2": result.mmd2,
+                    "recon_axiom": result.recon_axiom,
+                    "effectiveness": result.effectiveness,
+                    "reversibility": result.reversibility,
+                },
+            )
+    progress.finish()
+    step.close()
     save_rows(rows, args.out_dir, stem="ctee_benchmarks")
     logger.info(
         "%-20s %14s %14s %14s %14s", "case", "PEHE", "eATE", "CFMAE", "MBE"

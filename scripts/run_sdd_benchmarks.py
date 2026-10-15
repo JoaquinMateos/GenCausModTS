@@ -26,8 +26,10 @@ import torch
 from gcmts.core import SimpleTrainer, move_batch, save_training_report
 from gcmts.data.synthetic_sdd import MultiDomainGenerator
 from gcmts.evaluation.metrics import CDSMetric, MIGMetric
-from gcmts.evaluation.report import aggregate_rows, save_rows
+from gcmts.evaluation.progress import ProgressTracker
+from gcmts.evaluation.report import aggregate_rows, save_rows, wall_seconds
 from gcmts.evaluation.stats import paired_wilcoxon_holm
+from gcmts.evaluation.tracking import StepTracker
 from gcmts.static_dynamic_disentanglement.base import BaseStaticDynamicDisentangler
 from gcmts.static_dynamic_disentanglement.methods import DANN, ERM, SYNC, VREx
 
@@ -178,7 +180,7 @@ def run_case(
     )
     start = time.perf_counter()
     history = trainer.fit(model, _SplitGenerator(generator, TRAIN_DOMAINS))
-    seconds = time.perf_counter() - start
+    seconds = wall_seconds(start)
     if save_curves:
         save_training_report(history, exp_dir, title=f"{cfg.name} ({type(model).__name__})")
         model.save(exp_dir / "model.pt")
@@ -285,6 +287,17 @@ def main() -> int:
     if args.only:
         cases = [c for c in cases if c.name in set(args.only)]
     rows: list[dict[str, Any]] = []
+    progress = ProgressTracker(
+        args.out_dir / "sdd_benchmarks_progress.json",
+        "SDD invariance",
+        args.seeds * len(cases) + 1,
+    ).start()
+    step = StepTracker.start(
+        name="SDD invariance",
+        params={"seeds": args.seeds, "cases": [c.name for c in cases]},
+        tags=["sdd"],
+        progress=progress,
+    )
     for seed in range(args.seeds):
         for cfg in cases:
             result = run_case(
@@ -293,7 +306,23 @@ def main() -> int:
             )
             rows.append(asdict(result))
             save_rows(rows, args.out_dir, stem="sdd_benchmarks")
+            progress.advance()
+            step.log_run(
+                method=result.method,
+                iteration=seed,
+                metrics={
+                    "id_mse": result.id_mse,
+                    "ood_mse": result.ood_mse,
+                    "ood_mae": result.ood_mae,
+                    "domain_accuracy": result.domain_accuracy,
+                    "mig": result.mig,
+                    "cds": result.cds,
+                },
+            )
     rows.append(asdict(oracle_result(args.out_dir)))
+    progress.advance()
+    progress.finish()
+    step.close()
     save_rows(rows, args.out_dir, stem="sdd_benchmarks")
     logger.info(
         "%-22s %8s %8s %8s %8s",

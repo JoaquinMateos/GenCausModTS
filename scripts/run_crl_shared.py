@@ -47,6 +47,7 @@ from gcmts.data.hierarchical import HierarchicalTemporalGenerator
 from gcmts.data.linear_processes import OUProcessGenerator, VARMAProcessGenerator
 from gcmts.data.lorenz import LorenzGenerator
 from gcmts.data.physics import PhysicsSCMGenerator
+from gcmts.data.pool import PooledGenerator
 from gcmts.data.synthetic import (
     CartPoleGenerator,
     Causal3DIdentGenerator,
@@ -57,7 +58,8 @@ from gcmts.data.voronoi import VoronoiGenerator
 from gcmts.evaluation import BenchmarkTask, CrlBenchmarkRunner
 from gcmts.evaluation.benchmarks import crl_label
 from gcmts.evaluation.metrics import SHDMetric, TripletDistanceMetric
-from gcmts.evaluation.report import aggregate_rows, save_rows
+from gcmts.evaluation.progress import ProgressTracker
+from gcmts.evaluation.report import aggregate_rows, save_rows, wall_seconds
 from gcmts.evaluation.stats import (
     friedman_test,
     metric_matrix,
@@ -65,6 +67,7 @@ from gcmts.evaluation.stats import (
     paired_wilcoxon_holm,
     plot_cd_diagram,
 )
+from gcmts.evaluation.tracking import StepTracker
 
 logger = logging.getLogger("gcmts.crl_shared")
 
@@ -505,9 +508,13 @@ def _run(
     batch_size: int,
     out_dir: Path,
     save_curves: bool,
+    tracker: StepTracker | None = None,
+    pool_size: int = 0,
 ) -> Row:
     torch.manual_seed(seed)
     generator = suite.make_generator(seed)
+    if pool_size:
+        generator = PooledGenerator(generator, pool_size, resample_seed=seed)
     model = factory()
     trainer = SimpleTrainer(
         max_epochs=epochs,
@@ -524,10 +531,12 @@ def _run(
     )
     start = time.perf_counter()
     history = trainer.fit(model, generator)
-    seconds = time.perf_counter() - start
+    seconds = wall_seconds(start)
     if save_curves:
         exp = out_dir / f"shared_{suite.name}_{method}"
         save_training_report(history, exp, title=f"{suite.name}/{method}")
+        if tracker is not None:
+            tracker.log_curves(method, history)
 
     resolved = trainer.resolve_device(model)
     batch = move_batch(generator.sample(2048), resolved)
@@ -736,12 +745,18 @@ def _baselines(suite: Suite) -> None:
     )
 
 
-def configure_logging(out_dir: Path) -> None:
+def configure_logging(out_dir: Path, name: str) -> None:
+    """Configure logging to ``<out_dir>/<name>.log``.
+
+    ``name`` is a full stem (e.g. ``crl_shared_npvar`` or
+    ``crl_shared_grid_a``) so that the concurrently-run benchmarks never share
+    a log file.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     root.handlers = [
-        logging.FileHandler(out_dir / "crl_shared.log", mode="w"),
+        logging.FileHandler(out_dir / f"{name}.log", mode="w"),
         logging.StreamHandler(),
     ]
 
@@ -758,6 +773,21 @@ def run_suite(args: argparse.Namespace) -> int:
         args.epochs_scale,
     )
     rows: list[dict[str, Any]] = []
+    total = args.seeds * len(methods)
+    progress = ProgressTracker(
+        args.out_dir / f"{stem}_progress.json", crl_label(suite.name), total
+    ).start()
+    step = StepTracker.start(
+        name=crl_label(suite.name),
+        params={
+            "suite": suite.name,
+            "seeds": args.seeds,
+            "epochs_scale": args.epochs_scale,
+            "methods": [name for name, _, _ in methods],
+        },
+        tags=["crl", suite.name],
+        progress=progress,
+    )
     for seed in range(args.seeds):
         for name, factory, epochs in methods:
             row = _run(
@@ -770,10 +800,31 @@ def run_suite(args: argparse.Namespace) -> int:
                 args.batch_size,
                 args.out_dir,
                 save_curves=(seed == 0),
+                tracker=step,
+                pool_size=args.pool_size,
             )
             rows.append(asdict(row))
             _log_rows(suite.name, name, seed, row)
             save_rows(rows, args.out_dir, stem=stem)
+            progress.advance()
+            step.log_run(
+                method=name,
+                iteration=seed,
+                metrics={
+                    "mcc": row.mcc,
+                    "r2_diag": row.r2_diag,
+                    "r2_sep": row.r2_sep,
+                    "dci": row.dci,
+                    "shd": row.shd,
+                    "triplet": row.triplet,
+                    "forecast1": row.forecast1,
+                    "forecast4": row.forecast4,
+                    "auprc": row.auprc,
+                    "w2": row.w2,
+                },
+            )
+    progress.finish()
+    step.close()
     save_rows(rows, args.out_dir, stem=stem)
     _log_aggregate(rows, [name for name, _, _ in methods], args.seeds)
     if args.baselines:
@@ -802,10 +853,37 @@ def run_grid(args: argparse.Namespace) -> int:
     if args.configs:
         wanted = set(args.configs)
         configs = [config for config in configs if config.name in wanted]
+    if args.shard_total:
+        if not 0 <= args.shard_index < args.shard_total:
+            logger.error(
+                "Invalid shard: --shard-index %d out of range for --shard-total %d.",
+                args.shard_index,
+                args.shard_total,
+            )
+            return 1
+        configs = configs[args.shard_index :: args.shard_total]
     if not configs:
-        logger.error("No grid configs selected; check --configs.")
+        logger.error("No grid configs selected; check --configs/--shard-index.")
         return 1
     stem = args.stem or "crl_shared_grid"
+    representative = build_methods(configs[0].as_suite(), epochs_scale=args.epochs_scale)
+    if args.only:
+        representative = [m for m in representative if m[0] in set(args.only)]
+    total = args.seeds * len(configs) * len(representative)
+    progress = ProgressTracker(
+        args.out_dir / f"{stem}_progress.json", f"Grid {stem} ({len(configs)} configs)", total
+    ).start()
+    step = StepTracker.start(
+        name=f"CRL grid {stem}",
+        params={
+            "configs": [c.name for c in configs],
+            "seeds": args.seeds,
+            "epochs_scale": args.epochs_scale,
+            "methods": [name for name, _, _ in representative],
+        },
+        tags=["crl", "grid", stem],
+        progress=progress,
+    )
     for seed in range(args.seeds):
         for config in configs:
             suite = config.as_suite()
@@ -823,11 +901,28 @@ def run_grid(args: argparse.Namespace) -> int:
                     args.batch_size,
                     args.out_dir,
                     save_curves=False,
+                    pool_size=args.pool_size,
                 )
                 row.dataset = config.name
                 rows.append(asdict(row))
                 _log_rows(config.name, name, seed, row)
                 save_rows(rows, args.out_dir, stem=stem)
+                progress.advance()
+                step.log_run(
+                    method=name,
+                    iteration=seed,
+                    params={"config": config.name},
+                    metrics={
+                        "mcc": row.mcc,
+                        "r2_diag": row.r2_diag,
+                        "r2_sep": row.r2_sep,
+                        "dci": row.dci,
+                        "forecast1": row.forecast1,
+                        "forecast4": row.forecast4,
+                    },
+                )
+    progress.finish()
+    step.close()
     save_rows(rows, args.out_dir, stem=stem)
     method_names = [name for name, _, _ in build_methods(configs[0].as_suite())]
     _log_aggregate(rows, method_names, args.seeds)
@@ -858,6 +953,22 @@ def main() -> int:
     parser.add_argument("--configs", nargs="*", default=None, help="grid config names to run")
     parser.add_argument("--stem", default=None, help="output stem for grid splits")
     parser.add_argument(
+        "--shard-index", type=int, default=0,
+        help="index of this grid shard (paired with --shard-total) to run configs round-robin",
+    )
+    parser.add_argument(
+        "--shard-total", type=int, default=0,
+        help="split the grid configs into this many round-robin shards (0 = run all)",
+    )
+    parser.add_argument(
+        "--pool-size", type=int, default=0,
+        help=(
+            "PROTOCOL-CHANGING throughput mode: pre-generate this many trajectories "
+            "and resample minibatches instead of drawing fresh data each step "
+            "(results are not comparable to a standard run)"
+        ),
+    )
+    parser.add_argument(
         "--epochs-scale",
         type=float,
         default=1.0,
@@ -866,9 +977,10 @@ def main() -> int:
     parser.add_argument("--no-baselines", dest="baselines", action="store_false")
     parser.add_argument("--out-dir", type=Path, default=Path("outputs"))
     args = parser.parse_args()
-    configure_logging(args.out_dir)
     if args.grid:
+        configure_logging(args.out_dir, args.stem or "crl_shared_grid")
         return run_grid(args)
+    configure_logging(args.out_dir, f"crl_shared_{args.suite}")
     return run_suite(args)
 
 

@@ -45,8 +45,10 @@ from gcmts.effect_estimation.base import BaseEffectEstimator
 from gcmts.effect_estimation.methods import CEPAE, CRN, GANITE, CaTSG
 from gcmts.evaluation.benchmarks import CTEE_REAL_BENCHMARKS
 from gcmts.evaluation.metrics import PolicyRiskMetric
-from gcmts.evaluation.report import aggregate_rows, save_rows
+from gcmts.evaluation.progress import ProgressTracker
+from gcmts.evaluation.report import aggregate_rows, save_rows, wall_seconds
 from gcmts.evaluation.stats import paired_wilcoxon_holm
+from gcmts.evaluation.tracking import StepTracker
 
 logger = logging.getLogger("gcmts.ctee_static")
 
@@ -255,7 +257,7 @@ def run_replication(
         )
         start = time.perf_counter()
         history = trainer.fit(model, train_generator)
-        seconds = time.perf_counter() - start
+        seconds = wall_seconds(start)
         if save_curves:
             save_training_report(history, exp_dir, title=f"{method_name}_{dataset}")
         resolved = trainer.resolve_device(model)
@@ -370,6 +372,22 @@ def main() -> int:
     configure_logging(args.out_dir, args.dataset)
     methods = args.methods or list(METHODS)
     rows: list[dict[str, Any]] = []
+    total = args.replications * len(methods)
+    progress = ProgressTracker(
+        args.out_dir / f"ctee_static_{args.dataset}_progress.json",
+        f"CTEE static {args.dataset}",
+        total,
+    ).start()
+    step = StepTracker.start(
+        name=f"CTEE static {args.dataset.upper()}",
+        params={
+            "dataset": args.dataset,
+            "replications": args.replications,
+            "methods": list(methods),
+        },
+        tags=["ctee", "static", args.dataset],
+        progress=progress,
+    )
     for index in range(args.replications):
         results = run_replication(
             args.dataset,
@@ -383,6 +401,19 @@ def main() -> int:
         )
         rows.extend(asdict(result) for result in results)
         save_rows(rows, args.out_dir, stem=f"ctee_static_{args.dataset}")
+        progress.advance(len(results))
+        for result in results:
+            step.log_run(
+                method=result.method,
+                iteration=index,
+                metrics={
+                    "pehe": result.pehe,
+                    "ate_error": result.ate_error,
+                    "policy_risk": result.policy_risk,
+                },
+            )
+    progress.finish()
+    step.close()
     aggregated = aggregate_rows(rows)
     logger.info("%-24s %12s %12s %12s", "case", "PEHE", "eATE", "Risk")
     for case, metrics in aggregated.items():

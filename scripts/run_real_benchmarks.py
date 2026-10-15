@@ -29,7 +29,9 @@ from gcmts.causal_representation_learning.base import BaseCausalRepresentationLe
 from gcmts.causal_representation_learning.methods import IVAE, LEAP, MOSAIC, NCTRL, TDRL
 from gcmts.core import SimpleTrainer, save_training_report
 from gcmts.data.real import RealTimeSeries, RealTSGenerator
-from gcmts.evaluation.report import aggregate_rows, save_rows
+from gcmts.evaluation.progress import ProgressTracker
+from gcmts.evaluation.report import aggregate_rows, save_rows, wall_seconds
+from gcmts.evaluation.tracking import StepTracker
 
 logger = logging.getLogger("gcmts.real")
 
@@ -206,7 +208,7 @@ def run_case(
     )
     start = time.perf_counter()
     history = trainer.fit(model, RealTSGenerator(series))
-    seconds = time.perf_counter() - start
+    seconds = wall_seconds(start)
     if save_curves:
         save_training_report(
             history, out_dir / f"real_{spec.name}_{method}", title=f"{spec.name}/{method}"
@@ -306,6 +308,20 @@ def main() -> int:
     ]
 
     rows: list[dict[str, Any]] = []
+    counted_methods = build_methods(8, 4)
+    if args.only:
+        counted_methods = [m for m in counted_methods if m[0] in set(args.only)]
+    progress = ProgressTracker(
+        args.out_dir / "real_benchmarks_progress.json",
+        "Real external validity",
+        len(args.datasets) * args.seeds * len(counted_methods),
+    ).start()
+    step = StepTracker.start(
+        name="Real external validity",
+        params={"datasets": list(args.datasets), "seeds": args.seeds},
+        tags=["real", "external-validity"],
+        progress=progress,
+    )
     for name in args.datasets:
         spec = DATASETS[name]
         probe = RealTimeSeries(
@@ -322,18 +338,30 @@ def main() -> int:
             methods = [m for m in methods if m[0] in set(args.only)]
         for seed in range(args.seeds):
             for method, factory, epochs in methods:
-                rows.append(
-                    run_case(
-                        spec,
-                        method,
-                        factory,
-                        epochs,
-                        seed,
-                        args.device,
-                        args.out_dir,
-                        save_curves=(seed == 0),
-                    )
+                result = run_case(
+                    spec,
+                    method,
+                    factory,
+                    epochs,
+                    seed,
+                    args.device,
+                    args.out_dir,
+                    save_curves=(seed == 0),
                 )
+                rows.append(result)
+                progress.advance()
+                step.log_run(
+                    method=method,
+                    iteration=seed,
+                    params={"dataset": spec.name},
+                    metrics={
+                        "recon_mse": result.get("recon_mse"),
+                        "forecast1_mse": result.get("forecast1_mse"),
+                        "forecast4_mse": result.get("forecast4_mse"),
+                    },
+                )
+    progress.finish()
+    step.close()
 
     save_rows(rows, args.out_dir, stem="real_benchmarks")
     aggregated = aggregate_rows(rows)

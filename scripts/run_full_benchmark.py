@@ -10,9 +10,35 @@ Soft smoke run (fast, few seeds/epochs, small replications):
 
     uv run python scripts/run_full_benchmark.py --soft --device cuda
 
+Parallelism
+-----------
+The individual runs train *small* models whose cost is dominated by CPU-side
+data generation, so a single process leaves the GPU almost entirely idle
+(typically ~1% utilisation). The benchmark families are independent, so this
+orchestrator dispatches them to a bounded pool of worker processes that share
+the GPU, keeping it fed instead of serialising everything behind one CPU-bound
+process:
+
+    uv run python scripts/run_full_benchmark.py --device cuda --seeds 10 --jobs 8
+
+``--jobs 1`` reproduces the original strictly-sequential behaviour. On hosts
+with several GPUs, ``--gpus 0,1`` pins the worker steps round-robin to the
+listed devices (via ``CUDA_VISIBLE_DEVICES``). Each step still writes exactly
+the same output files as before, so results are bit-for-bit identical to a
+sequential run. The 18-problem grid is split into two balanced shards
+(``crl_shared_grid_a`` / ``crl_shared_grid_b``, both read by
+``make_paper_tables.py``); disable with ``--grid-shards 1``.
+
+A live progress dashboard (Rich, when installed) reads the per-step
+``*_progress.json`` files and shows runs done/left plus an approximate ETA, and
+ClearML tracking is available with the optional ``tracking`` extra
+(``uv sync --extra tracking``); see ``README.md`` for the self-hosted ClearML
+environment variables. Disable the dashboard with ``--no-dashboard``.
+
 Everything is written under ``outputs/`` and ``outputs_shared/`` and the tables
 into ``../latex/pic/experiments/``; a JSON summary and a log are written to
-``outputs/full_benchmark_summary.json`` and ``outputs/full_benchmark.log``.
+``outputs/full_benchmark_summary.json`` and ``outputs/full_benchmark.log`` while
+each step's own stdout/stderr is captured under ``outputs/logs/``.
 """
 
 from __future__ import annotations
@@ -20,9 +46,15 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
+import re
 import subprocess
 import sys
+import threading
 import time
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,6 +64,7 @@ from gcmts.evaluation.benchmarks import (
     CTEE_STATIC_BENCHMARKS,
     crl_label,
 )
+from gcmts.evaluation.progress import format_duration, read_progress
 
 LOGGER = logging.getLogger("gcmts.full")
 
@@ -51,11 +84,20 @@ REAL_PANELS = {
     "cesm2": "cesm2.csv",
 }
 
+# Stems already understood by ``make_paper_tables.write_stats_section``.
+_GRID_SHARD_STEMS = {1: ("crl_shared_grid",), 2: ("crl_shared_grid_a", "crl_shared_grid_b")}
+
 
 @dataclass
 class Step:
     name: str
     command: list[str]
+    barrier: bool = False  # run only after every non-barrier step has finished
+    progress: Path | None = None  # *_progress.json written by the step
+
+
+def _progress(out_dir: str, stem: str) -> Path:
+    return Path(out_dir) / f"{stem}_progress.json"
 
 
 def build_steps(args: argparse.Namespace) -> list[Step]:
@@ -73,6 +115,7 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
                 [py, "scripts/run_crl_shared.py", "--device", device, "--suite", suite,
                  "--seeds", str(seeds), "--epochs-scale", str(epochs_scale),
                  "--out-dir", "outputs_shared"],
+                progress=_progress("outputs_shared", f"crl_shared_{suite}"),
             )
         )
     if not args.suites:
@@ -81,6 +124,7 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
                 "CRL sanity (matching-benchmark)",
                 [py, "scripts/run_crl_benchmarks.py", "--device", device,
                  "--seeds", str(seeds), "--out-dir", "outputs"],
+                progress=_progress("outputs", "crl_benchmarks"),
             )
         )
         steps.append(
@@ -88,6 +132,7 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
                 "CTEE temporal",
                 [py, "scripts/run_ctee_benchmarks.py", "--device", device,
                  "--datasets", *CTEE_DATASETS, "--seeds", str(seeds), "--out-dir", "outputs"],
+                progress=_progress("outputs", "ctee_benchmarks"),
             )
         )
         for dataset in CTEE_STATIC_BENCHMARKS:
@@ -96,6 +141,7 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
                     f"CTEE static {dataset.upper()}",
                     [py, "scripts/run_ctee_static.py", "--device", device, "--dataset", dataset,
                      "--replications", str(args.replications), "--out-dir", "outputs"],
+                    progress=_progress("outputs", f"ctee_static_{dataset}"),
                 )
             )
         steps.append(
@@ -103,6 +149,7 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
                 "SDD invariance",
                 [py, "scripts/run_sdd_benchmarks.py", "--device", device,
                  "--seeds", str(seeds), "--out-dir", "outputs"],
+                progress=_progress("outputs", "sdd_benchmarks"),
             )
         )
         steps.append(
@@ -110,6 +157,7 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
                 "Adjacent branches + II.D",
                 [py, "scripts/run_adjacent_benchmarks.py", "--device", device,
                  "--seeds", str(seeds), "--out-dir", "outputs"],
+                progress=_progress("outputs", "adjacent_benchmarks"),
             )
         )
         for dataset in CTEE_REAL_BENCHMARKS:
@@ -118,6 +166,7 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
                     f"CTEE real {dataset}",
                     [py, "scripts/run_ctee_static.py", "--device", device, "--dataset", dataset,
                      "--replications", "1", "--out-dir", "outputs"],
+                    progress=_progress("outputs", f"ctee_static_{dataset}"),
                 )
             )
         real_dir = Path("data/real")
@@ -128,25 +177,253 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
                     "Real external validity",
                     [py, "scripts/run_real_benchmarks.py", "--device", device,
                      "--datasets", *available, "--seeds", str(seeds), "--out-dir", "outputs"],
+                    progress=_progress("outputs", "real_benchmarks"),
                 )
             )
     if args.with_grid:
-        steps.append(
-            Step(
-                "CRL 18-problem grid",
-                [py, "scripts/run_crl_shared.py", "--device", device, "--grid",
-                 "--seeds", str(seeds), "--epochs-scale", str(epochs_scale),
-                 "--out-dir", "outputs_shared"],
+        stems = _GRID_SHARD_STEMS[args.grid_shards]
+        if args.grid_shards == 1:
+            steps.append(
+                Step(
+                    "CRL 18-problem grid",
+                    [py, "scripts/run_crl_shared.py", "--device", device, "--grid",
+                     "--seeds", str(seeds), "--epochs-scale", str(epochs_scale),
+                     "--out-dir", "outputs_shared"],
+                    progress=_progress("outputs_shared", "crl_shared_grid"),
+                )
             )
-        )
+        else:
+            for index, stem in enumerate(stems):
+                steps.append(
+                    Step(
+                        f"CRL 18-problem grid [{index + 1}/{args.grid_shards}]",
+                        [py, "scripts/run_crl_shared.py", "--device", device, "--grid",
+                         "--shard-index", str(index), "--shard-total", str(args.grid_shards),
+                         "--stem", stem, "--seeds", str(seeds),
+                         "--epochs-scale", str(epochs_scale), "--out-dir", "outputs_shared"],
+                        progress=_progress("outputs_shared", stem),
+                    )
+                )
     steps.append(
         Step(
             "Regenerate LaTeX tables",
             [py, "scripts/make_paper_tables.py", "--shared-dir", "outputs_shared",
              "--outputs-dir", "outputs", "--latex-dir", "../latex"],
+            barrier=True,
         )
     )
     return steps
+
+
+def _slug(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_")[:80] or "step"
+
+
+def _resolve_schedule(args: argparse.Namespace, n_steps: int) -> tuple[int, list[str]]:
+    """Return ``(jobs, gpus)`` for this run."""
+    cpu = os.cpu_count() or 4
+    # CPU-bound workload: use the cores, leave headroom for the OS/GPU driver.
+    auto_jobs = max(1, min(n_steps, cpu - 1 if cpu > 2 else cpu, 8))
+    jobs = args.jobs if args.jobs > 0 else auto_jobs
+    gpus = [gpu.strip() for gpu in args.gpus.split(",") if gpu.strip()]
+    return jobs, gpus
+
+
+def _run_step(
+    step: Step,
+    index: int,
+    gpus: list[str],
+    threads: int,
+    extra_env: dict[str, str],
+    log_dir: Path,
+) -> dict[str, object]:
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    if threads > 0:
+        # Opt-in thread cap to limit oversubscription under high ``--jobs``.
+        # Left untouched by default so runs stay numerically identical to a
+        # sequential run (a different thread count can change FP reduction order).
+        for key in (
+            "OMP_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+        ):
+            env[key] = str(threads)
+    env.update(extra_env)
+    if gpus:
+        env["CUDA_VISIBLE_DEVICES"] = gpus[index % len(gpus)]
+
+    log_path = log_dir / f"{index:02d}_{_slug(step.name)}.log"
+    LOGGER.info("RUN %s -> %s", step.name, log_path)
+    start = time.time()
+    with log_path.open("w", encoding="utf-8") as handle:
+        handle.write("$ " + " ".join(step.command) + "\n\n")
+        handle.flush()
+        completed = subprocess.run(step.command, stdout=handle, stderr=subprocess.STDOUT, env=env)
+    elapsed = time.time() - start
+    LOGGER.info("DONE %s in %.1fs (exit=%d)", step.name, elapsed, completed.returncode)
+    return {"step": step.name, "seconds": elapsed, "exit": completed.returncode}
+
+
+# -- live progress dashboard ------------------------------------------------
+def _step_progress(steps: list[Step]) -> tuple[list[tuple[Step, object]], int, int]:
+    """Return ``(rows, total_done, total_planned)`` from the progress files."""
+    rows: list[tuple[Step, object]] = []
+    total_done = total_planned = 0
+    for step in steps:
+        snapshot = read_progress(step.progress) if step.progress is not None else None
+        rows.append((step, snapshot))
+        if snapshot is not None:
+            total_done += snapshot.done
+            total_planned += snapshot.total
+    return rows, total_done, total_planned
+
+
+def _render_dashboard(steps: list[Step], started: float) -> object:
+    from rich.console import Group
+    from rich.progress_bar import ProgressBar
+    from rich.table import Table
+    from rich.text import Text
+
+    table = Table(title="GenCausModTS full benchmark", expand=True, pad_edge=False)
+    table.add_column("Step", ratio=2, overflow="fold")
+    table.add_column("Progress", ratio=3)
+    table.add_column("Runs", justify="right")
+    table.add_column("Elapsed", justify="right")
+    table.add_column("ETA", justify="right")
+
+    rows, total_done, total_planned = _step_progress(steps)
+    for step, snapshot in rows:
+        if snapshot is None:
+            table.add_row(step.name, Text("queued", style="dim"), "-", "-", "-")
+            continue
+        bar = ProgressBar(total=max(snapshot.total, 1), completed=snapshot.done, width=None)
+        runs = f"{snapshot.done}/{snapshot.total}"
+        if snapshot.errors:
+            runs += f" ({snapshot.errors} err)"
+        eta = "done" if snapshot.finished else format_duration(snapshot.eta_seconds)
+        table.add_row(
+            step.name, bar, runs, format_duration(snapshot.elapsed), eta
+        )
+
+    elapsed = time.time() - started
+    if total_planned and total_done:
+        left = max(total_planned - total_done, 0)
+        eta = elapsed / total_done * left
+        footer = (
+            f"Overall {total_done}/{total_planned} runs "
+            f"({100 * total_done / total_planned:.0f}%) | elapsed {format_duration(elapsed)}"
+            f" | ~{format_duration(eta)} left"
+        )
+    elif total_planned:
+        footer = f"Overall 0/{total_planned} runs | elapsed {format_duration(elapsed)}"
+    else:
+        footer = f"Starting... elapsed {format_duration(elapsed)}"
+    return Group(table, Text(footer, style="bold"))
+
+
+def _plain_summary(steps: list[Step], started: float) -> str:
+    rows, total_done, total_planned = _step_progress(steps)
+    parts = [
+        f"{snapshot.label or step.name}: {snapshot.done}/{snapshot.total}"
+        for step, snapshot in rows
+        if snapshot is not None
+    ]
+    head = (
+        f"progress {total_done}/{total_planned} runs, "
+        f"elapsed {format_duration(time.time() - started)}"
+    )
+    return head + (" | " + "; ".join(parts) if parts else "")
+
+
+class _Dashboard:
+    """Live ``rich`` dashboard (TTY) or periodic plain-text summary otherwise."""
+
+    def __init__(
+        self,
+        steps: list[Step],
+        log_path: Path,
+        *,
+        enabled: bool = True,
+        interval: float = 2.0,
+    ) -> None:
+        self.steps = steps
+        self.log_path = log_path
+        self.enabled = enabled
+        self.interval = interval
+        self.started = time.time()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._rich = False
+        self._live: object | None = None
+        self._saved_handlers: list[logging.Handler] = []
+
+    def _rich_available(self) -> bool:
+        try:
+            import rich  # noqa: F401
+        except ImportError:
+            return False
+        return sys.stderr.isatty()
+
+    def start(self) -> None:
+        if not self.enabled or not self.steps:
+            return
+        if self._rich_available():
+            from rich.console import Console
+            from rich.live import Live
+            from rich.logging import RichHandler
+
+            console = Console(stderr=True)
+            root = logging.getLogger()
+            self._saved_handlers = root.handlers[:]
+            root.handlers = [
+                RichHandler(console=console, show_path=False, rich_tracebacks=True),
+                logging.FileHandler(self.log_path),
+            ]
+            self._live = Live(
+                _render_dashboard(self.steps, self.started),
+                console=console,
+                refresh_per_second=1,
+                transient=False,
+            )
+            self._live.start()
+            self._rich = True
+            self._thread = threading.Thread(target=self._rich_loop, daemon=True)
+        else:
+            self._thread = threading.Thread(target=self._plain_loop, daemon=True)
+        self._thread.start()
+
+    def _rich_loop(self) -> None:
+        while not self._stop.wait(self.interval):
+            self._live.update(_render_dashboard(self.steps, self.started))  # type: ignore[attr-defined]
+
+    def _plain_loop(self) -> None:
+        while not self._stop.wait(max(self.interval, 30.0)):
+            LOGGER.info("%s", _plain_summary(self.steps, self.started))
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=max(self.interval, 30.0) + 1)
+        if self._rich and self._live is not None:
+            self._live.update(_render_dashboard(self.steps, self.started))  # type: ignore[attr-defined]
+            self._live.stop()  # type: ignore[attr-defined]
+            logging.getLogger().handlers = self._saved_handlers
+        elif self.enabled and self.steps:
+            LOGGER.info("%s (finished)", _plain_summary(self.steps, self.started))
+
+
+@contextmanager
+def _dashboard(
+    steps: list[Step], log_path: Path, *, enabled: bool, interval: float
+) -> Iterator[None]:
+    dashboard = _Dashboard(steps, log_path, enabled=enabled, interval=interval)
+    dashboard.start()
+    try:
+        yield
+    finally:
+        dashboard.stop()
 
 
 def main() -> int:
@@ -159,6 +436,46 @@ def main() -> int:
     parser.add_argument("--with-grid", action="store_true", help="also run the 18-problem grid")
     parser.add_argument("--suites", nargs="*", default=None, help="only these CRL suites")
     parser.add_argument("--dry-run", action="store_true", help="print the commands only")
+    parser.add_argument(
+        "--jobs", type=int, default=0,
+        help=(
+            "max concurrent benchmark steps sharing the GPU "
+            "(0 = auto from CPU count; 1 = sequential)"
+        ),
+    )
+    parser.add_argument(
+        "--threads", type=int, default=0,
+        help=(
+            "cap intra-op threads per worker (0 = leave the environment "
+            "untouched, preserving sequential-equivalent numerics)"
+        ),
+    )
+    parser.add_argument(
+        "--gpus", default="",
+        help=(
+            "comma-separated GPU ids to pin steps to round-robin, "
+            "e.g. '0' or '0,1' (default: inherit)"
+        ),
+    )
+    parser.add_argument(
+        "--keep-timing", action="store_true",
+        help=(
+            "record per-run seconds even when steps run concurrently "
+            "(the times are inflated by CPU contention; off by default)"
+        ),
+    )
+    parser.add_argument(
+        "--no-dashboard", action="store_true",
+        help="disable the live Rich progress dashboard (periodic plain summary only)",
+    )
+    parser.add_argument(
+        "--dashboard-interval", type=float, default=2.0,
+        help="dashboard refresh interval in seconds (default: 2)",
+    )
+    parser.add_argument(
+        "--grid-shards", type=int, choices=(1, 2), default=2,
+        help="split the 18-problem grid into 1 or 2 balanced shards (default: 2)",
+    )
     args = parser.parse_args()
 
     if args.soft:
@@ -175,36 +492,89 @@ def main() -> int:
     )
 
     steps = build_steps(args)
+    if args.dry_run:
+        for step in steps:
+            print(" ".join(step.command))
+        return 0
+
+    data_steps = [step for step in steps if not step.barrier]
+    barrier_steps = [step for step in steps if step.barrier]
+    jobs, gpus = _resolve_schedule(args, len(data_steps))
+    threads = args.threads  # 0 = leave the environment untouched
+    log_dir = out / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    extra_env: dict[str, str] = {}
+    if jobs > 1 and not args.keep_timing:
+        # Wall-clock times under CPU contention are not comparable across
+        # methods or to a sequential run, so suppress them by default.
+        extra_env["GCMTS_TIMING"] = "0"
+        LOGGER.warning(
+            "Running %d steps concurrently: per-run 'seconds' will be recorded as "
+            "unavailable to avoid contention-inflated timings. Use --jobs 1 (or "
+            "--keep-timing) if you need the Time column.",
+            jobs,
+        )
+
     LOGGER.info(
-        "Full benchmark: %d steps (device=%s, seeds=%d, epochs_scale=%.2f, replications=%d)",
-        len(steps),
+        "Full benchmark: %d steps + %d barrier step(s) (device=%s, seeds=%d, "
+        "epochs_scale=%.2f, replications=%d, jobs=%d, threads/job=%s, gpus=%s)",
+        len(data_steps),
+        len(barrier_steps),
         args.device,
         args.seeds,
         args.epochs_scale,
         args.replications,
+        jobs,
+        threads if threads > 0 else "default",
+        ",".join(gpus) or "inherit",
     )
 
-    summary: list[dict[str, object]] = []
-    for step in steps:
-        printable = " ".join(step.command)
-        if args.dry_run:
-            print(printable)
-            continue
-        LOGGER.info("RUN %s", step.name)
-        start = time.time()
-        completed = subprocess.run(step.command, check=False)
-        elapsed = time.time() - start
-        LOGGER.info("DONE %s in %.1fs (exit=%d)", step.name, elapsed, completed.returncode)
-        summary.append({"step": step.name, "seconds": elapsed, "exit": completed.returncode})
+    summary_by_index: dict[int, dict[str, object]] = {}
+    with _dashboard(
+        data_steps,
+        out / "full_benchmark.log",
+        enabled=not args.no_dashboard,
+        interval=args.dashboard_interval,
+    ):
+        if jobs <= 1 or len(data_steps) <= 1:
+            for index, step in enumerate(data_steps):
+                summary_by_index[index] = _run_step(
+                    step, index, gpus, threads, extra_env, log_dir
+                )
+        else:
+            with ThreadPoolExecutor(max_workers=jobs) as pool:
+                futures = {
+                    pool.submit(
+                        _run_step, step, index, gpus, threads, extra_env, log_dir
+                    ): index
+                    for index, step in enumerate(data_steps)
+                }
+                for future in as_completed(futures):
+                    index = futures[future]
+                    try:
+                        summary_by_index[index] = future.result()
+                    except Exception:  # pragma: no cover - surfaced below
+                        LOGGER.exception("Step %s crashed", data_steps[index].name)
+                        summary_by_index[index] = {
+                            "step": data_steps[index].name,
+                            "seconds": float("nan"),
+                            "exit": -1,
+                        }
 
-    if not args.dry_run:
-        (out / "full_benchmark_summary.json").write_text(
-            json.dumps(summary, indent=2), encoding="utf-8"
-        )
-        failures = [row for row in summary if row["exit"] != 0]
-        LOGGER.info("Finished: %d steps, %d failed.", len(summary), len(failures))
-        for row in failures:
-            LOGGER.error("FAILED: %s (exit=%s)", row["step"], row["exit"])
+        for offset, step in enumerate(barrier_steps):
+            summary_by_index[len(data_steps) + offset] = _run_step(
+                step, len(data_steps) + offset, gpus, threads, {}, log_dir
+            )
+
+    summary = [summary_by_index[index] for index in sorted(summary_by_index)]
+    (out / "full_benchmark_summary.json").write_text(
+        json.dumps(summary, indent=2), encoding="utf-8"
+    )
+    failures = [row for row in summary if row["exit"] != 0]
+    LOGGER.info("Finished: %d steps, %d failed.", len(summary), len(failures))
+    for row in failures:
+        LOGGER.error("FAILED: %s (exit=%s)", row["step"], row["exit"])
     return 0
 
 

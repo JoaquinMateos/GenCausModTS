@@ -319,6 +319,172 @@ uv run python scripts/run_sdd_benchmarks.py --device cuda --seeds 10
 uv run python scripts/make_paper_tables.py                  # LaTeX tables from JSON
 ```
 
+The whole suite — every benchmark family plus the LaTeX tables — is driven by
+one orchestrator:
+
+```bash
+uv run python scripts/run_full_benchmark.py --device cuda --seeds 10          # everything
+uv run python scripts/run_full_benchmark.py --soft --device cuda             # smoke run
+```
+
+These runs train small models whose cost is dominated by CPU-side data
+generation, so a single process leaves the GPU almost entirely idle. The
+orchestrator therefore dispatches the independent benchmark steps to a bounded
+pool of worker processes that share the GPU (`--jobs N`; default auto from the
+CPU count, `--jobs 1` restores the original strictly-sequential behaviour):
+
+```bash
+uv run python scripts/run_full_benchmark.py --device cuda --seeds 10 --jobs 8
+```
+
+On multi-GPU hosts `--gpus 0,1` pins steps round-robin via
+`CUDA_VISIBLE_DEVICES`; the 18-problem grid is split into two balanced shards by
+default (`--grid-shards 1` disables this). Every step writes exactly the same
+files as a sequential run, and each step's stdout/stderr is captured under
+`outputs/logs/`.
+
+Because concurrent steps contend for CPU, their wall-clock `seconds` are no
+longer comparable to a sequential run: the orchestrator therefore records
+per-run timings as unavailable (the `Time (s)` column renders `--`) unless you
+pass `--keep-timing`. To produce the `Time (s)` column for the paper, run once
+with `--jobs 1` on an idle machine; thread counts are left untouched by default
+(`--threads 0`) so the *metrics* stay numerically identical to a sequential run.
+
+### Progress and ClearML tracking
+
+#### Terminal progress
+
+Every benchmark process writes a `<stem>_progress.json` file (`done/total`,
+elapsed, ETA) next to its results. When `rich` is installed the orchestrator
+renders a live dashboard from those files — one bar per step plus an overall
+count and approximate remaining time — and falls back to a periodic plain log
+otherwise (`--no-dashboard`, `--dashboard-interval`).
+
+#### ClearML (optional web UI)
+
+Install the extra once:
+
+```bash
+uv sync --extra tracking        # adds rich + clearml
+```
+
+**1. Have a server.** Use an existing ClearML instance, or self-host one on the
+same box as the benchmark (the official Docker stack):
+
+```bash
+git clone https://github.com/allegroai/clearml-server.git
+cd clearml-server
+docker compose up -d            # API :8008, Web :8080, Files :8081
+```
+
+**2. Point the code at it.** The easiest way is the interactive wizard, which
+writes `~/clearml.conf` for you:
+
+```bash
+uv run --extra tracking clearml-init
+# Prompts for the API server, Web server and Files server, then for credentials.
+```
+
+Get credentials from the web UI: open the Web server, sign in, then
+**Settings → Workspace → Create new credentials** (copy the generated snippet).
+For non-interactive/remote runs you can export the standard variables instead
+of using `clearml-init`:
+
+```bash
+export CLEARML_API_HOST=http://localhost:8008
+export CLEARML_WEB_HOST=http://localhost:8080
+export CLEARML_FILES_HOST=http://localhost:8081
+export CLEARML_API_ACCESS_KEY=...
+export CLEARML_API_SECRET_KEY=...
+# optional
+export GCMTS_CLEARML_PROJECT=GenCausModTS
+```
+
+**3. Run** (the `--extra` flag keeps the tracking packages available to the
+subprocess workers):
+
+```bash
+uv run --extra tracking python scripts/run_full_benchmark.py \
+    --device cuda --seeds 10 --jobs 8
+```
+
+You then get **one task per benchmark step** (e.g. `Benchmark A.1: …`,
+`CTEE static IHDP`, `CRL grid crl_shared_grid_a`) under the project, with each
+run's metrics as scalars (`series = method`, `iteration = seed`), every task's
+progress percentage, and seed-0 training curves.
+
+#### Can `your-server` be `localhost`?
+
+Yes — but note *which machine* resolves each host, because the three URLs are
+used by different clients:
+
+| Variable | Used by | `localhost` means |
+| --- | --- | --- |
+| `CLEARML_API_HOST` / `CLEARML_FILES_HOST` | the Python process (benchmark box) | the box running the benchmark |
+| `CLEARML_WEB_HOST` | your **browser** | the browser's machine |
+
+So `localhost` is correct **when the ClearML server runs on the same machine as
+the benchmark process**. Common cases:
+
+- **Server and benchmark on the same CUDA box.** Use `localhost` for all three.
+  If you open the UI from your laptop, tunnel the web port over SSH:
+  ```bash
+  ssh -N -L 8080:localhost:8080 -L 8008:localhost:8008 you@cuda-box
+  # then browse http://localhost:8080 locally
+  ```
+- **Server on your laptop, benchmark on the CUDA box.** `localhost` won't work
+  for the benchmark process: set `CLEARML_API_HOST`/`CLEARML_FILES_HOST` to the
+  laptop's LAN address (e.g. `http://192.168.1.20:8008`) and make ports 8008/8081
+  reachable from the box.
+- **Server on a third host.** Use its hostname for all three variables.
+
+#### If ClearML is unavailable
+
+Tracking is a no-op when the `clearml` package is missing, when the API host is
+unreachable (a 2 s TCP probe runs first), or when you set `GCMTS_CLEARML=0`;
+the benchmark keeps running. To run detached from any server and upload later,
+set `GCMTS_CLEARML_OFFLINE=1` and use `clearml-task`/`clearml-agent` to sync.
+
+### Data path and performance tuning
+
+Most suites are **CPU-bound**: each step regenerates its batch on the CPU
+(Python loops over `horizon × latent_dim`), which is far costlier than the tiny
+model step, so the GPU idles. Measure the split first, per suite:
+
+```bash
+uv run python scripts/profile_training.py --suite npvar --method iVAE --device cuda
+uv run python scripts/profile_training.py --suite voronoi --method CITRIS --device cuda --json p.json
+```
+
+It prints the mean/median time and share of each phase (`data`, `forward`,
+`loss`, `backward`, `optim`, `sync`). Three results-neutral options can be
+enabled through the environment (honoured by every script via `SimpleTrainer`):
+
+```bash
+export GCMTS_PREFETCH=1     # generate the next batch on a background thread, overlapping compute
+export GCMTS_LIGHT_BATCH=1  # copy only x/context to the GPU during training (skip z/adjacency/...)
+export GCMTS_PROFILE=1      # print a phase profile at the end of each fit
+```
+
+These are **result-neutral**: the batches and the RNG sequence are unchanged
+(verified in `tests/test_data_path.py`). Gains are modest for the tiny-MLP
+suites (a few percent) because generation, not the host-to-device copy, is the
+bottleneck.
+
+For a genuinely large throughput win there is an explicitly **protocol-changing**
+mode: pre-generate a fixed pool of trajectories once and resample minibatches
+from it (this removes ~all per-step generation — e.g. Voronoi drops from ~21 ms
+to ~0.3 ms per step — but the data seen each step is no longer freshly drawn):
+
+```bash
+uv run python scripts/run_crl_shared.py --suite voronoi --device cuda --seeds 10 --pool-size 65536
+```
+
+Results from a pooled run are **not comparable** to a standard run and must be
+reported separately (see `gcmts/data/pool.py`).
+
+### Benchmark results
+
 Each method is trained on the synthetic benchmark matching its assumptions;
 input/output shapes are validated and the aggregate results are written to
 `outputs/crl_benchmarks.{log,json,csv}`. The shared suites (NP/VAR, CartPole,
