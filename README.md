@@ -318,29 +318,54 @@ The suite trains every method under one protocol on synthetic processes that
 expose causal ground truth, then writes the paper's LaTeX tables. A single
 orchestrator drives all of it.
 
-### Generate once, then train (recommended on a GPU server)
+### Recommended recipe: all the data, then the full run
 
-The default protocol draws a **fresh** batch on the CPU at every optimisation
-step, which leaves the GPU waiting. The faster, otherwise result-neutral setup is
-to materialise each synthetic process **once** — on any CPU box, no GPU needed —
-and then train on the GPU from those fixed pools:
+Two commands. The first prepares **all** the data (downloaded datasets + the
+materialised synthetic pools) on a CPU box; the second runs the whole benchmark
+with every implemented training technique enabled.
+
+**1 — download and generate all the data** (one-off; CPU only, no GPU needed):
 
 ```bash
-# Phase 1 (one-off, deterministic, no GPU needed): write the train/eval pools
+uv run python scripts/download_datasets.py                                     # real series, IHDP, effect cohorts
 uv run python scripts/generate_synthetic_data.py --clean --seeds 10 --with-grid
-
-# Phase 2 (GPU): train every experiment from the pools
-uv run python scripts/run_full_benchmark.py \
-    --device cuda --seeds 10 --with-grid --data-source pool --jobs 4 --gpus 1
 ```
 
-Phase 1 writes one `data/synthetic/<suite>/seed_XX.pt` per `(suite, seed)` plus a
+`--clean` wipes any previous synthetic generation, `--seeds 10` must match the
+run, and `--with-grid` is only needed if you run the grid. (Add
+`download_datasets.py --generate` for the legacy Voronoi tensors.)
+
+**2 — run the full suite with every training technique on** (adaptive schedule,
+permissive early stopping, weight EMA, KL/`beta` warm-up, best-weight restore,
+plus the result-neutral data-pipeline switches):
+
+```bash
+export GCMTS_PREFETCH=1 GCMTS_LIGHT_BATCH=1     # result-neutral: overlap generation / copy less
+export GCMTS_EARLY_STOPPING_PATIENCE=300        # applies to every family
+export GCMTS_EMA_DECAY=0.99                     # applies to every family
+# export GCMTS_AMP=1                            # optional: ~neutral here (small models)
+
+uv run --extra tracking python scripts/run_full_benchmark.py \
+    --device cuda --gpus 1 --jobs 8 --seeds 10 --with-grid \
+    --data-source pool \
+    --scheduler adaptive --kl-warmup-epochs 50 --restore-best-weights
+```
+
+These techniques **change the reported numbers** relative to the plain
+`cosine`/no-EMA recipe, so keep this one recipe for the whole paper and state it
+(see *Training schedule and early stopping* and *Other training techniques*
+below). `--scheduler` and `--kl-warmup-epochs` are forwarded to the **CRL** steps
+only; the `GCMTS_*` environment variables apply to every family that uses the
+shared trainer. Drop `--data-source pool` for the standard **fresh-sampling**
+protocol (slower, `data`-bound); with it, step 1's pools are used as a finite,
+fixed dataset (a separate protocol — see below).
+
+Step 1 writes one `data/synthetic/<suite>/seed_XX.pt` per `(suite, seed)` plus a
 `synthetic/manifest.json` audit record (sizes, hashes, generator, `max_lag`).
-Copy that directory to the GPU server if you generate it elsewhere. `--clean`
-wipes a previous generation first; `--train-size` (default 65536) controls the
-pool size (larger is closer to fresh sampling). `run_crl_shared.py` then loads
-each pool, keeps it **resident on the GPU**, trains by resampling it, and
-evaluates on a **disjoint** held-out pool.
+Copy that directory to the GPU server if you generate it elsewhere. `--train-size`
+(default 65536) controls the pool size (larger is closer to fresh sampling).
+`run_crl_shared.py` then loads each pool, keeps it **resident on the GPU**, trains
+by resampling it, and evaluates on a **disjoint** held-out pool.
 
 Because the training set is finite and fixed, pool runs are a **different and
 finite-sample protocol** from the default fresh runs and must be reported
@@ -563,8 +588,8 @@ the Wilcoxon block and written to `<stem>_stats.json`; this closes the
   Turing (`sm_75`) needs a torch wheel that still ships that arch; if
   `--device cuda` falls back to CPU, reinstall torch for a CUDA version that
   supports it.
-- **Generate on either box.** Phase 1 is CPU-only, so generate on the server or
-  locally and copy `data/synthetic/` over.
+- **Generate on either box.** Step 1 (data generation) is CPU-only, so generate
+  on the server or locally and copy `data/synthetic/` over.
 - **Launch under `tmux`/`nohup`.** The orchestrator writes results incrementally
   (`*_progress.json`, per-run rows, `outputs/logs/`), so a dropped SSH session
   does not lose the run. Add `2>&1 | tee outputs/run.log` to keep the console.
