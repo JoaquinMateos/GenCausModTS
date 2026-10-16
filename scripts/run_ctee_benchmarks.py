@@ -39,7 +39,13 @@ from gcmts.evaluation.metrics import (
     PEHEMetric,
 )
 from gcmts.evaluation.progress import ProgressTracker
-from gcmts.evaluation.report import aggregate_rows, save_rows, wall_seconds
+from gcmts.evaluation.report import (
+    aggregate_rows,
+    guard_resume,
+    load_rows,
+    save_rows,
+    wall_seconds,
+)
 from gcmts.evaluation.stats import paired_wilcoxon_holm
 from gcmts.evaluation.tracking import StepTracker
 
@@ -343,18 +349,41 @@ def main() -> int:
     parser.add_argument("--datasets", nargs="*", default=None)
     parser.add_argument("--methods", nargs="*", default=None)
     parser.add_argument("--seeds", type=int, default=10, help="number of seeds")
+    parser.add_argument(
+        "--resume", action=argparse.BooleanOptionalAction, default=True,
+        help="skip runs already present in the output JSON (default: resume)",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="resume even when the stored configuration or code revision differs",
+    )
     parser.add_argument("--out-dir", type=Path, default=Path("outputs"))
     args = parser.parse_args()
     configure_logging(args.out_dir)
     cases = build_cases(args.datasets, args.methods)
     if args.only:
         cases = [c for c in cases if c.name in set(args.only)]
-    rows: list[dict[str, Any]] = []
+    stem = "ctee_benchmarks"
+    rows: list[dict[str, Any]] = load_rows(args.out_dir, stem) if args.resume else []
+    ok, reason = guard_resume(
+        args.out_dir, stem,
+        {"cases": [c.name for c in cases], "seeds": args.seeds, "batch_size": args.batch_size},
+        force=args.force,
+    )
+    if not ok:
+        logger.error(
+            "Refusing to resume %s: %s. Re-run with --force to append anyway, "
+            "or delete %s to start over.", stem, reason, args.out_dir / f"{stem}.json",
+        )
+        return 2
+    done = {(row.get("case"), row.get("seed")) for row in rows}
     progress = ProgressTracker(
-        args.out_dir / "ctee_benchmarks_progress.json",
+        args.out_dir / f"{stem}_progress.json",
         "CTEE temporal",
         args.seeds * len(cases),
-    ).start()
+    )
+    progress.done = len(rows)
+    progress.start()
     step = StepTracker.start(
         name="CTEE temporal",
         params={"seeds": args.seeds, "cases": [c.name for c in cases]},
@@ -363,6 +392,8 @@ def main() -> int:
     )
     for seed in range(args.seeds):
         for cfg in cases:
+            if (cfg.name, seed) in done:
+                continue
             result = run_case(
                 cfg, args.device, args.batch_size, args.out_dir,
                 seed=seed, save_curves=(seed == 0),

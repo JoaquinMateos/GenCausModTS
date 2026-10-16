@@ -11,9 +11,102 @@ from typing import Any
 
 import numpy as np
 
-__all__ = ["aggregate_rows", "save_rows", "paired_wilcoxon", "wall_seconds"]
+__all__ = [
+    "aggregate_rows",
+    "code_revision",
+    "guard_resume",
+    "load_rows",
+    "paired_wilcoxon",
+    "save_rows",
+    "wall_seconds",
+]
 
 _NON_METRIC = {"epochs", "n_parameters", "seconds", "seed"}
+
+
+def code_revision() -> str:
+    """Best-effort identifier of the code revision (git commit, else version)."""
+    import subprocess
+
+    root = Path(__file__).resolve().parents[3]
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        import gcmts
+
+        return str(getattr(gcmts, "__version__", "unknown"))
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
+def load_rows(out_dir: str | Path, stem: str) -> list[dict[str, Any]]:
+    """Load previously written raw rows for ``stem`` (``[]`` if none)."""
+    path = Path(out_dir) / f"{stem}.json"
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _fingerprint(config: dict[str, Any]) -> str:
+    import hashlib
+
+    payload = json.dumps(
+        {"code": code_revision(), **config}, sort_keys=True, default=str
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def guard_resume(
+    out_dir: str | Path,
+    stem: str,
+    config: dict[str, Any],
+    *,
+    force: bool = False,
+) -> tuple[bool, str]:
+    """Check that existing rows were produced by the same configuration.
+
+    Writes ``<stem>_config.json`` (fingerprint + configuration + code revision)
+    the first time, and on later runs compares against it. Returns
+    ``(ok, reason)``; ``ok=False`` means the caller must refuse to append (the
+    training configuration or code revision changed) unless ``force`` is set.
+    """
+    path = Path(out_dir) / f"{stem}_config.json"
+    fingerprint = _fingerprint(config)
+    current = {"fingerprint": fingerprint, "code_revision": code_revision(), "config": config}
+    if os.environ.get("GCMTS_FORCE", "0").strip().lower() not in {"", "0", "false", "no"}:
+        force = True
+    rows_path = Path(out_dir) / f"{stem}.json"
+    if not path.exists():
+        if rows_path.exists() and not force:
+            return False, (
+                "existing rows were written before the resume guard, so their "
+                "configuration and code revision are unknown"
+            )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(current, indent=2, default=str), encoding="utf-8")
+        return True, ""
+    try:
+        stored = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return True, ""
+    if stored.get("fingerprint") != fingerprint and not force:
+        return False, (
+            "existing rows were produced by a different configuration or code "
+            f"revision (stored code={stored.get('code_revision')}, "
+            f"current code={current['code_revision']})"
+        )
+    return True, ""
 
 
 def wall_seconds(start: float) -> float:

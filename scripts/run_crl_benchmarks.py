@@ -51,7 +51,13 @@ from gcmts.data.synthetic import (
 from gcmts.evaluation import BenchmarkTask, CrlBenchmarkRunner
 from gcmts.evaluation.metrics import SHDMetric, WSHDMetric
 from gcmts.evaluation.progress import ProgressTracker
-from gcmts.evaluation.report import aggregate_rows, save_rows, wall_seconds
+from gcmts.evaluation.report import (
+    aggregate_rows,
+    guard_resume,
+    load_rows,
+    save_rows,
+    wall_seconds,
+)
 from gcmts.evaluation.tracking import StepTracker
 
 logger = logging.getLogger("gcmts.benchmarks")
@@ -487,6 +493,14 @@ def main() -> int:
     parser.add_argument("--quick", action="store_true", help="fewer epochs (smoke run)")
     parser.add_argument("--only", nargs="*", default=None, help="subset of case names")
     parser.add_argument("--seeds", type=int, default=10, help="number of seeds")
+    parser.add_argument(
+        "--resume", action=argparse.BooleanOptionalAction, default=True,
+        help="skip runs already present in the output JSON (default: resume)",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="resume even when the stored configuration or code revision differs",
+    )
     parser.add_argument("--out-dir", type=Path, default=Path("outputs"))
     parser.add_argument(
         "--device",
@@ -510,13 +524,29 @@ def main() -> int:
         if not cases:
             logger.error("No cases matched --only %s", args.only)
             return 2
-    rows: list[dict[str, Any]] = []
+    stem = "crl_benchmarks"
+    rows: list[dict[str, Any]] = load_rows(args.out_dir, stem) if args.resume else []
+    ok, reason = guard_resume(
+        args.out_dir, stem,
+        {"cases": [c.name for c in cases], "seeds": args.seeds, "quick": args.quick,
+         "batch_size": args.batch_size},
+        force=args.force,
+    )
+    if not ok:
+        logger.error(
+            "Refusing to resume %s: %s. Re-run with --force to append anyway, "
+            "or delete %s to start over.", stem, reason, args.out_dir / f"{stem}.json",
+        )
+        return 2
+    done = {(row.get("case"), row.get("seed")) for row in rows}
     last_results: list[CaseResult] = []
     progress = ProgressTracker(
-        args.out_dir / "crl_benchmarks_progress.json",
+        args.out_dir / f"{stem}_progress.json",
         "CRL sanity (matching-benchmark)",
         args.seeds * len(cases),
-    ).start()
+    )
+    progress.done = len(rows)
+    progress.start()
     step = StepTracker.start(
         name="CRL sanity (matching-benchmark)",
         params={"seeds": args.seeds, "cases": [c.name for c in cases], "quick": args.quick},
@@ -526,6 +556,8 @@ def main() -> int:
     for seed in range(args.seeds):
         last_results = []
         for cfg in cases:
+            if (cfg.name, seed) in done:
+                continue
             result = run_case(
                 cfg,
                 device=args.device,

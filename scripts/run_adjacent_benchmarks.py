@@ -45,7 +45,13 @@ from gcmts.evaluation.metrics import (
     StructuralViolationMetric,
 )
 from gcmts.evaluation.progress import ProgressTracker
-from gcmts.evaluation.report import aggregate_rows, save_rows, wall_seconds
+from gcmts.evaluation.report import (
+    aggregate_rows,
+    guard_resume,
+    load_rows,
+    save_rows,
+    wall_seconds,
+)
 from gcmts.evaluation.tracking import StepTracker
 from gcmts.explanation.methods import CausalConceptTS
 from gcmts.structure_discovery.methods import GBTPL
@@ -143,17 +149,40 @@ def main() -> int:
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--seeds", type=int, default=10)
     parser.add_argument("--methods", nargs="*", default=None)
+    parser.add_argument(
+        "--resume", action=argparse.BooleanOptionalAction, default=True,
+        help="skip runs already present in the output JSON (default: resume)",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="resume even when the stored configuration or code revision differs",
+    )
     parser.add_argument("--out-dir", type=Path, default=Path("outputs"))
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
 
     methods = args.methods or list(METHODS)
-    rows: list[dict[str, Any]] = []
+    stem = "adjacent_benchmarks"
+    rows: list[dict[str, Any]] = load_rows(args.out_dir, stem) if args.resume else []
+    ok, reason = guard_resume(
+        args.out_dir, stem,
+        {"methods": list(methods), "seeds": args.seeds, "epochs": args.epochs},
+        force=args.force,
+    )
+    if not ok:
+        logger.error(
+            "Refusing to resume %s: %s. Re-run with --force to append anyway, "
+            "or delete %s to start over.", stem, reason, args.out_dir / f"{stem}.json",
+        )
+        return 2
+    done = {(row.get("case"), row.get("seed")) for row in rows}
     progress = ProgressTracker(
-        args.out_dir / "adjacent_benchmarks_progress.json",
+        args.out_dir / f"{stem}_progress.json",
         "Adjacent branches + II.D",
         len(methods) * args.seeds,
-    ).start()
+    )
+    progress.done = len(rows)
+    progress.start()
     step = StepTracker.start(
         name="Adjacent branches + II.D",
         params={"methods": list(methods), "seeds": args.seeds, "epochs": args.epochs},
@@ -162,6 +191,8 @@ def main() -> int:
     )
     for name in methods:
         for seed in range(args.seeds):
+            if (name, seed) in done:
+                continue
             metrics = METHODS[name](args.device, args.epochs, seed)
             row = {"case": name, "method": name, "seed": seed, **metrics}
             rows.append(row)

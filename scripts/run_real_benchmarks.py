@@ -30,7 +30,13 @@ from gcmts.causal_representation_learning.methods import IVAE, LEAP, MOSAIC, NCT
 from gcmts.core import SimpleTrainer, save_training_report
 from gcmts.data.real import RealTimeSeries, RealTSGenerator
 from gcmts.evaluation.progress import ProgressTracker
-from gcmts.evaluation.report import aggregate_rows, save_rows, wall_seconds
+from gcmts.evaluation.report import (
+    aggregate_rows,
+    guard_resume,
+    load_rows,
+    save_rows,
+    wall_seconds,
+)
 from gcmts.evaluation.tracking import StepTracker
 
 logger = logging.getLogger("gcmts.real")
@@ -296,6 +302,14 @@ def main() -> int:
     parser.add_argument("--seeds", type=int, default=3)
     parser.add_argument("--datasets", nargs="*", default=["etth1", "jena"])
     parser.add_argument("--only", nargs="*", default=None, help="subset of method names")
+    parser.add_argument(
+        "--resume", action=argparse.BooleanOptionalAction, default=True,
+        help="skip runs already present in the output JSON (default: resume)",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="resume even when the stored configuration or code revision differs",
+    )
     parser.add_argument("--out-dir", type=Path, default=Path("outputs"))
     args = parser.parse_args()
 
@@ -307,15 +321,32 @@ def main() -> int:
         logging.StreamHandler(),
     ]
 
-    rows: list[dict[str, Any]] = []
+    stem = "real_benchmarks"
+    rows: list[dict[str, Any]] = load_rows(args.out_dir, stem) if args.resume else []
     counted_methods = build_methods(8, 4)
     if args.only:
         counted_methods = [m for m in counted_methods if m[0] in set(args.only)]
+    ok, reason = guard_resume(
+        args.out_dir, stem,
+        {"datasets": list(args.datasets), "seeds": args.seeds,
+         "methods": [m[0] for m in counted_methods]},
+        force=args.force,
+    )
+    if not ok:
+        logger.error(
+            "Refusing to resume %s: %s. Re-run with --force to append anyway, "
+            "or delete %s to start over.", stem, reason, args.out_dir / f"{stem}.json",
+        )
+        return 2
+    done = {(row.get("case"), row.get("seed")) for row in rows}
+    existing_cases = {row.get("case") for row in rows}
     progress = ProgressTracker(
-        args.out_dir / "real_benchmarks_progress.json",
+        args.out_dir / f"{stem}_progress.json",
         "Real external validity",
         len(args.datasets) * args.seeds * len(counted_methods),
-    ).start()
+    )
+    progress.done = sum(1 for row in rows if row.get("seed") is not None)
+    progress.start()
     step = StepTracker.start(
         name="Real external validity",
         params={"datasets": list(args.datasets), "seeds": args.seeds},
@@ -332,12 +363,18 @@ def main() -> int:
             missing_value=spec.missing_value,
         )
         latent_dim = max(min(probe.observed_dim, 8), 3)
-        rows.extend(baseline_rows(spec))
+        new_baselines = [
+            row for row in baseline_rows(spec) if row.get("case") not in existing_cases
+        ]
+        rows.extend(new_baselines)
+        existing_cases.update(row.get("case") for row in new_baselines)
         methods = build_methods(probe.observed_dim, latent_dim)
         if args.only:
             methods = [m for m in methods if m[0] in set(args.only)]
         for seed in range(args.seeds):
             for method, factory, epochs in methods:
+                if (f"{spec.name}/{method}", seed) in done:
+                    continue
                 result = run_case(
                     spec,
                     method,

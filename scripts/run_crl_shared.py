@@ -60,7 +60,13 @@ from gcmts.evaluation import BenchmarkTask, CrlBenchmarkRunner
 from gcmts.evaluation.benchmarks import crl_label
 from gcmts.evaluation.metrics import SHDMetric, TripletDistanceMetric
 from gcmts.evaluation.progress import ProgressTracker
-from gcmts.evaluation.report import aggregate_rows, save_rows, wall_seconds
+from gcmts.evaluation.report import (
+    aggregate_rows,
+    guard_resume,
+    load_rows,
+    save_rows,
+    wall_seconds,
+)
 from gcmts.evaluation.stats import (
     bootstrap_case_cis,
     friedman_test,
@@ -840,11 +846,39 @@ def run_suite(args: argparse.Namespace) -> int:
         args.seeds,
         args.epochs_scale,
     )
-    rows: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = load_rows(args.out_dir, stem) if args.resume else []
+    config = {
+        "suite": suite.name,
+        "seeds": args.seeds,
+        "epochs_scale": args.epochs_scale,
+        "methods": [name for name, _, _ in methods],
+        "data_source": args.data_source,
+        "pool_size": args.pool_size,
+        "scheduler": args.scheduler,
+        "early_stopping_patience": args.early_stopping_patience,
+        "restore_best_weights": args.restore_best_weights,
+        "amp": args.amp,
+        "ema_decay": args.ema_decay,
+        "kl_warmup_epochs": args.kl_warmup_epochs,
+        "batch_size": args.batch_size,
+    }
+    ok, reason = guard_resume(args.out_dir, stem, config, force=args.force)
+    if not ok:
+        logger.error(
+            "Refusing to resume %s: %s. Re-run with --force to append anyway "
+            "(results may mix protocols), or delete %s to start over.",
+            stem, reason, args.out_dir / f"{stem}.json",
+        )
+        return 2
+    done = {(row.get("case"), row.get("seed")) for row in rows}
     total = args.seeds * len(methods)
+    if rows:
+        logger.info("Resuming %s: %d/%d runs already complete.", stem, len(rows), total)
     progress = ProgressTracker(
         args.out_dir / f"{stem}_progress.json", crl_label(suite.name), total
-    ).start()
+    )
+    progress.done = len(rows)
+    progress.start()
     step = StepTracker.start(
         name=crl_label(suite.name),
         params={
@@ -857,11 +891,14 @@ def run_suite(args: argparse.Namespace) -> int:
         progress=progress,
     )
     for seed in range(args.seeds):
+        pending = [m for m in methods if (m[0], seed) not in done]
+        if not pending:
+            continue
         if args.data_source == "pool":
             train_data, eval_batch, ds_max_lag = _load_pool(args.dataset_dir, suite.name, seed)
         else:
             train_data = eval_batch = ds_max_lag = None
-        for name, factory, epochs in methods:
+        for name, factory, epochs in pending:
             row = _run(
                 suite,
                 name,
@@ -951,9 +988,40 @@ def run_grid(args: argparse.Namespace) -> int:
     if args.only:
         representative = [m for m in representative if m[0] in set(args.only)]
     total = args.seeds * len(configs) * len(representative)
+    rows = load_rows(args.out_dir, stem) if args.resume else []
+    grid_config = {
+        "grid": True,
+        "stem": stem,
+        "configs": [c.name for c in configs],
+        "seeds": args.seeds,
+        "epochs_scale": args.epochs_scale,
+        "methods": [name for name, _, _ in representative],
+        "data_source": args.data_source,
+        "pool_size": args.pool_size,
+        "scheduler": args.scheduler,
+        "early_stopping_patience": args.early_stopping_patience,
+        "restore_best_weights": args.restore_best_weights,
+        "amp": args.amp,
+        "ema_decay": args.ema_decay,
+        "kl_warmup_epochs": args.kl_warmup_epochs,
+        "batch_size": args.batch_size,
+    }
+    ok, reason = guard_resume(args.out_dir, stem, grid_config, force=args.force)
+    if not ok:
+        logger.error(
+            "Refusing to resume %s: %s. Re-run with --force to append anyway, "
+            "or delete %s to start over.",
+            stem, reason, args.out_dir / f"{stem}.json",
+        )
+        return 2
+    done = {(row.get("dataset"), row.get("case"), row.get("seed")) for row in rows}
+    if rows:
+        logger.info("Resuming %s: %d/%d runs already complete.", stem, len(rows), total)
     progress = ProgressTracker(
         args.out_dir / f"{stem}_progress.json", f"Grid {stem} ({len(configs)} configs)", total
-    ).start()
+    )
+    progress.done = len(rows)
+    progress.start()
     step = StepTracker.start(
         name=f"CRL grid {stem}",
         params={
@@ -971,11 +1039,14 @@ def run_grid(args: argparse.Namespace) -> int:
             methods = build_methods(suite, epochs_scale=args.epochs_scale)
             if args.only:
                 methods = [m for m in methods if m[0] in set(args.only)]
+            pending = [m for m in methods if (config.name, m[0], seed) not in done]
+            if not pending:
+                continue
             if args.data_source == "pool":
                 train_data, eval_batch, ds_max_lag = _load_pool(args.dataset_dir, suite.name, seed)
             else:
                 train_data = eval_batch = ds_max_lag = None
-            for name, factory, epochs in methods:
+            for name, factory, epochs in pending:
                 row = _run(
                     suite,
                     name,
@@ -1121,6 +1192,14 @@ def main() -> int:
     )
     parser.add_argument("--no-baselines", dest="baselines", action="store_false")
     parser.add_argument("--out-dir", type=Path, default=Path("outputs"))
+    parser.add_argument(
+        "--resume", action=argparse.BooleanOptionalAction, default=True,
+        help="skip (method, seed) runs already present in the output JSON (default: resume)",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="resume even when the stored configuration or code revision differs",
+    )
     args = parser.parse_args()
     if args.grid:
         configure_logging(args.out_dir, args.stem or "crl_shared_grid")

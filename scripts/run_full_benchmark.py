@@ -505,6 +505,13 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--force", action="store_true",
+        help=(
+            "append to existing results even when the stored configuration or "
+            "code revision changed (otherwise such steps refuse to resume)"
+        ),
+    )
+    parser.add_argument(
         "--dataset-dir", type=Path, default=Path("data/synthetic"),
         help="root of the persisted synthetic pools used with --data-source pool",
     )
@@ -562,6 +569,8 @@ def main() -> int:
     log_dir.mkdir(parents=True, exist_ok=True)
 
     extra_env: dict[str, str] = {}
+    if args.force:
+        extra_env["GCMTS_FORCE"] = "1"
     if jobs > 1 and not args.keep_timing:
         # Wall-clock times under CPU contention are not comparable across
         # methods or to a sequential run, so suppress them by default.

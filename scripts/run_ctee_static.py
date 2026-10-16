@@ -46,7 +46,13 @@ from gcmts.effect_estimation.methods import CEPAE, CRN, GANITE, CaTSG
 from gcmts.evaluation.benchmarks import CTEE_REAL_BENCHMARKS
 from gcmts.evaluation.metrics import PolicyRiskMetric
 from gcmts.evaluation.progress import ProgressTracker
-from gcmts.evaluation.report import aggregate_rows, save_rows, wall_seconds
+from gcmts.evaluation.report import (
+    aggregate_rows,
+    guard_resume,
+    load_rows,
+    save_rows,
+    wall_seconds,
+)
 from gcmts.evaluation.stats import paired_wilcoxon_holm
 from gcmts.evaluation.tracking import StepTracker
 
@@ -359,6 +365,14 @@ def main() -> int:
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--methods", nargs="*", default=None)
     parser.add_argument("--replications", type=int, default=100)
+    parser.add_argument(
+        "--resume", action=argparse.BooleanOptionalAction, default=True,
+        help="skip replications already present in the output JSON (default: resume)",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="resume even when the stored configuration or code revision differs",
+    )
     parser.add_argument("--out-dir", type=Path, default=Path("outputs"))
     args = parser.parse_args()
     if args.data_dir is not None:
@@ -371,13 +385,29 @@ def main() -> int:
         data_dir = Path("data/acic")
     configure_logging(args.out_dir, args.dataset)
     methods = args.methods or list(METHODS)
-    rows: list[dict[str, Any]] = []
+    stem = f"ctee_static_{args.dataset}"
+    rows: list[dict[str, Any]] = load_rows(args.out_dir, stem) if args.resume else []
+    ok, reason = guard_resume(
+        args.out_dir, stem,
+        {"dataset": args.dataset, "replications": args.replications,
+         "methods": list(methods), "batch_size": args.batch_size},
+        force=args.force,
+    )
+    if not ok:
+        logger.error(
+            "Refusing to resume %s: %s. Re-run with --force to append anyway, "
+            "or delete %s to start over.", stem, reason, args.out_dir / f"{stem}.json",
+        )
+        return 2
+    done_replications = {row.get("seed") for row in rows}
     total = args.replications * len(methods)
     progress = ProgressTracker(
-        args.out_dir / f"ctee_static_{args.dataset}_progress.json",
+        args.out_dir / f"{stem}_progress.json",
         f"CTEE static {args.dataset}",
         total,
-    ).start()
+    )
+    progress.done = len(rows)
+    progress.start()
     step = StepTracker.start(
         name=f"CTEE static {args.dataset.upper()}",
         params={
@@ -389,6 +419,8 @@ def main() -> int:
         progress=progress,
     )
     for index in range(args.replications):
+        if index in done_replications:
+            continue
         results = run_replication(
             args.dataset,
             index,

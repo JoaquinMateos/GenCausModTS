@@ -363,6 +363,27 @@ uv run python scripts/run_full_benchmark.py --soft --device cuda  # ~minutes smo
 Use `--suites ...` for a subset and `--with-grid` to include the
 eighteen-problem statistics grid.
 
+### Resuming an interrupted run
+
+Every runner writes its per-run rows incrementally and is **resumable by
+default**: re-running the same command loads the rows already on disk and skips
+the `(case, seed)` runs that are present, continuing where you stopped.
+
+```bash
+# relaunch the whole suite; completed runs are skipped
+uv run python scripts/run_full_benchmark.py --device cuda --seeds 10 --with-grid --data-source pool
+```
+
+To avoid mixing incompatible results, each stem records a configuration
+fingerprint — the training-relevant options plus the code revision — in
+`<stem>_config.json`. If that changed (for example after updating the code), the
+step **refuses to resume** rather than appending rows produced under a different
+protocol; pass `--force` (also accepted by `run_full_benchmark.py`) only if you
+accept the mix, or delete the `<stem>.json` to start over. Use `--no-resume` to
+force a step to restart. Synthetic-data generation resumes too:
+`generate_synthetic_data.py` skips datasets that already exist unless `--force`
+(and `--clean` wipes the whole directory first).
+
 ### Parallelism and timing
 
 The models are small and, under the default fresh protocol, the cost is

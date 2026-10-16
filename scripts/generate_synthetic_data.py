@@ -38,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import run_crl_shared as shared  # noqa: E402
 
-from gcmts.data.synthetic_store import dataset_path, save_dataset  # noqa: E402
+from gcmts.data.synthetic_store import dataset_exists, dataset_path, save_dataset  # noqa: E402
 from gcmts.evaluation.progress import ProgressTracker  # noqa: E402
 
 logger = logging.getLogger("gcmts.generate_data")
@@ -98,6 +98,10 @@ def main() -> int:
         "--clean", action="store_true",
         help="delete the existing output directory before generating",
     )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="regenerate datasets that already exist (default: skip them)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="list what would be generated")
     args = parser.parse_args()
 
@@ -127,6 +131,10 @@ def main() -> int:
     ).start()
     for suite in specs:
         for seed in range(args.seeds):
+            if dataset_exists(args.out_dir, suite.name, seed) and not args.force:
+                logger.info("skip %s seed %d (already generated)", suite.name, seed)
+                progress.advance()
+                continue
             path = generate_one(
                 suite, seed,
                 train_size=args.train_size, eval_size=args.eval_size, out_dir=args.out_dir,
