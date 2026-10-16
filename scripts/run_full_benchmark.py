@@ -35,6 +35,14 @@ ClearML tracking is available with the optional ``tracking`` extra
 (``uv sync --extra tracking``); see ``README.md`` for the self-hosted ClearML
 environment variables. Disable the dashboard with ``--no-dashboard``.
 
+Interrupting
+------------
+Each step runs in its own process group. The first ``Ctrl+C`` stops scheduling
+new steps and sends ``SIGTERM`` to the running ones (graceful); a second
+``Ctrl+C`` sends ``SIGKILL`` and aborts immediately. Either way no child is left
+running, and because every runner is resumable you can relaunch the same command
+to continue.
+
 Everything is written under ``outputs/`` and ``outputs_shared/`` and the tables
 into ``../latex/pic/experiments/``; a JSON summary and a log are written to
 ``outputs/full_benchmark_summary.json`` and ``outputs/full_benchmark.log`` while
@@ -44,10 +52,12 @@ each step's own stdout/stderr is captured under ``outputs/logs/``.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -248,6 +258,73 @@ def _resolve_schedule(args: argparse.Namespace, n_steps: int) -> tuple[int, list
     return jobs, gpus
 
 
+# -- graceful interrupt handling --------------------------------------------
+# Each step runs in its own process group, so on Ctrl+C we can stop the whole
+# tree (the script and any grandchildren). The first Ctrl+C stops scheduling new
+# steps and sends SIGTERM (graceful); a second Ctrl+C sends SIGKILL and aborts.
+_ACTIVE_PROCS: dict[int, subprocess.Popen[bytes]] = {}
+_ACTIVE_LOCK = threading.Lock()
+_STOP = threading.Event()
+_INTERRUPTS = 0
+_ORIGINAL_SIGINT: object = None
+
+
+def _register_proc(proc: subprocess.Popen[bytes]) -> None:
+    with _ACTIVE_LOCK:
+        _ACTIVE_PROCS[proc.pid] = proc
+
+
+def _unregister_proc(proc: subprocess.Popen[bytes]) -> None:
+    with _ACTIVE_LOCK:
+        _ACTIVE_PROCS.pop(proc.pid, None)
+
+
+def _active_procs() -> list[subprocess.Popen[bytes]]:
+    with _ACTIVE_LOCK:
+        return [proc for proc in _ACTIVE_PROCS.values() if proc.poll() is None]
+
+
+def _terminate_children(sig: int) -> int:
+    """Send ``sig`` to every running step's process group; return the count."""
+    procs = _active_procs()
+    for proc in procs:
+        try:
+            os.killpg(os.getpgid(proc.pid), sig)
+        except (ProcessLookupError, PermissionError):
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                proc.send_signal(sig)
+    return len(procs)
+
+
+def _install_signal_handlers() -> None:
+    global _ORIGINAL_SIGINT
+
+    def _handler(signum: int, frame: object) -> None:
+        global _INTERRUPTS
+        _INTERRUPTS += 1
+        _STOP.set()
+        active = len(_active_procs())
+        if _INTERRUPTS == 1:
+            LOGGER.warning(
+                "Interrupt: no new steps will start and %d running step(s) are "
+                "being stopped. Press Ctrl+C again to force-kill.",
+                active,
+            )
+            _terminate_children(signal.SIGTERM)
+        else:
+            LOGGER.warning("Second interrupt: force-killing %d running step(s).", active)
+            _terminate_children(signal.SIGKILL)
+            raise KeyboardInterrupt
+
+    _ORIGINAL_SIGINT = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, _handler)
+
+
+def _restore_signal_handlers() -> None:
+    if _ORIGINAL_SIGINT is not None:
+        signal.signal(signal.SIGINT, _ORIGINAL_SIGINT)  # type: ignore[arg-type]
+
+
 def _run_step(
     step: Step,
     index: int,
@@ -274,15 +351,30 @@ def _run_step(
         env["CUDA_VISIBLE_DEVICES"] = gpus[index % len(gpus)]
 
     log_path = log_dir / f"{index:02d}_{_slug(step.name)}.log"
+    if _STOP.is_set():
+        LOGGER.warning("SKIP %s (interrupted)", step.name)
+        return {"step": step.name, "seconds": 0.0, "exit": -2}
     LOGGER.info("RUN %s -> %s", step.name, log_path)
     start = time.time()
     with log_path.open("w", encoding="utf-8") as handle:
         handle.write("$ " + " ".join(step.command) + "\n\n")
         handle.flush()
-        completed = subprocess.run(step.command, stdout=handle, stderr=subprocess.STDOUT, env=env)
+        # Own process group so an interrupt can stop the step (and any children).
+        proc = subprocess.Popen(
+            step.command,
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            env=env,
+            start_new_session=True,
+        )
+        _register_proc(proc)
+        try:
+            returncode = proc.wait()
+        finally:
+            _unregister_proc(proc)
     elapsed = time.time() - start
-    LOGGER.info("DONE %s in %.1fs (exit=%d)", step.name, elapsed, completed.returncode)
-    return {"step": step.name, "seconds": elapsed, "exit": completed.returncode}
+    LOGGER.info("DONE %s in %.1fs (exit=%d)", step.name, elapsed, returncode)
+    return {"step": step.name, "seconds": elapsed, "exit": returncode}
 
 
 # -- live progress dashboard ------------------------------------------------
@@ -597,46 +689,65 @@ def main() -> int:
     )
 
     summary_by_index: dict[int, dict[str, object]] = {}
-    with _dashboard(
-        data_steps,
-        out / "full_benchmark.log",
-        enabled=not args.no_dashboard,
-        interval=args.dashboard_interval,
-    ):
-        if jobs <= 1 or len(data_steps) <= 1:
-            for index, step in enumerate(data_steps):
-                summary_by_index[index] = _run_step(
-                    step, index, gpus, threads, extra_env, log_dir
-                )
-        else:
-            with ThreadPoolExecutor(max_workers=jobs) as pool:
-                futures = {
-                    pool.submit(
-                        _run_step, step, index, gpus, threads, extra_env, log_dir
-                    ): index
-                    for index, step in enumerate(data_steps)
-                }
-                for future in as_completed(futures):
-                    index = futures[future]
-                    try:
-                        summary_by_index[index] = future.result()
-                    except Exception:  # pragma: no cover - surfaced below
-                        LOGGER.exception("Step %s crashed", data_steps[index].name)
-                        summary_by_index[index] = {
-                            "step": data_steps[index].name,
-                            "seconds": float("nan"),
-                            "exit": -1,
-                        }
+    interrupted = False
+    _install_signal_handlers()
+    try:
+        with _dashboard(
+            data_steps,
+            out / "full_benchmark.log",
+            enabled=not args.no_dashboard,
+            interval=args.dashboard_interval,
+        ):
+            if jobs <= 1 or len(data_steps) <= 1:
+                for index, step in enumerate(data_steps):
+                    summary_by_index[index] = _run_step(
+                        step, index, gpus, threads, extra_env, log_dir
+                    )
+            else:
+                with ThreadPoolExecutor(max_workers=jobs) as pool:
+                    futures = {
+                        pool.submit(
+                            _run_step, step, index, gpus, threads, extra_env, log_dir
+                        ): index
+                        for index, step in enumerate(data_steps)
+                    }
+                    for future in as_completed(futures):
+                        index = futures[future]
+                        try:
+                            summary_by_index[index] = future.result()
+                        except Exception:  # pragma: no cover - surfaced below
+                            LOGGER.exception("Step %s crashed", data_steps[index].name)
+                            summary_by_index[index] = {
+                                "step": data_steps[index].name,
+                                "seconds": float("nan"),
+                                "exit": -1,
+                            }
 
-        for offset, step in enumerate(barrier_steps):
-            summary_by_index[len(data_steps) + offset] = _run_step(
-                step, len(data_steps) + offset, gpus, threads, {}, log_dir
-            )
+            # Only regenerate tables when every data step finished normally.
+            if not _STOP.is_set():
+                for offset, step in enumerate(barrier_steps):
+                    summary_by_index[len(data_steps) + offset] = _run_step(
+                        step, len(data_steps) + offset, gpus, threads, {}, log_dir
+                    )
+    except KeyboardInterrupt:
+        interrupted = True
+        LOGGER.warning("Interrupted: stopping remaining steps.")
+    finally:
+        _terminate_children(signal.SIGKILL)
+        _restore_signal_handlers()
+    interrupted = interrupted or _STOP.is_set()
 
     summary = [summary_by_index[index] for index in sorted(summary_by_index)]
     (out / "full_benchmark_summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8"
     )
+    if interrupted:
+        LOGGER.warning(
+            "Stopped by user after %d step(s); their partial results are saved. "
+            "Re-run the same command to resume where it left off.",
+            len(summary),
+        )
+        return 130
     failures = [row for row in summary if row["exit"] != 0]
     LOGGER.info("Finished: %d steps, %d failed.", len(summary), len(failures))
     for row in failures:

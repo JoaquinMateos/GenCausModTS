@@ -374,6 +374,12 @@ the `(case, seed)` runs that are present, continuing where you stopped.
 uv run python scripts/run_full_benchmark.py --device cuda --seeds 10 --with-grid --data-source pool
 ```
 
+To stop a running suite, press **Ctrl+C once**: no new steps start and the running
+steps are asked to stop (`SIGTERM`); a **second Ctrl+C** force-kills them
+immediately (`SIGKILL`). Either way every step is terminated cleanly (each runs in
+its own process group) and no child process is left behind — just re-run the same
+command to resume.
+
 To avoid mixing incompatible results, each stem records a configuration
 fingerprint — the training-relevant options plus the code revision — in
 `<stem>_config.json`. If that changed (for example after updating the code), the
