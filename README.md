@@ -351,7 +351,11 @@ families still sample fresh and remain CPU-bound — that is expected.
 Results land under `outputs/` and `outputs_shared/` (per-run rows as JSON/CSV,
 aggregates, Holm-corrected Wilcoxon tests, Friedman/Nemenyi summaries and CD
 diagrams), the LaTeX tables in `../latex/pic/experiments/`, and each step's
-logs in `outputs/logs/`.
+logs in `outputs/logs/`. There, every step writes a combined `*.log`, and a
+failing step also gets a matching `*.error` with just its traceback/error lines;
+`outputs/logs/errors.log` collects a one-line entry per failure, so
+`ls outputs/logs/*.error` (or `cat outputs/logs/errors.log`) is the fastest way
+to see whether anything went wrong.
 
 ### A minimal run
 

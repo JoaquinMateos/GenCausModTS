@@ -97,6 +97,15 @@ REAL_PANELS = {
 # Stems already understood by ``make_paper_tables.write_stats_section``.
 _GRID_SHARD_STEMS = {1: ("crl_shared_grid",), 2: ("crl_shared_grid_a", "crl_shared_grid_b")}
 
+# Lines that mark a problem in a captured step log (used for the *.error files).
+_ERROR_RE = re.compile(
+    r"(Traceback \(most recent call last\)|\bERROR\b|\bCRITICAL\b|"
+    r"\bException\b|\w*Error\b|CUDA out of memory|"
+    r"Segmentation fault|Killed|core dumped)",
+    re.MULTILINE,
+)
+_ERRORS_LOCK = threading.Lock()
+
 
 @dataclass
 class Step:
@@ -325,6 +334,66 @@ def _restore_signal_handlers() -> None:
         signal.signal(signal.SIGINT, _ORIGINAL_SIGINT)  # type: ignore[arg-type]
 
 
+# -- error extraction for fast triage ---------------------------------------
+def _error_excerpt(log_path: Path, *, limit: int = 80) -> list[str]:
+    """Return the error-relevant lines of a captured step log.
+
+    If the log contains a traceback, return from the first ``Traceback`` line to
+    the end (an uncaught exception is the last thing a step prints); otherwise
+    return the matching ``ERROR`` / ``*Error`` / ``Killed`` lines.
+    """
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    lines = text.splitlines()
+    for position, line in enumerate(lines):
+        if "Traceback (most recent call last)" in line:
+            return lines[position:]
+    return [line for line in lines if _ERROR_RE.search(line)][-limit:]
+
+
+def _write_error_report(
+    log_dir: Path,
+    index: int,
+    step: Step,
+    returncode: int,
+    log_path: Path,
+    *,
+    interrupted: bool,
+) -> Path | None:
+    """Write ``<index>_<step>.error`` when a step failed; return its path."""
+    if returncode == -2:  # skipped because the run was interrupted
+        return None
+    if interrupted and returncode < 0:  # SIGTERM/SIGKILL from Ctrl+C, not a fault
+        return None
+    excerpt = _error_excerpt(log_path)
+    has_traceback = bool(excerpt) and "Traceback (most recent call last)" in excerpt[0]
+    if returncode == 0 and not has_traceback:
+        return None
+    body = excerpt or ["(no error lines found in the step log)"]
+    header = [
+        f"step:    {step.name}",
+        f"command: {' '.join(step.command)}",
+        f"exit:    {returncode}",
+        f"log:     {log_path}",
+        "-" * 72,
+    ]
+    error_path = log_dir / f"{index:02d}_{_slug(step.name)}.error"
+    error_path.write_text("\n".join(header + body) + "\n", encoding="utf-8")
+    return error_path
+
+
+def _record_error(log_dir: Path, step: Step, returncode: int, error_path: Path) -> None:
+    """Append a one-line entry to ``<log_dir>/errors.log`` (thread-safe)."""
+    line = (
+        f"{time.strftime('%Y-%m-%d %H:%M:%S')}  exit={returncode:>4}  "
+        f"{step.name}  ->  {error_path.name}\n"
+    )
+    with _ERRORS_LOCK, (log_dir / "errors.log").open("a", encoding="utf-8") as handle:
+        handle.write(line)
+
+
 def _run_step(
     step: Step,
     index: int,
@@ -353,7 +422,7 @@ def _run_step(
     log_path = log_dir / f"{index:02d}_{_slug(step.name)}.log"
     if _STOP.is_set():
         LOGGER.warning("SKIP %s (interrupted)", step.name)
-        return {"step": step.name, "seconds": 0.0, "exit": -2}
+        return {"step": step.name, "seconds": 0.0, "exit": -2, "error": None}
     LOGGER.info("RUN %s -> %s", step.name, log_path)
     start = time.time()
     with log_path.open("w", encoding="utf-8") as handle:
@@ -374,7 +443,18 @@ def _run_step(
             _unregister_proc(proc)
     elapsed = time.time() - start
     LOGGER.info("DONE %s in %.1fs (exit=%d)", step.name, elapsed, returncode)
-    return {"step": step.name, "seconds": elapsed, "exit": returncode}
+    error_path = _write_error_report(
+        log_dir, index, step, returncode, log_path, interrupted=_STOP.is_set()
+    )
+    if error_path is not None:
+        _record_error(log_dir, step, returncode, error_path)
+        LOGGER.error("Step %s failed (exit=%d); see %s", step.name, returncode, error_path)
+    return {
+        "step": step.name,
+        "seconds": elapsed,
+        "exit": returncode,
+        "error": None if error_path is None else str(error_path),
+    }
 
 
 # -- live progress dashboard ------------------------------------------------
@@ -659,6 +739,11 @@ def main() -> int:
     threads = args.threads  # 0 = leave the environment untouched
     log_dir = out / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
+    (log_dir / "errors.log").write_text(
+        f"# step errors - {time.strftime('%Y-%m-%d %H:%M:%S')} - "
+        f"{' '.join(sys.argv[1:])}\n",
+        encoding="utf-8",
+    )
 
     extra_env: dict[str, str] = {}
     if args.force:
@@ -752,6 +837,15 @@ def main() -> int:
     LOGGER.info("Finished: %d steps, %d failed.", len(summary), len(failures))
     for row in failures:
         LOGGER.error("FAILED: %s (exit=%s)", row["step"], row["exit"])
+    errored = [row for row in summary if row.get("error")]
+    if errored:
+        LOGGER.error(
+            "%d step(s) reported errors; per-step *.error files are in %s "
+            "(one-line summary: %s)",
+            len(errored), log_dir, log_dir / "errors.log",
+        )
+    else:
+        LOGGER.info("No step errors; see %s for the (empty) summary.", log_dir / "errors.log")
     return 0
 
 
