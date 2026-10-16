@@ -587,7 +587,7 @@ def _run(
     # Keep a persisted pool resident on the training device so the per-step
     # host->device copy disappears. This is numerically identical to feeding a
     # CPU pool: only the index draw changes, and that still uses the CPU RNG.
-    if isinstance(source, PooledGenerator):
+    if isinstance(source, PooledGenerator) and hasattr(source, "to"):
         source.to(resolved)
     start = time.perf_counter()
     history = trainer.fit(model, source)

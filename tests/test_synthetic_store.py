@@ -71,6 +71,19 @@ def test_from_batch_pool_resamples_deterministically(tmp_path: Path) -> None:
     assert drawn_rows <= pool_rows
 
 
+def test_pooled_generator_exposes_to() -> None:
+    # Regression guard: run_crl_shared._run calls ``source.to(device)`` when the
+    # training source is a pool, so the method must exist and be idempotent.
+    generator = TemporalNonlinearGenerator(
+        observed_dim=6, latent_dim=3, horizon=16, n_regimes=2, seed=0
+    )
+    pool = PooledGenerator.from_batch(generator.sample(32), resample_seed=0)
+    assert hasattr(pool, "to")
+    assert pool.to("cpu") is pool
+    assert pool.to("cpu") is pool
+    assert pool.sample(4).x.shape == (4, 16, 6)
+
+
 def test_read_manifest_missing(tmp_path: Path) -> None:
     manifest = read_manifest(tmp_path / "does_not_exist")
     assert manifest["datasets"] == {}

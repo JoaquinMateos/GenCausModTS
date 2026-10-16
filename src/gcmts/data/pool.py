@@ -52,6 +52,7 @@ class PooledGenerator(BaseDataGenerator):
         pool_size: number of trajectories to pre-generate once.
         resample_seed: seed for the minibatch index sampler (independent of the
             underlying generator's own RNG).
+        device: optional device to keep the materialised pool on (see :meth:`to`).
     """
 
     def __init__(
@@ -60,16 +61,24 @@ class PooledGenerator(BaseDataGenerator):
         pool_size: int,
         *,
         resample_seed: int = 0,
+        device: torch.device | str | None = None,
     ) -> None:
         self.generator: BaseDataGenerator | None = generator
         self.pool_size = max(int(pool_size), 1)
         self.observed_dim = generator.observed_dim
         self.horizon = generator.horizon
         self._pool: Batch | None = None
+        self._device = torch.device(device) if device is not None else None
         self._rng = torch.Generator().manual_seed(resample_seed)
 
     @classmethod
-    def from_batch(cls, batch: Batch, *, resample_seed: int = 0) -> PooledGenerator:
+    def from_batch(
+        cls,
+        batch: Batch,
+        *,
+        resample_seed: int = 0,
+        device: torch.device | str | None = None,
+    ) -> PooledGenerator:
         """Wrap an already-materialised pool (e.g. loaded from disk)."""
         instance = cls.__new__(cls)
         instance.generator = None
@@ -77,13 +86,35 @@ class PooledGenerator(BaseDataGenerator):
         instance.observed_dim = int(batch.x.shape[-1])
         instance.horizon = int(batch.x.shape[1])
         instance._pool = batch
+        instance._device = torch.device(device) if device is not None else None
         instance._rng = torch.Generator().manual_seed(resample_seed)
+        instance._move_pool()
         return instance
+
+    def to(self, device: torch.device | str) -> PooledGenerator:
+        """Keep the pool resident on ``device`` (idempotent).
+
+        The pool can be kept on a device (e.g. CUDA) so minibatching only indexes
+        device memory and no per-step host-to-device copy is needed. The index
+        draw still uses a CPU ``torch.Generator``, so the sampled rows — and
+        therefore the numerics — are unchanged.
+        """
+        self._device = torch.device(device)
+        self._move_pool()
+        return self
+
+    def _move_pool(self) -> None:
+        if self._device is None or self._pool is None:
+            return
+        from gcmts.core.trainer import move_batch
+
+        self._pool = move_batch(self._pool, self._device)
 
     def _ensure_pool(self) -> Batch:
         if self._pool is None:
             assert self.generator is not None
             self._pool = cast(Batch, self.generator.sample(self.pool_size))
+            self._move_pool()
         return self._pool
 
     def sample(self, n_samples: int, horizon: int | None = None, **kwargs: Any) -> Batch:
