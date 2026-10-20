@@ -128,6 +128,11 @@ def load_nhefs(path: str | Path) -> EffectCohort:
         "exercise", "active", "wt71",
     ]
     covariates = [column for column in covariates if column in frame.columns]
+    # ``wt82_71`` (weight change) and some covariates have missing entries.
+    # sklearn rejects NaN targets, and silently imputing the outcome would
+    # change the estimand, so drop incomplete rows and report the cohort size.
+    needed = [*covariates, "qsmk", "wt82_71"]
+    frame = frame.dropna(subset=needed)
     x = frame[covariates].to_numpy(dtype=np.float64)
     t = frame["qsmk"].to_numpy(dtype=np.int64)
     y = frame["wt82_71"].to_numpy(dtype=np.float64)

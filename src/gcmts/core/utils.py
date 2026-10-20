@@ -35,6 +35,8 @@ def hungarian_match(cost: Tensor) -> tuple[Tensor, Tensor]:
     Returns ``(row_idx, col_idx)`` such that ``cost[row_idx, col_idx]`` is
     minimised.
     """
+    if not bool(torch.isfinite(cost).all()):
+        raise ValueError("Assignment cost matrix contains non-finite entries.")
     row_idx, col_idx = linear_sum_assignment(cost.detach().cpu().numpy())
     return torch.as_tensor(row_idx), torch.as_tensor(col_idx)
 
@@ -48,11 +50,16 @@ def mcc(z_true: Tensor, z_pred: Tensor) -> float:
     """
     z_true = z_true.reshape(-1, z_true.shape[-1])
     z_pred = z_pred.reshape(-1, z_pred.shape[-1])
+    if not bool(torch.isfinite(z_true).all()) or not bool(torch.isfinite(z_pred).all()):
+        # A diverged encoder must not crash a whole benchmark block.
+        return float("nan")
     z_true = (z_true - z_true.mean(0)) / (z_true.std(0) + 1e-8)
     z_pred = (z_pred - z_pred.mean(0)) / (z_pred.std(0) + 1e-8)
     corr = torch.abs((z_true.T @ z_pred) / z_true.shape[0])
-    _, col_idx = hungarian_match(-corr)
-    score = corr[torch.arange(corr.shape[0]), col_idx].mean().item()
+    if not bool(torch.isfinite(corr).all()):
+        return float("nan")
+    row_idx, col_idx = hungarian_match(-corr)
+    score = corr[row_idx, col_idx].mean().item()
     return float(score)
 
 

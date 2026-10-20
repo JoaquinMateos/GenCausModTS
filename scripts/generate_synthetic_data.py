@@ -55,6 +55,22 @@ def _suite_specs(args: argparse.Namespace) -> list[shared.Suite]:
     return specs
 
 
+def _assert_finite(suite: shared.Suite, seed: int, split: str, batch: object) -> None:
+    """Refuse to persist a pool with non-finite values.
+
+    A single NaN/inf trajectory silently poisons every method trained on the
+    pool (the loss becomes NaN from the first epoch and the MCC assignment
+    rejects the result), so this is a hard error, not a warning.
+    """
+    for name in ("x", "z"):
+        value = getattr(batch, name, None)
+        if value is not None and not bool(torch.isfinite(value).all()):
+            raise RuntimeError(
+                f"Non-finite {name} in the {split} pool for suite '{suite.name}' "
+                f"seed {seed}. Fix the generator before writing the dataset."
+            )
+
+
 def generate_one(
     suite: shared.Suite, seed: int, *, train_size: int, eval_size: int, out_dir: Path
 ) -> str:
@@ -63,6 +79,8 @@ def generate_one(
     generator = suite.make_generator(seed)
     train = generator.sample(train_size)
     eval_batch = generator.sample(eval_size)
+    _assert_finite(suite, seed, "train", train)
+    _assert_finite(suite, seed, "eval", eval_batch)
     record = save_dataset(
         dataset_path(out_dir, suite.name, seed),
         train,

@@ -18,6 +18,12 @@ usable and are now reported in the paper (`latex/sections/09_comparative_experim
 The 11 failures reduce to **six independent root causes**. None invalidates a
 completed result; each is a localised code or data defect.
 
+> **Implementation status.** R1, R2, R3, R4, R6 and R7 are **fixed** in this
+> tree and covered by `tests/test_regressions.py`; the full suite passes
+> (`165 passed`). R5 (Oregon) is a manual data download because the Dataverse is
+> behind a WAF challenge; the runner now raises an actionable message if the
+> archive is missing. The remaining action is the rerun in §3.
+
 The `Overall 5248/4693 runs (112%)` line is a dashboard accounting artefact, not
 a result: the footer sums the `done` counters of every `*_progress.json`, while
 `total` is each step's current planned count. After a failed step is restarted

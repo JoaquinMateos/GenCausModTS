@@ -122,7 +122,15 @@ def _load_replication(dataset: str, index: int, directory: Path) -> Replication:
         return loader.load()[index]
     if dataset in REAL_COHORTS:
         filename, cohort_loader = REAL_COHORTS[dataset]
-        cohort = cohort_loader(directory / filename)
+        path = directory / filename
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Missing cohort file {path}. For 'oregon_rct' download the "
+                "Oregon Health Insurance Experiment public-use archive from "
+                "https://dataverse.harvard.edu/dataverse/oregon and place it at "
+                f"{path}; the NHEFS file is fetched by scripts/download_datasets.py."
+            )
+        cohort = cohort_loader(path)
         _REFERENCE_ATE[dataset] = cohort.reference_ate
         n = cohort.y.shape[0]
         nan = np.full(n, np.nan, dtype=np.float64)

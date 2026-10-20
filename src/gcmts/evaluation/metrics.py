@@ -174,20 +174,33 @@ def _nonlinear_r2(features: Tensor, target: Tensor, *, seed: int = 0) -> float:
     return float(max(0.0, r2_linear, r2_boosted))
 
 
-def _r2_matrix(pred: Tensor, tgt: Tensor, *, seed: int = 0) -> tuple[np.ndarray, Tensor]:
-    """Return the ``(K, K)`` matrix ``R²_ij`` (true ``i`` from estimated ``j``) and match."""
+def _r2_matrix(
+    pred: Tensor, tgt: Tensor, *, seed: int = 0
+) -> tuple[np.ndarray, dict[int, int]]:
+    """Return the ``(K_true, K_pred)`` matrix ``R²_ij`` and the matched column.
+
+    The estimated and true latent dimensions need not agree: a method may
+    over- or under-allocate its latent budget. The Hungarian assignment is
+    rectangular and is returned as ``{true_index: predicted_index}`` so callers
+    never index a matrix with a column that does not exist.
+    """
     pred = pred.reshape(-1, pred.shape[-1])
     tgt = tgt.reshape(-1, tgt.shape[-1])
+    if not bool(torch.isfinite(pred).all()) or not bool(torch.isfinite(tgt).all()):
+        return np.full((tgt.shape[-1], pred.shape[-1]), np.nan), {}
     pred_std = (pred - pred.mean(0)) / (pred.std(0) + 1e-8)
     tgt_std = (tgt - tgt.mean(0)) / (tgt.std(0) + 1e-8)
     corr = (tgt_std.T @ pred_std) / tgt.shape[0]
-    _, col = hungarian_match(-corr.abs())
-    k = tgt.shape[-1]
-    matrix = np.zeros((k, k))
-    for i in range(k):
-        for j in range(k):
+    row, col = hungarian_match(-corr.abs())
+    assignment = {
+        int(i): int(j) for i, j in zip(row.tolist(), col.tolist(), strict=True)
+    }
+    k_true, k_pred = tgt.shape[-1], pred.shape[-1]
+    matrix = np.zeros((k_true, k_pred))
+    for i in range(k_true):
+        for j in range(k_pred):
             matrix[i, j] = _nonlinear_r2(pred[:, j : j + 1], tgt[:, i], seed=seed)
-    return matrix, col
+    return matrix, assignment
 
 
 class R2DiagMetric(Metric):
@@ -202,10 +215,9 @@ class R2DiagMetric(Metric):
         super().__init__("r2_diag", "L1_representation", higher_is_better=True)
 
     def __call__(self, prediction: Tensor, target: Tensor) -> MetricResult:
-        matrix, col = _r2_matrix(prediction, target)
-        value = float(
-            np.mean([matrix[i, int(col[i].item())] for i in range(matrix.shape[0])])
-        )
+        matrix, assignment = _r2_matrix(prediction, target)
+        matched = [matrix[i, j] for i, j in assignment.items()]
+        value = float(np.mean(matched)) if matched else float("nan")
         return MetricResult(self.name, value, self.level, self.higher_is_better)
 
 
@@ -220,21 +232,30 @@ class R2SepMetric(Metric):
         super().__init__("r2_sep", "L1_representation", higher_is_better=False)
 
     def __call__(self, prediction: Tensor, target: Tensor) -> MetricResult:
-        matrix, col = _r2_matrix(prediction, target)
+        matrix, assignment = _r2_matrix(prediction, target)
         leakage = []
         for i in range(matrix.shape[0]):
-            others = [matrix[i, j] for j in range(matrix.shape[1]) if j != col[i].item()]
+            others = [
+                matrix[i, j] for j in range(matrix.shape[1]) if j != assignment.get(i)
+            ]
             leakage.append(max(others) if others else 0.0)
-        return MetricResult(self.name, float(np.mean(leakage)), self.level, self.higher_is_better)
+        value = float(np.mean(leakage)) if leakage else float("nan")
+        return MetricResult(self.name, value, self.level, self.higher_is_better)
 
 
 def _importance_matrix(pred: Tensor, tgt: Tensor, *, seed: int = 0) -> np.ndarray:
-    """Feature-importance matrix ``R_ij`` (importance of latent ``j`` for factor ``i``)."""
+    """Feature-importance matrix ``R_ij`` (importance of latent ``j`` for factor ``i``).
+
+    The matrix is ``(K_true, K_pred)`` so it remains well defined when a method
+    over- or under-allocates its latent budget.
+    """
     x = pred.reshape(-1, pred.shape[-1]).detach().cpu().numpy()
     y = tgt.reshape(-1, tgt.shape[-1]).detach().cpu().numpy()
-    k = x.shape[1]
-    matrix = np.zeros((k, k))
-    for i in range(k):
+    k_true, k_pred = y.shape[1], x.shape[1]
+    if not np.isfinite(x).all() or not np.isfinite(y).all():
+        return np.full((k_true, k_pred), np.nan)
+    matrix = np.zeros((k_true, k_pred))
+    for i in range(k_true):
         regressor = GradientBoostingRegressor(random_state=seed)
         regressor.fit(x, y[:, i])
         matrix[i] = regressor.feature_importances_
@@ -259,6 +280,8 @@ class DCIDisentanglementMetric(Metric):
 
     def __call__(self, prediction: Tensor, target: Tensor) -> MetricResult:
         matrix = _importance_matrix(prediction, target)
+        if not np.isfinite(matrix).all():
+            return MetricResult(self.name, float("nan"), self.level, self.higher_is_better)
         scores = [1.0 - _normalised_entropy(matrix[:, j]) for j in range(matrix.shape[1])]
         return MetricResult(self.name, float(np.mean(scores)), self.level, self.higher_is_better)
 
@@ -271,6 +294,8 @@ class DCICompletenessMetric(Metric):
 
     def __call__(self, prediction: Tensor, target: Tensor) -> MetricResult:
         matrix = _importance_matrix(prediction, target)
+        if not np.isfinite(matrix).all():
+            return MetricResult(self.name, float("nan"), self.level, self.higher_is_better)
         scores = [1.0 - _normalised_entropy(matrix[i]) for i in range(matrix.shape[0])]
         return MetricResult(self.name, float(np.mean(scores)), self.level, self.higher_is_better)
 
@@ -284,6 +309,8 @@ class DCIInformativenessMetric(Metric):
     def __call__(self, prediction: Tensor, target: Tensor) -> MetricResult:
         tgt = target.reshape(-1, target.shape[-1])
         pred = prediction.reshape(-1, prediction.shape[-1])
+        if not bool(torch.isfinite(pred).all()) or not bool(torch.isfinite(tgt).all()):
+            return MetricResult(self.name, float("nan"), self.level, self.higher_is_better)
         scores = [_nonlinear_r2(pred, tgt[:, i]) for i in range(tgt.shape[-1])]
         return MetricResult(
             self.name, float(np.nanmean(scores)), self.level, self.higher_is_better

@@ -88,8 +88,15 @@ def _kuramoto(x: Tensor, p: Tensor) -> Tensor:
 
 
 def _lotka_volterra(x: Tensor, p: Tensor) -> Tensor:
+    """Competitive Lotka--Volterra drift.
+
+    ``dx_i/dt = x_i (1 - p (x_i + 0.15 sum_{j != i} x_j))``: the diagonal of the
+    interaction matrix must be *positive* (self-limitation). A negative diagonal
+    turns the logistic term into growth and makes the explicit Euler step
+    diverge for every initial condition.
+    """
     d = x.shape[1]
-    interaction = torch.eye(d, device=x.device) * -1.0 + 0.15
+    interaction = 0.15 + 0.85 * torch.eye(d, device=x.device)
     return x * (1.0 - p.unsqueeze(-1) * (x @ interaction.T))
 
 
@@ -180,15 +187,24 @@ class PhysicsSCMGenerator(BaseDataGenerator):
     def sample(self, n_samples: int, horizon: int | None = None, **kwargs: Any) -> Batch:
         horizon = horizon or self.horizon
         d = self.latent_dim
-        state = torch.randn(n_samples, d, generator=self.rng)
-        if self.system in {"kuramoto"}:
-            state = state * 3.0
+        if self.system == "lotka_volterra":
+            # Populations must start positive; a sign-indefinite start makes the
+            # competitive dynamics unphysical and numerically unstable.
+            state = torch.rand(n_samples, d, generator=self.rng) + 0.5
+        else:
+            state = torch.randn(n_samples, d, generator=self.rng)
+            if self.system in {"kuramoto"}:
+                state = state * 3.0
         regimes = torch.randint(0, self.n_regimes, (n_samples, horizon), generator=self.rng)
         states = torch.empty(n_samples, horizon, d)
         for t in range(horizon):
             p = self.param[regimes[:, t]]
             for _ in range(self.substeps):
                 state = state + self.dt * self.drift(state, p)
+                if self.system == "lotka_volterra":
+                    # Keep populations in a finite positive box; the Euler step
+                    # can otherwise leave the stable region for extreme regimes.
+                    state = state.clamp(1e-4, 1e3)
             states[:, t] = state
         mean = states.mean(dim=(0, 1), keepdim=True)
         std = states.std(dim=(0, 1), keepdim=True) + 1e-6

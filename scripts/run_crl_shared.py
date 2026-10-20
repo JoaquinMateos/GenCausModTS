@@ -314,12 +314,24 @@ def _grid_configs() -> list[GridConfig]:
 GRID_CONFIGS = _grid_configs()
 
 
+def _tdrl_blocks(latent_dim: int) -> tuple[int, int, int]:
+    """Split TDRL's latent budget into ``(fix, dyn, obs)`` summing to ``latent_dim``.
+
+    TDRL has a fixed-dynamics block, a domain-conditioned dynamic block and an
+    observation-shift block. A two-dimensional process cannot host three
+    non-empty blocks, so the observation block is dropped there. Allocating
+    ``1+1+1`` latents for a two-factor problem makes every representation metric
+    ill-posed (the metric matrices are built against the true dimension).
+    """
+    if latent_dim >= 3:
+        return latent_dim - 2, 1, 1
+    return 1, 1, 0
+
+
 def build_methods(suite: Suite, *, epochs_scale: float = 1.0) -> list[MethodSpec]:
     d, r, D = suite.latent_dim, suite.n_regimes, suite.observed_dim
     u = max(r, 1)  # stationary suites expose a constant, one-dimensional context
-    fix = max(d - 2, 1)
-    obs = 1
-    dyn = max(d - fix - obs, 1)
+    fix, dyn, obs = _tdrl_blocks(d)
 
     def scale(value: int) -> int:
         return max(int(value * epochs_scale), 200)

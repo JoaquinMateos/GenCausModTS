@@ -93,7 +93,7 @@ def shd(
     if adj_est.shape != adj_true.shape:
         raise ValueError("Adjacency matrices must share a shape.")
     est = _binarise(adj_est, threshold)
-    true = _binarise(adj_true, threshold)
+    true = _binarise(adj_true.to(est.device), threshold)
     return int((est != true).sum().item())
 
 
@@ -104,6 +104,7 @@ def weighted_shd(
     threshold: float = 1e-3,
 ) -> float:
     """SHD variant that weights each structural difference by edge magnitude."""
+    adj_true = adj_true.to(adj_est.device)
     est = _binarise(adj_est, threshold)
     true = _binarise(adj_true, threshold)
     weight = torch.maximum(adj_est.abs(), adj_true.abs())
@@ -260,6 +261,7 @@ def aligned_shd(
     """
     if adj_est.shape != adj_true.shape:
         raise ValueError("Adjacency matrices must share a shape.")
+    adj_true = adj_true.to(adj_est.device)
     dim = int(adj_est.shape[0])
 
     def score(perm: tuple[int, ...]) -> float:

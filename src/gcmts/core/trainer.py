@@ -24,9 +24,10 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["AdaptiveScheduler", "EMA", "SimpleTrainer", "move_batch"]
 
-#: Keys the training losses actually read (all CRL and effect methods use only
-#: ``x`` and ``context``); everything else is evaluation-only.
-TRAIN_BATCH_KEYS = frozenset({"x", "context"})
+#: Keys a training loss may read. CRL methods use ``x``/``context``; the
+#: static--dynamic methods (SYNC/DANN/VREx) also read ``outcome`` and ``domain``.
+#: ``z``, ``adjacency`` and ``counterfactual`` remain evaluation-only.
+TRAIN_BATCH_KEYS = frozenset({"x", "context", "outcome", "domain"})
 
 
 def _env_flag(name: str) -> bool:
