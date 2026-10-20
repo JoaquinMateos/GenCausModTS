@@ -632,6 +632,12 @@ static–dynamic step and the two real effect cohorts (NHEFS, Oregon).
 The root causes, evidence lines, proposed code fixes and the exact rerun
 commands are in
 [`docs/failure_analysis_and_rerun_plan.md`](docs/failure_analysis_and_rerun_plan.md).
+
+**Rerun pitfall.** After a code or configuration change every runner refuses to
+append to rows written by the previous revision (`exit 2`, `Refusing to resume …
+stored code=…`). Delete the affected `<stem>.json` and `<stem>_config.json`, or
+pass `--force` (the orchestrator exports `GCMTS_FORCE=1` to its workers). A naive
+rerun of the eleven blocked steps will otherwise fail within seconds.
 Two are especially worth knowing: TDRL allocates three latents for `d=2` (the
 metric layer then indexes out of bounds), and the Lotka–Volterra Euler
 integration can write non-finite trajectories into the fixed pool; the SDD

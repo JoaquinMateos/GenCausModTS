@@ -291,6 +291,26 @@ uv run ruff check src scripts tests
 uv run pytest -q -m "not slow"
 ```
 
+### Resume guard: why a naive rerun exits with code 2
+
+Every runner fingerprints its output in `<stem>_config.json`. After a code or
+configuration change it **refuses to append** to rows written by the previous
+revision (exit 2, `Refusing to resume … stored code=…, current code=…`). This is
+what the first rerun hit: the old rows were produced at `d63caa2`, the fixes are
+at `a023d5c`, and the explicit `--ema-decay 0.99` also changed the recorded
+configuration (the original run supplied it through `GCMTS_EMA_DECAY`).
+
+Two ways out:
+
+- **Clean (recommended):** delete the affected `<stem>.json` and
+  `<stem>_config.json` before rerunning, so the new rows never mix with the old
+  protocol.
+- **Quick:** pass `--force` to the runner (the orchestrator exports
+  `GCMTS_FORCE=1` to its workers). This appends and *skips* `(case, seed)` pairs
+  already present, so a partial old block is retained.
+
+The commands below delete the stale rows of exactly the eleven blocked blocks.
+
 ### Step 1 — regenerate the Lotka–Volterra pools
 
 ```bash
@@ -304,12 +324,17 @@ Run the finiteness check shown in R2 before continuing.
 
 ### Step 2 — rerun the six blocked CRL suites
 
-Fast path through the orchestrator (writes `outputs_shared/` and the tables):
+Fast path through the orchestrator (writes `outputs_shared/` and the tables).
+The `rm` lines are the clean way to satisfy the resume guard:
 
 ```bash
 cd gcmts
+for suite in lotka_volterra duffing fitzhugh_nagumo van_der_pol pendulum mountain_car; do
+  rm -f "outputs_shared/crl_shared_${suite}".json \
+        "outputs_shared/crl_shared_${suite}"_config.json
+done
 uv run python scripts/run_full_benchmark.py \
-    --device cuda --gpus 1 --jobs 4 --seeds 10 \
+    --device cuda --gpus 1 --jobs 4 --seeds 10 --force \
     --data-source pool --scheduler adaptive --early-stopping-patience 300 \
     --restore-best-weights --kl-warmup-epochs 50 --ema-decay 0.99 \
     --suites lotka_volterra duffing fitzhugh_nagumo van_der_pol pendulum mountain_car
@@ -319,8 +344,10 @@ Per-suite equivalent, useful when a single suite still fails:
 
 ```bash
 for suite in lotka_volterra duffing fitzhugh_nagumo van_der_pol pendulum mountain_car; do
+  rm -f "outputs_shared/crl_shared_${suite}".json \
+        "outputs_shared/crl_shared_${suite}"_config.json
   uv run python scripts/run_crl_shared.py \
-      --device cuda --suite "$suite" --seeds 10 --epochs-scale 1.0 \
+      --device cuda --suite "$suite" --seeds 10 --epochs-scale 1.0 --force \
       --data-source pool --dataset-dir data/synthetic \
       --scheduler adaptive --early-stopping-patience 300 \
       --restore-best-weights --kl-warmup-epochs 50 --ema-decay 0.99 \
@@ -331,22 +358,22 @@ done
 ### Step 3 — rerun the CRL sanity block
 
 ```bash
-uv run python scripts/run_crl_benchmarks.py --device cuda --seeds 10 --out-dir outputs
+uv run python scripts/run_crl_benchmarks.py --device cuda --seeds 10 --out-dir outputs --force
 ```
 
 ### Step 4 — rerun SDD (with the light-batch guard until verified)
 
 ```bash
 GCMTS_LIGHT_BATCH=0 uv run python scripts/run_sdd_benchmarks.py \
-    --device cuda --seeds 10 --out-dir outputs
+    --device cuda --seeds 10 --out-dir outputs --force
 ```
 
 ### Step 5 — real effect cohorts
 
 ```bash
 # after placing oregon_puf.zip under data/real/dataverse_files/Oregon/
-uv run python scripts/run_ctee_static.py --device cuda --dataset oregon_rct --replications 1 --out-dir outputs
-uv run python scripts/run_ctee_static.py --device cuda --dataset nhefs      --replications 1 --out-dir outputs
+uv run python scripts/run_ctee_static.py --device cuda --dataset oregon_rct --replications 1 --out-dir outputs --force
+uv run python scripts/run_ctee_static.py --device cuda --dataset nhefs      --replications 1 --out-dir outputs --force
 ```
 
 ### Step 6 — regenerate the LaTeX tables
