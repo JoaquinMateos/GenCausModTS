@@ -145,6 +145,7 @@ def _suite_block(
         if sum(1 for row in subset if row.get("case") == method and "seed" in row) < seeds:
             return []
     aggregated = aggregate_rows(subset)
+    suite_tex = suite.replace("_", r"\_")
     if sde:
         # CEGEN operates in observation space: no mixing model, so MCC and the
         # latent-graph columns are undefined and its conditional W2 is the
@@ -160,7 +161,7 @@ def _suite_block(
             f1 = _fmt(aggregated, method, "forecast1", bold=method in best_f1)
             f4 = _fmt(aggregated, method, "forecast4", bold=method in best_f4)
             lines.append(
-                f"    {method} & {suite} & {w2} & n/a & n/a & n/a & n/a & {f1} & {f4} & {_time(subset, method)} \\\\"
+                f"    {method} & {suite_tex} & {w2} & n/a & n/a & n/a & n/a & {f1} & {f4} & {_time(subset, method)} \\\\"
             )
         return lines
     best_mcc = _best_cases(aggregated, methods, "mcc", higher=True)
@@ -182,7 +183,7 @@ def _suite_block(
         f1 = _fmt(aggregated, method, "forecast1", bold=method in best_f1)
         f4 = _fmt(aggregated, method, "forecast4", bold=method in best_f4)
         lines.append(
-            f"    {method} & {suite} & {mcc} & {r2d} & {r2s} & {shd} & {triplet} & {f1} & {f4} & {_time(subset, method)} \\\\"
+            f"    {method} & {suite_tex} & {mcc} & {r2d} & {r2s} & {shd} & {triplet} & {f1} & {f4} & {_time(subset, method)} \\\\"
         )
     return lines
 
@@ -211,7 +212,7 @@ def _baselines(suite_name: str) -> list[str]:
     ar_mse = float(((ar.predict(test_x) - test_y) ** 2).mean())
     p1 = _persistence_mse(eval_batch, 1)
     p4 = _persistence_mse(eval_batch, 4)
-    label = suite_name
+    label = suite_name.replace("_", r"\_")
     return [
         f"    Persistence & {label} & n/a & n/a & n/a & n/a & n/a & {p1:.2f} & {p4:.2f} & n/a \\\\",
         f"    AR(1) & {label} & n/a & n/a & n/a & n/a & n/a & {ar_mse:.2f} & -- & n/a \\\\",
@@ -371,9 +372,20 @@ def write_crl_summary(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
     print(f"wrote {out}")
 
 
+_DETERMINISTIC_CASES = frozenset({"Persistence", "AR(1)"})
+
+
 def _case_complete(rows: list[dict[str, Any]], case: str, seeds: int) -> bool:
-    """True when ``case`` has at least ``seeds`` independent runs."""
-    return sum(1 for row in rows if row.get("case") == case) >= seeds
+    """True when ``case`` has enough independent runs to report.
+
+    Deterministic baselines are evaluated once (they have no seed-dependent
+    fit), so they are complete with a single row; learned methods need the full
+    ``seeds``-run block.
+    """
+    count = sum(1 for row in rows if row.get("case") == case)
+    if case.split("/", 1)[-1] in _DETERMINISTIC_CASES:
+        return count >= 1
+    return count >= seeds
 
 
 def write_ctee_table(outputs_dir: Path, latex_dir: Path, *, seeds: int) -> None:
@@ -623,8 +635,16 @@ def write_stats_section(shared_dir: Path, latex_dir: Path) -> None:
             f"{case}: {rank:.2f}"
             for case, rank in zip(cases, result["average_ranks"].tolist(), strict=True)
         )
+        pretty = {
+            "mcc": "MCC",
+            "r2_diag": r"$R^2_{\mathrm{diag}}$",
+            "r2_sep": r"$R^2_{\mathrm{sep}}$",
+            "dci": "DCI",
+            "forecast1": "1-step MSE",
+            "forecast4": "4-step MSE",
+        }.get(metric, metric.replace("_", r"\_"))
         lines.append(
-            f"\\textbf{{{metric}}} & {friedman['n_problems']:.0f} & "
+            f"\\textbf{{{pretty}}} & {friedman['n_problems']:.0f} & "
             f"{friedman['statistic']:.2f} & {friedman['p_value']:.3g} & "
             f"{result['critical_difference']:.2f} & {ranks} \\\\"
         )
@@ -896,11 +916,9 @@ def write_external_validity_table(outputs_dir: Path, latex_dir: Path, *, seeds: 
         }
         for case in cases:
             method = case.split("/", 1)[1]
-            blocks.append(
-                "    \\multicolumn{5}{@{}l}{\\emph{" + dataset + "}}\\\\\n"
-                if case == cases[0]
-                else ""
-            )
+            if case == cases[0]:
+                label = dataset.replace("_", r"\_")
+                blocks.append("    \\multicolumn{5}{@{}l}{\\emph{" + label + "}}\\\\")
             blocks.append(
                 f"    {method} & "
                 + _fmt(aggregated, case, "forecast1_mse", digits=3, bold=case in best["forecast1_mse"])
@@ -1029,6 +1047,9 @@ def main() -> int:
     parser.add_argument("--latex-dir", type=Path, default=Path("../latex"))
     parser.add_argument("--seeds", type=int, default=10)
     args = parser.parse_args()
+    # The LaTeX tree may not exist on a GPU-only host; create the target so a
+    # table regeneration never fails merely because the directory is absent.
+    (args.latex_dir / "pic" / "experiments").mkdir(parents=True, exist_ok=True)
     write_crl_summary(args.shared_dir, args.latex_dir, seeds=args.seeds)
     write_crl_table(args.shared_dir, args.latex_dir, seeds=args.seeds)
     write_ctee_table(args.outputs_dir, args.latex_dir, seeds=args.seeds)

@@ -346,7 +346,7 @@ export GCMTS_EMA_DECAY=0.99                     # applies to every family
 # export GCMTS_AMP=1                            # optional: ~neutral here (small models)
 
 uv run --extra tracking python scripts/run_full_benchmark.py \
-    --device cuda --gpus 1 --jobs 8 --seeds 10 --with-grid \
+    --device cuda --gpus 1 --jobs 4 --seeds 10 --with-grid \
     --data-source pool \
     --scheduler adaptive --kl-warmup-epochs 50 --restore-best-weights
 ```
@@ -619,6 +619,30 @@ Everything is written to `outputs/` and `outputs_shared/`, and
 `scripts/make_paper_tables.py` turns the raw rows into the LaTeX tables and
 critical-difference diagrams under `../latex/pic/experiments/`.
 
+### Current run status (ten-seed run of 2026-10-16 → 2026-10-20)
+
+The full suite ran 36 steps; **25 completed and 11 failed**, all traceable to six
+localised defects rather than to the methods. The complete blocks are CRL
+A.1–A.8, A.12, A.16, A.17 and B–D plus the 18-problem grid, the temporal and
+static effect-estimation suites, the real external-validity panels and the
+adjacent branches. The blocked blocks are the six two-dimensional physics/control
+suites (A.9–A.11, A.13–A.15), the matching-benchmark sanity check, the
+static–dynamic step and the two real effect cohorts (NHEFS, Oregon).
+
+The root causes, evidence lines, proposed code fixes and the exact rerun
+commands are in
+[`docs/failure_analysis_and_rerun_plan.md`](docs/failure_analysis_and_rerun_plan.md).
+Two are especially worth knowing: TDRL allocates three latents for `d=2` (the
+metric layer then indexes out of bounds), and the Lotka–Volterra Euler
+integration can write non-finite trajectories into the fixed pool; the SDD
+failure was caused by `GCMTS_LIGHT_BATCH=1` dropping the `outcome` tensor that
+`SYNC` reads. Refresh the LaTeX tables after a rerun with:
+
+```bash
+uv run python scripts/make_paper_tables.py \
+    --shared-dir outputs_shared --outputs-dir outputs --latex-dir ../latex
+```
+
 ---
 
 ## Taxonomy coverage
@@ -674,11 +698,15 @@ The design and roadmap are documented in [`docs/design.md`](docs/design.md).
 - **Statistical protocol.** The shared suites and the configuration grid run
   with ten seeds and report Holm-corrected Wilcoxon plus Friedman/Nemenyi tests
   and bootstrap confidence intervals; a tagged release with a DOI is pending.
-- **Pending methods.** iCITRIS, APPEX, and the adjacent-branch methods
-  (structure discovery, decision-making, explanation) are not implemented.
-- **Pending benchmarks.** The SDE suite in the shared comparison and the
-  rendered image variant of Causal3DIdent remain to be run; the ACIC archives
-  require a hand download.
+- **Pending methods.** APPEX is not implemented; iCITRIS, GBTPL, LacaDM and
+  CausalConceptTS are implemented and reported.
+- **Pending benchmarks.** Six two-dimensional physics/control CRL blocks
+  (A.9–A.11, A.13–A.15) are blocked by the TDRL dimension-allocation and
+  Lotka–Volterra finiteness defects; the ten-seed matching-benchmark sanity and
+  static–dynamic blocks need a rerun after the device fixes; the NHEFS loader
+  and the Oregon archive remain; the rendered-image Causal3DIdent variant and
+  the ACIC archives (hand download) are not run. See
+  [`docs/failure_analysis_and_rerun_plan.md`](docs/failure_analysis_and_rerun_plan.md).
 
 ---
 
