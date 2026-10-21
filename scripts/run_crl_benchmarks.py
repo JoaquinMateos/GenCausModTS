@@ -568,6 +568,9 @@ def main() -> int:
             )
             last_results.append(result)
             rows.append(asdict(result))
+            # Persist after every run so a restart never loses a whole block;
+            # with the default ``--resume`` the next invocation skips these.
+            save_rows(rows, args.out_dir, stem="crl_benchmarks")
             progress.advance()
             step.log_run(
                 method=result.method,
