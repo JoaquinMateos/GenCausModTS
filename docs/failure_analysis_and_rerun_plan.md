@@ -19,10 +19,13 @@ The 11 failures reduce to **six independent root causes**. None invalidates a
 completed result; each is a localised code or data defect.
 
 > **Implementation status.** R1, R2, R3, R4, R6 and R7 are **fixed** in this
-> tree and covered by `tests/test_regressions.py`; the full suite passes
-> (`165 passed`). R5 (Oregon) is a manual data download because the Dataverse is
-> behind a WAF challenge; the runner now raises an actionable message if the
-> archive is missing. The remaining action is the rerun in §3.
+> tree and covered by `tests/test_regressions.py`. R5 (Oregon) is a manual data
+> download because the Dataverse is behind a WAF challenge; the runner raises an
+> actionable message when the archive is missing. **All eleven blocked steps
+> have now been rerun successfully:** the six CRL suites (50 rows each), the
+> ten-seed sanity block (110 rows), SDD (41 rows), NHEFS (6 rows) and Oregon
+> (6 rows). The LaTeX tables have been regenerated. The only pending items are
+> the rendered-image Causal3DIdent variant, the ACIC panels and a tagged release.
 
 The `Overall 5248/4693 runs (112%)` line is a dashboard accounting artefact, not
 a result: the footer sums the `done` counters of every `*_progress.json`, while

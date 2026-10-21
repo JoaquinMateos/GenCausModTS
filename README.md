@@ -619,15 +619,15 @@ Everything is written to `outputs/` and `outputs_shared/`, and
 `scripts/make_paper_tables.py` turns the raw rows into the LaTeX tables and
 critical-difference diagrams under `../latex/pic/experiments/`.
 
-### Current run status (ten-seed run of 2026-10-16 → 2026-10-20)
+### Current run status (ten-seed run of 2026-10-16 → 2026-10-21)
 
-The full suite ran 36 steps; **25 completed and 11 failed**, all traceable to six
-localised defects rather than to the methods. The complete blocks are CRL
-A.1–A.8, A.12, A.16, A.17 and B–D plus the 18-problem grid, the temporal and
-static effect-estimation suites, the real external-validity panels and the
-adjacent branches. The blocked blocks are the six two-dimensional physics/control
-suites (A.9–A.11, A.13–A.15), the matching-benchmark sanity check, the
-static–dynamic step and the two real effect cohorts (NHEFS, Oregon).
+The full suite ran 36 steps. The first pass completed 25 and left 11 blocked by
+six localised defects rather than by the methods; after the fixes all 11 were
+rerun successfully, so the complete set now covers **all seventeen shared CRL
+benchmarks A.1–A.17**, B–D, the 18-problem grid, the temporal and static
+effect-estimation suites (including NHEFS and the Oregon RCT), the
+static–dynamic block, the ten-seed matching-benchmark sanity, the real
+external-validity panels and the adjacent branches.
 
 The root causes, evidence lines, proposed code fixes and the exact rerun
 commands are in
@@ -706,12 +706,9 @@ The design and roadmap are documented in [`docs/design.md`](docs/design.md).
   and bootstrap confidence intervals; a tagged release with a DOI is pending.
 - **Pending methods.** APPEX is not implemented; iCITRIS, GBTPL, LacaDM and
   CausalConceptTS are implemented and reported.
-- **Pending benchmarks.** Six two-dimensional physics/control CRL blocks
-  (A.9–A.11, A.13–A.15) are blocked by the TDRL dimension-allocation and
-  Lotka–Volterra finiteness defects; the ten-seed matching-benchmark sanity and
-  static–dynamic blocks need a rerun after the device fixes; the NHEFS loader
-  and the Oregon archive remain; the rendered-image Causal3DIdent variant and
-  the ACIC archives (hand download) are not run. See
+- **Pending benchmarks.** The rendered-image Causal3DIdent variant and the ACIC
+  panels (hand download) are not run; a tagged release with a DOI is pending.
+  The defects that blocked the first pass are fixed and documented in
   [`docs/failure_analysis_and_rerun_plan.md`](docs/failure_analysis_and_rerun_plan.md).
 
 ---
