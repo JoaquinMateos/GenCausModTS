@@ -64,3 +64,4 @@ data/acic/
 data/static/
 # materialised synthetic pools (see scripts/generate_synthetic_data.py)
 data/synthetic/
+data/synthetic_*/
