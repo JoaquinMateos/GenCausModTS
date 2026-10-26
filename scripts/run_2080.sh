@@ -21,7 +21,7 @@ cd "$(dirname "$0")/.."
 SEEDS="${SEEDS:-10}"
 REPLICATIONS="${REPLICATIONS:-100}"
 JOBS="${JOBS:-8}"
-STAMP="${STAMP:-$(date +%Y%m%d)}"
+STAMP="${STAMP:-$(date +%Y%m%d_%H%M%S)}"
 SKIP_DOWNLOAD="${SKIP_DOWNLOAD:-0}"
 
 echo "== 1/6 environment =="

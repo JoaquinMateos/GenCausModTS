@@ -92,6 +92,10 @@ class TwinsLoader:
         self.y0 = np.asarray(frame[outcome_columns[0]].to_numpy() < 9999, dtype=np.int64)
         self.y1 = np.asarray(frame[outcome_columns[1]].to_numpy() < 9999, dtype=np.int64)
 
+    def replication(self, index: int) -> IHDPReplication:
+        """Return one replication without materialising the whole list."""
+        return self.load()[index]
+
     def load(self) -> list[IHDPReplication]:
         rng = np.random.default_rng(self.seed)
         replications: list[IHDPReplication] = []
@@ -210,6 +214,10 @@ class NewsLoader:
         mu1 = y[:, 4].astype(np.float32)
         return IHDPReplication(x=x, t=t, yf=yf, ycf=ycf, mu0=mu0, mu1=mu1)
 
+    def replication(self, index: int) -> IHDPReplication:
+        """Load a single News replication (the 5,000 x 3,477 matrix)."""
+        return self._one(index)
+
     def load(self) -> list[IHDPReplication]:
         return [self._one(index) for index in range(self.replications)]
 
@@ -264,6 +272,10 @@ class CPSLoader:
                 "a public mirror; request cps.csv and place it under data/static/ "
                 "with columns t, yf, ycf, mu0, mu1 plus covariates."
             )
+
+    def replication(self, index: int) -> IHDPReplication:
+        """Return one train/test concatenated CPS replication."""
+        return self.load()[index]
 
     def load(self) -> list[IHDPReplication]:
         frame = pd.read_csv(self.path)

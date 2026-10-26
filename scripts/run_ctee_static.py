@@ -135,7 +135,7 @@ def _load_replication(dataset: str, index: int, directory: Path) -> Replication:
                 directory / "cps.csv", replications=index + 1, seed=0
             ),
         }[dataset]()
-        return loader.load()[index]
+        return loader.replication(index)
     if dataset in STATIC_CATE_BENCHMARKS:
         loader = StaticCateLoader(dataset, replications=index + 1, seed=0)
         return loader.load()[index]
