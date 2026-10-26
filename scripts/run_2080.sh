@@ -66,7 +66,7 @@ echo "== 5/6 full benchmark (${SEEDS} seeds, ${REPLICATIONS} replications, ${JOB
 # epochs; both are uniform across methods.
 uv run --no-sync python scripts/run_full_benchmark.py \
   --device cuda --seeds "$SEEDS" --replications "$REPLICATIONS" \
-  --jobs "$JOBS" --with-grid --data-source pool
+  --jobs "$JOBS" --gpus "${GPUS:-}" --with-grid --data-source pool
 
 echo "== 6/6 regenerate tables (idempotent; the barrier already did it) =="
 uv run --no-sync python scripts/make_paper_tables.py \

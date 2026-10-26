@@ -643,10 +643,12 @@ def main() -> int:
         ),
     )
     parser.add_argument(
-        "--gpus", default="1",
+        "--gpus", default="",
         help=(
             "comma-separated GPU ids to pin steps to round-robin, "
-            "e.g. '0' or '0,1' (default: '1'; pass '' to inherit the environment)"
+            "e.g. '0' or '0,1'. The default (empty) inherits "
+            "CUDA_VISIBLE_DEVICES from the parent shell, so "
+            "`CUDA_VISIBLE_DEVICES=0 ...` selects physical GPU 0."
         ),
     )
     parser.add_argument(
