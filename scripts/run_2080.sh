@@ -55,7 +55,7 @@ fi
 
 echo "== 4/6 synthetic pools =="
 uv run --no-sync python scripts/generate_synthetic_data.py \
-  --seeds $(seq 0 $((SEEDS - 1))) \
+  --seeds "$SEEDS" --with-grid \
   --suites npvar npvar_linear npvar_hard cartpole causal3d lorenz lorenz96 pcl \
            kuramoto lotka_volterra duffing fitzhugh_nagumo chua van_der_pol \
            pendulum mountain_car varma ou voronoi sde child
@@ -66,7 +66,7 @@ echo "== 5/6 full benchmark (${SEEDS} seeds, ${REPLICATIONS} replications, ${JOB
 # epochs; both are uniform across methods.
 uv run --no-sync python scripts/run_full_benchmark.py \
   --device cuda --seeds "$SEEDS" --replications "$REPLICATIONS" \
-  --jobs "$JOBS" --with-grid
+  --jobs "$JOBS" --with-grid --data-source pool
 
 echo "== 6/6 regenerate tables (idempotent; the barrier already did it) =="
 uv run --no-sync python scripts/make_paper_tables.py \
