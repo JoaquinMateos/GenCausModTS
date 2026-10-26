@@ -1,0 +1,33 @@
+{
+  "datasets": {
+    "npvar/seed_00": {
+      "suite": "npvar",
+      "seed": 0,
+      "train_size": 256,
+      "eval_size": 64,
+      "horizon": 16,
+      "observed_dim": 6,
+      "latent_dim": 3,
+      "max_lag": 1,
+      "generator": "TemporalNonlinearGenerator",
+      "created_at": "2026-10-26T10:25:25.146099+00:00",
+      "sha256": "bcff5c3786ebf71a0a43cc8bed299e11fcaf16584410d6804b7e6aff0a6a6f9b",
+      "path": "data/synthetic_smoke/npvar/seed_00.pt"
+    },
+    "voronoi/seed_00": {
+      "suite": "voronoi",
+      "seed": 0,
+      "train_size": 256,
+      "eval_size": 64,
+      "horizon": 16,
+      "observed_dim": 6,
+      "latent_dim": 6,
+      "max_lag": 1,
+      "generator": "VoronoiGenerator",
+      "created_at": "2026-10-26T10:25:25.166298+00:00",
+      "sha256": "3178b82cddef30d9a1be0a7362514dce64284631c8190767f7da52ba35623226",
+      "path": "data/synthetic_smoke/voronoi/seed_00.pt"
+    }
+  },
+  "updated_at": "2026-10-26T10:25:25.167029+00:00"
+}

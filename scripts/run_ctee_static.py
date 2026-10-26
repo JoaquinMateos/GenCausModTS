@@ -47,6 +47,7 @@ from gcmts.effect_estimation.methods import CEPAE, CRN, GANITE, CaTSG
 from gcmts.evaluation.benchmarks import (
     CTEE_OPTIONAL_STATIC_BENCHMARKS,
     CTEE_REAL_BENCHMARKS,
+    CTEE_STATIC_BENCHMARKS,
     EMA_DECAY,
 )
 from gcmts.evaluation.metrics import PolicyRiskMetric
@@ -311,6 +312,7 @@ def run_replication(
     data_dir: Path,
     *,
     save_curves: bool = False,
+    epochs_scale: float = 1.0,
 ) -> list[StaticResult]:
     train_replication, test_replication = _load_pair(dataset, index, data_dir)
     results: list[StaticResult] = []
@@ -320,6 +322,7 @@ def run_replication(
     )
     for method_name in methods:
         factory, epochs, note = METHODS[method_name]
+        epochs = max(2, int(round(epochs * epochs_scale)))
         logger.info("=" * 72)
         logger.info(
             "CASE %s_%s replication=%d | %s", method_name, dataset, index, note
@@ -438,7 +441,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run static CTEE benchmarks.")
     parser.add_argument(
         "--dataset",
-        choices=["ihdp", "acic", *CTEE_OPTIONAL_STATIC_BENCHMARKS, *CTEE_REAL_BENCHMARKS],
+        choices=[*CTEE_STATIC_BENCHMARKS, *CTEE_OPTIONAL_STATIC_BENCHMARKS, *CTEE_REAL_BENCHMARKS],
         default="ihdp",
     )
     parser.add_argument("--data-dir", type=Path, default=None)
@@ -446,6 +449,9 @@ def main() -> int:
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--methods", nargs="*", default=None)
     parser.add_argument("--replications", type=int, default=100)
+    parser.add_argument(
+        "--epochs-scale", type=float, default=1.0, help="smoke-test budget multiplier"
+    )
     parser.add_argument(
         "--resume", action=argparse.BooleanOptionalAction, default=True,
         help="skip replications already present in the output JSON (default: resume)",
@@ -513,6 +519,7 @@ def main() -> int:
             args.out_dir,
             data_dir,
             save_curves=False,
+            epochs_scale=args.epochs_scale,
         )
         rows.extend(asdict(result) for result in results)
         save_rows(rows, args.out_dir, stem=f"ctee_static_{args.dataset}")

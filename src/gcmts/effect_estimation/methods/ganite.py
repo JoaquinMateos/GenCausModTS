@@ -134,7 +134,9 @@ class GANITE(BaseEffectEstimator):
         batch, time, dim = x.shape
         flat = x.reshape(batch * time, dim)
         noise = torch.zeros(flat.shape[0], self.noise_dim, device=x.device)
-        generated = cast(Tensor, self.ite_generator(torch.cat([flat, noise], dim=-1)))
+        generated = cast(Tensor, self.ite_generator(torch.cat([flat, noise], dim=-1))).clamp(
+            -10.0, 10.0
+        )
         return generated.reshape(batch, time, self.n_arms, dim)
 
     def prediction(self, context: dict[str, Tensor], horizon: int) -> Tensor:
@@ -173,7 +175,7 @@ class GANITE(BaseEffectEstimator):
             self.counterfactual_generator(
                 torch.cat([flat_x, arm, flat_x, noise], dim=-1)
             ),
-        )
+        ).clamp(-10.0, 10.0)
         generated_arms = generated.reshape(flat_x.shape[0], self.n_arms, self.observed_dim)
         g_supervised = nn.functional.mse_loss(
             generated_arms[torch.arange(flat_x.shape[0], device=flat_x.device), index],
@@ -206,7 +208,7 @@ class GANITE(BaseEffectEstimator):
         generated_ite = cast(
             Tensor,
             self.ite_generator(torch.cat([flat_x, noise], dim=-1)),
-        )
+        ).clamp(-10.0, 10.0)
         generated_ite_arms = generated_ite.reshape(
             flat_x.shape[0], self.n_arms, self.observed_dim
         )

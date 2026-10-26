@@ -289,6 +289,9 @@ def main() -> int:
     parser.add_argument("--only", nargs="*", default=None)
     parser.add_argument("--seeds", type=int, default=10, help="number of seeds")
     parser.add_argument(
+        "--epochs-scale", type=float, default=1.0, help="smoke-test budget multiplier"
+    )
+    parser.add_argument(
         "--resume", action=argparse.BooleanOptionalAction, default=True,
         help="skip runs already present in the output JSON (default: resume)",
     )
@@ -300,6 +303,8 @@ def main() -> int:
     args = parser.parse_args()
     configure_logging(args.out_dir)
     cases = build_cases()
+    for case in cases:
+        case.epochs = max(2, int(round(case.epochs * args.epochs_scale)))
     if args.only:
         cases = [c for c in cases if c.name in set(args.only)]
     stem = "sdd_benchmarks"
