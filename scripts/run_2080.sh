@@ -25,7 +25,7 @@ STAMP="${STAMP:-$(date +%Y%m%d_%H%M%S)}"
 SKIP_DOWNLOAD="${SKIP_DOWNLOAD:-0}"
 
 echo "== 1/6 environment =="
-uv sync --extra dev --extra real
+uv sync --extra dev --extra real --extra progress
 uv run --no-sync python - <<'PY'
 import torch
 print("cuda available:", torch.cuda.is_available())

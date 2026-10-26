@@ -694,6 +694,9 @@ docs = [
     { name = "mkdocs" },
     { name = "mkdocs-material" },
 ]
+progress = [
+    { name = "rich" },
+]
 real = [
     { name = "anndata" },
     { name = "h5py" },
@@ -727,6 +730,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
+    { name = "rich", marker = "extra == 'progress'", specifier = ">=13.7" },
     { name = "rich", marker = "extra == 'tracking'", specifier = ">=13.7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
     { name = "scikit-learn", specifier = ">=1.5" },
@@ -736,7 +740,7 @@ requires-dist = [
     { name = "xarray", marker = "extra == 'real'", specifier = ">=2024.1" },
     { name = "zarr", marker = "extra == 'real'", specifier = ">=2.18" },
 ]
-provides-extras = ["dev", "docs", "real", "tracking"]
+provides-extras = ["dev", "docs", "real", "progress", "tracking"]
 
 [[package]]
 name = "ghp-import"

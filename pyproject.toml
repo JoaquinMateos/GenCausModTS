@@ -59,6 +59,9 @@ real = [
     "h5py>=3.11",
     "nibabel>=5.3",
 ]
+progress = [
+    "rich>=13.7",
+]
 tracking = [
     "rich>=13.7",
     "clearml>=1.16",
