@@ -71,12 +71,17 @@ class MultiDomainGenerator(BaseDataGenerator):
         # Causal dynamics are domain-invariant, so the causal factors transfer
         # exactly; only the spurious correlation flips on the held-out domain.
         self.dynamic_scale = torch.ones(n_domains)
-        # The spurious correlation is positive in most training domains but
-        # flips sign on the last training domain and on the held-out domain, so
-        # an average-risk predictor leans on it while an invariant one discards it.
-        self.spurious_sign = torch.ones(n_domains)
-        self.spurious_sign[-1] = -1.0
-        self.spurious_sign[-2] = -1.0
+        # The spurious coefficient varies across the training domains (so an
+        # invariance method can identify the feature as spurious) but stays
+        # positive and has a non-zero average, which creates a genuine average-
+        # risk shortcut.  The held-out domain reverses the sign and is outside
+        # the training range: an ERM predictor that keeps the average
+        # coefficient is wrong there, while an invariant predictor is not.
+        if n_domains == 5:
+            self.spurious_coefficient = torch.tensor([1.0, 0.8, 0.6, 0.4, -1.0])
+        else:
+            self.spurious_coefficient = torch.linspace(1.0, -1.0, n_domains)
+        self.spurious_sign = self.spurious_coefficient
         self.static_causal_weights = torch.randn(static_dim, generator=self.rng)
 
     def _roll(

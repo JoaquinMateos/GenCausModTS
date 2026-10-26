@@ -1,18 +1,15 @@
-r"""Additional static CATE benchmarks (Twins, Jobs/LaLonde, News, CPS).
+r"""Additional *synthetic* static CATE panels (Twins/Jobs/News/CPS dimensions).
 
 The canonical static benchmarks beyond IHDP/ACIC are the semi-synthetic CATE
 datasets popularised by Louizos et al.\ (2017) and Shalit et al.\ (2017):
-**Twins**, **Jobs** (LaLonde), **News** and **CPS**. Their covariates come from
-real observational studies, but their *potential outcomes are simulated* (the
-originals expose no ground-truth counterfactuals), so each is a semi-synthetic
-benchmark in the same sense as IHDP.
-
-This module instantiates each benchmark through a documented semi-synthetic
-data-generating process calibrated to the source's characteristics (covariate
-dimension, treated fraction, degree of non-linearity), and returns the same
-``IHDPReplication`` records used by the IHDP loader, so the static runner and
-the effect estimators are unchanged. The generator is deterministic given the
-seed, which keeps the paired tests valid across methods.
+**Twins**, **Jobs** (LaLonde), **News** and **CPS**.  This module does **not**
+bundle their real covariates.  It instantiates synthetic Gaussian replacements
+calibrated to the source's covariate dimension and treated fraction, with a
+known linear-plus-nonlinear outcome surface and exact potential outcomes.  They
+are therefore *calibration panels*, not the canonical benchmarks: the results
+must be labelled ``Synth-Twins`` etc., and no claim about the real benchmarks
+may be based on them.  The canonical Twins loader (both twin outcomes observed)
+and the CFRNet semi-synthetic files are a planned addition.
 """
 
 from __future__ import annotations

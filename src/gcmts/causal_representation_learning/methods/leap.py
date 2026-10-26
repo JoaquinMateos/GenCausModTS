@@ -68,7 +68,7 @@ class LEAP(BaseCausalRepresentationLearner):
         if obs_noise <= 0:
             raise ValueError("obs_noise must be positive.")
         self.u_dim = u_dim
-        self.kl_weight = kl_weight
+        self.kl_weight: float = kl_weight
         self.encoder = GaussianHead(
             observed_dim + u_dim, latent_dim, hidden_dims=hidden_dims
         )

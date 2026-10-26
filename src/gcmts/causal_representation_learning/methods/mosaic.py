@@ -108,7 +108,7 @@ class MOSAIC(BaseCausalRepresentationLearner):
         super().__init__(observed_dim=observed_dim, latent_dim=latent_dim, max_lag=1)
         self.u_dim = u_dim
         self.sparsity = sparsity
-        self.kl_weight = kl_weight
+        self.kl_weight: float = kl_weight
         # Latents are identified from regime-conditioned temporal variation, so the
         # encoder conditions on the regime/domain context u.
         self.encoder = GaussianHead(observed_dim + u_dim, latent_dim, hidden_dims=hidden_dims)

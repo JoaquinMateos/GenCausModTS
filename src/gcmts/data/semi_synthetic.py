@@ -453,6 +453,7 @@ class IHDPGenerator(BaseDataGenerator):
         *,
         seed: int | None = None,
         standardize: bool = True,
+        reference: IHDPGenerator | None = None,
     ) -> None:
         covariates = replication.x.astype(np.float32)
         super().__init__(observed_dim=covariates.shape[1] + 1, horizon=1)
@@ -461,16 +462,28 @@ class IHDPGenerator(BaseDataGenerator):
         self.rng = torch.Generator().manual_seed(seed or 0)
         x = torch.from_numpy(covariates).float()
         yf = torch.from_numpy(replication.yf).float()
-        if standardize:
+        ycf = torch.from_numpy(replication.ycf).float()
+        self.x_mean: Tensor
+        self.x_std: Tensor
+        self.y_mean: Tensor
+        self.y_std: Tensor
+        if reference is not None:
+            # Use the training split's standardisation for the held-out split,
+            # so an estimated outcome can be mapped back with the same scale.
+            self.x_mean, self.x_std = reference.x_mean, reference.x_std
+            self.y_mean, self.y_std = reference.y_mean, reference.y_std
+            x = (x - self.x_mean) / self.x_std
+            yf = (yf - self.y_mean) / self.y_std
+            ycf = (ycf - self.y_mean) / self.y_std
+        elif standardize:
             self.x_mean, self.x_std = x.mean(0), x.std(0) + 1e-6
             self.y_mean, self.y_std = yf.mean(), yf.std() + 1e-6
             x = (x - self.x_mean) / self.x_std
             yf = (yf - self.y_mean) / self.y_std
-            ycf = (torch.from_numpy(replication.ycf).float() - self.y_mean) / self.y_std
+            ycf = (ycf - self.y_mean) / self.y_std
         else:
             self.x_mean, self.x_std = torch.zeros(x.shape[1]), torch.ones(x.shape[1])
             self.y_mean, self.y_std = torch.zeros(()), torch.ones(())
-            ycf = torch.from_numpy(replication.ycf).float()
         self.covariates = x
         self.outcomes = yf
         self.counterfactual_outcomes = ycf
@@ -544,6 +557,22 @@ class ACICLoader:
                 result[key] = (
                     pd.read_csv(path, header=None).to_numpy(dtype=np.float32).reshape(-1)
                 )
+        # ACIC outcomes are on a heavy-tailed, replication-specific scale (the
+        # raw PEHE of the earlier run was 610 +/- 4654).  Standardise the
+        # factual outcome, the realised potential outcomes and both response
+        # surfaces with the *factual* mean/std; the effect is then reported in
+        # standard-deviation units and is comparable across replications.
+        factual = result["yf"]
+        scale = float(np.std(factual))
+        if not np.isfinite(scale) or scale < 1e-8:
+            scale = 1.0
+        center = float(np.mean(factual))
+        result["yf"] = (result["yf"] - center) / scale
+        for key in ("mu0", "mu1"):
+            if key in result:
+                result[key] = (result[key] - center) / scale
+        result["outcome_mean"] = np.asarray([center], dtype=np.float32)
+        result["outcome_scale"] = np.asarray([scale], dtype=np.float32)
         return result
 
     def pehe(self, tau_hat: np.ndarray, name: str = "default") -> float:

@@ -163,11 +163,18 @@ def aggregate_rows(
             if isinstance(value, (int, float)) and key not in _NON_METRIC
         ]
         for key in keys:
-            values = [float(row[key]) for row in group if row.get(key) is not None]
+            values = [
+                float(row[key])
+                for row in group
+                if row.get(key) is not None and np.isfinite(float(row[key]))
+            ]
             if values:
                 metrics[key] = {
                     "mean": float(np.mean(values)),
-                    "std": float(np.std(values)),
+                    # ddof=1: the table reports the sample standard deviation
+                    # over seeds/replications, not the population std of the
+                    # realised runs.
+                    "std": float(np.std(values, ddof=1)) if len(values) > 1 else 0.0,
                     "n": float(len(values)),
                 }
         aggregated[case] = metrics

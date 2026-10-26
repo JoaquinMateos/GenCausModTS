@@ -37,7 +37,7 @@ from gcmts.causal_representation_learning.methods import (
     iCITRIS,
 )
 from gcmts.core import SimpleTrainer, move_batch, save_training_report
-from gcmts.core.graph_ops import estimate_latent_adjacency
+from gcmts.core.graph_ops import estimate_latent_adjacency, latent_permutation
 from gcmts.data.hierarchical import HierarchicalTemporalGenerator
 from gcmts.data.synthetic import (
     InterventionalTemporalGenerator,
@@ -49,6 +49,7 @@ from gcmts.data.synthetic import (
     TemporalNonlinearGenerator,
 )
 from gcmts.evaluation import BenchmarkTask, CrlBenchmarkRunner
+from gcmts.evaluation.benchmarks import EMA_DECAY
 from gcmts.evaluation.metrics import SHDMetric, WSHDMetric
 from gcmts.evaluation.progress import ProgressTracker
 from gcmts.evaluation.report import (
@@ -312,6 +313,7 @@ def run_case(
         warmup_fraction=0.05,
         val_size=512,
         val_every=10,
+        ema_decay=EMA_DECAY,
     )
     start = time.perf_counter()
     history = trainer.fit(model, generator)
@@ -389,8 +391,13 @@ def run_case(
                 adj_est = native
             else:
                 adj_est = estimate_latent_adjacency(z_pred, max_lag=max_lag)
-            shd_value = SHDMetric()(adj_est, adj_true).value
-            wshd_value = WSHDMetric()(adj_est, adj_true).value
+            if eval_batch.z is not None and adj_est.shape[0] == eval_batch.z.shape[-1]:
+                perm = latent_permutation(z_pred, eval_batch.z)
+                adj_est = adj_est[perm][:, perm]
+            # Hungarian alignment on the correlation matrix (source protocol);
+            # do not additionally optimise the permutation against the graph.
+            shd_value = SHDMetric(aligned=False)(adj_est, adj_true).value
+            wshd_value = WSHDMetric(aligned=False)(adj_est, adj_true).value
 
         if mcc_value < 0.2:
             logger.warning(

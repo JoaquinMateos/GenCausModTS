@@ -522,7 +522,20 @@ class SimpleTrainer(BaseTrainer):
                         scaler.scale(loss).backward()  # type: ignore[no-untyped-call]
                         if self.grad_clip is not None:
                             scaler.unscale_(optimiser)
-                            torch.nn.utils.clip_grad_norm_(model.parameters(), self.grad_clip)
+                            grad_norm = torch.nn.utils.clip_grad_norm_(
+                                model.parameters(), self.grad_clip
+                            )
+                            if not bool(torch.isfinite(grad_norm)):
+                                # A finite scalar loss can still have a
+                                # non-finite gradient through an extreme
+                                # activation; stepping would poison the Adam
+                                # state and every later validation batch.
+                                logger.warning(
+                                    "Non-finite gradient at epoch %d; skipping step.", epoch
+                                )
+                                optimiser.zero_grad(set_to_none=True)
+                                profiler.end_step()
+                                continue
                     with phase("optim"):
                         scaler.step(optimiser)
                         scaler.update()

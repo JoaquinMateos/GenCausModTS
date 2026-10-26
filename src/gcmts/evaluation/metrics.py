@@ -9,7 +9,6 @@ from typing import Any
 import numpy as np
 import torch
 from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 from sklearn.model_selection import train_test_split
 from torch import Tensor
@@ -151,14 +150,16 @@ class MCCMetric(Metric):
 
 
 def _nonlinear_r2(features: Tensor, target: Tensor, *, seed: int = 0) -> float:
-    """Test-split R² predicting ``target`` from ``features``, as in CITRIS.
+    """Held-out R² of a nonlinear regressor predicting ``target`` from ``features``.
 
-    Mirrors the coefficient-of-determination protocol of Lippe et al. (2022): a
-    non-linear regressor predicts the true factor and R² is measured on held-out
-    samples. Implemented with gradient boosting (which, unlike extremely
-    randomised trees, is never systematically worse than a linear fit here); the
-    reported value is the best of the linear and boosted fits so that it is a
-    valid lower-bound-consistent R².
+    Mirrors the coefficient-of-determination protocol of Lippe et al. (2022):
+    a nonlinear regressor predicts the true factor and R² is measured on held-out
+    samples.  R² is reported as defined (it may be negative for an
+    uninformative representation); it is *not* clipped at zero, because clipping
+    turns a failed factor into a zero-leakage factor and biases both
+    ``R²_diag`` and ``R²_sep`` upwards.  A single pre-specified regressor is
+    used; selecting the better of a linear and a nonlinear fit on the test split
+    would leak the test labels into model selection.
     """
     x = features.detach().cpu().numpy()
     y = target.detach().cpu().numpy().reshape(-1)
@@ -167,11 +168,8 @@ def _nonlinear_r2(features: Tensor, target: Tensor, *, seed: int = 0) -> float:
     x_train, x_test, y_train, y_test = train_test_split(
         x, y, test_size=0.3, random_state=seed
     )
-    linear = LinearRegression().fit(x_train, y_train)
     boosted = GradientBoostingRegressor(random_state=seed).fit(x_train, y_train)
-    r2_linear = r2_score(y_test, linear.predict(x_test))
-    r2_boosted = r2_score(y_test, boosted.predict(x_test))
-    return float(max(0.0, r2_linear, r2_boosted))
+    return float(r2_score(y_test, boosted.predict(x_test)))
 
 
 def _r2_matrix(
@@ -321,15 +319,29 @@ class SHDMetric(Metric):
     """Structural Hamming Distance between estimated and true adjacency.
 
     The estimated graph is aligned to the ground truth over latent permutations
-    before counting edge additions/deletions, since latents are identified only
-    up to permutation. Accepts adjacency of shape ``(d, d)`` or ``(d, d, p)``.
+    before counting edge additions/deletions/reversals, since latents are
+    identified only up to permutation. Accepts adjacency of shape ``(d, d)`` or
+    ``(d, d, p)``.
+
+    Set ``aligned=False`` when the caller has already aligned the latents with
+    :func:`gcmts.core.graph_ops.latent_permutation`. Re-optimising the
+    permutation inside the metric would otherwise use the ground-truth graph to
+    choose the alignment and make the score optimistic relative to the
+    correlation-based protocol used by the source methods.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, aligned: bool = True) -> None:
         super().__init__("shd", "L1_structure", higher_is_better=False)
+        self.aligned = aligned
 
     def __call__(self, prediction: Tensor, target: Tensor) -> MetricResult:
-        value = aligned_shd(prediction, target)
+        from gcmts.core.graph_ops import shd as plain_shd
+
+        value = (
+            aligned_shd(prediction, target)
+            if self.aligned
+            else float(plain_shd(prediction, target))
+        )
         return MetricResult(self.name, value, self.level, self.higher_is_better)
 
 
@@ -340,11 +352,17 @@ class WSHDMetric(Metric):
     :func:`gcmts.core.graph_ops.weighted_shd`.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, aligned: bool = True) -> None:
         super().__init__("wshd", "L1_structure", higher_is_better=False)
+        self.aligned = aligned
 
     def __call__(self, prediction: Tensor, target: Tensor) -> MetricResult:
-        value = aligned_shd(prediction, target, weighted=True)
+        if self.aligned:
+            value = aligned_shd(prediction, target, weighted=True)
+        else:
+            from gcmts.core.graph_ops import weighted_shd
+
+            value = weighted_shd(prediction, target)
         return MetricResult(self.name, value, self.level, self.higher_is_better)
 
 
@@ -383,24 +401,25 @@ def _covariance(x: Tensor) -> Tensor:
 
 
 class TripletDistanceMetric(Metric):
-    r"""Triplet distance: isolation of an intervened factor.
+    r"""Intervention-isolation distance (a derived diagnostic, not the CITRIS triplet).
 
-    For an intervention on factor ``a`` the *matched* latent coordinate
-    ``pi(a)`` should move, while every other latent coordinate stays fixed.
-    With ``d_self = |z_before_{pi(a)} - z_after_{pi(a)}|`` and
-    ``d_other = mean_{k != pi(a)} |z_before_k - z_after_k|`` the per-sample
-    score is ``d_other / (d_self + d_other)``: zero when the intervention is
-    perfectly isolated, about ``0.5`` when the change is spread uniformly
-    (chance). It is reported as a distance, matching the direction of the
-    source evaluation (CITRIS reports distances with optimum zero), and not as
-    the isolation ratio of the earlier implementation.
+    For an intervention on factor ``a`` the matched latent coordinate
+    ``pi(a)`` should move, while the other coordinates should not.  Samples are
+    grouped by intervention target so that the natural transition dynamics
+    average out; for target ``a``
 
-    Inputs follow the CITRIS convention: ``prediction`` is a dictionary with
-    ``before`` and ``after`` latent tensors and an intervention-target tensor
-    ``targets`` (either an index vector ``(N,)`` or a binary multi-hot matrix
-    ``(N, K)``); ``target`` is the true factor tensor of the *factual* samples,
-    used only to match latent coordinates to causal variables (Hungarian
-    assignment on absolute correlations, valid up to permutation).
+    ``d_self = mean_{n: I_n=a} |z_after_{pi(a)} - z_before_{pi(a)}|`` and
+    ``d_other = mean_{n: I_n=a} mean_{k != pi(a)} |z_after_k - z_before_k|``,
+
+    and the score is ``d_other / (d_self + d_other)`` (zero when the
+    intervention is isolated, about ``0.5`` at chance).  This is deliberately
+    *not* the CITRIS "triplet" evaluation, which composes two images in latent
+    space, decodes the composition and scores the decoded factors with a
+    supervised CNN; that protocol requires a rendered-image benchmark and a
+    factor regressor, neither of which exists for the low-dimensional SCMs
+    here.  Inputs follow the CITRIS convention: ``prediction`` is a dictionary
+    with ``before``/``after`` latents and an intervention-target vector;
+    ``target`` is the factual factor tensor used only for Hungarian matching.
     """
 
     def __init__(self) -> None:
@@ -433,12 +452,17 @@ class TripletDistanceMetric(Metric):
             after = after[valid]
 
         delta = (after - before).abs()
-        scores = []
-        for row, variable in zip(delta, index_tensor.tolist(), strict=True):
-            coordinate = int(matched[variable].item())
-            d_self = float(row[coordinate].item())
-            others = [float(row[k].item()) for k in range(row.numel()) if k != coordinate]
-            d_other = float(np.mean(others)) if others else 0.0
+        scores: list[float] = []
+        for variable in torch.unique(index_tensor).tolist():
+            mask = index_tensor == int(variable)
+            if int(mask.sum()) == 0:
+                continue
+            coordinate = int(matched[int(variable)].item())
+            d_self = float(delta[mask, coordinate].mean().item())
+            others = [k for k in range(delta.shape[1]) if k != coordinate]
+            if not others:
+                continue
+            d_other = float(delta[mask][:, others].mean().item())
             scores.append(d_other / (d_self + d_other + 1e-8))
         value = float(np.mean(scores)) if scores else float("nan")
         return MetricResult(self.name, value, self.level, self.higher_is_better)
@@ -569,20 +593,35 @@ class MMD2Metric(Metric):
 
     ``MMD^2(P, Q) = E[k(x,x')] - 2 E[k(x,y)] + E[k(y,y')]`` on flattened
     samples. Lower is better; zero means the two empirical distributions agree.
+
+    The kernel bandwidth is chosen by the median heuristic on the pooled
+    squared distances, which makes the score invariant to a global rescaling of
+    the trajectories. A fixed bandwidth (the previous default) makes the value
+    depend on the outcome scale and is not comparable across datasets.
     """
 
-    def __init__(self, bandwidth: float = 1.0) -> None:
+    def __init__(self, bandwidth: float | str = "median") -> None:
         super().__init__("mmd2", "L3_counterfactual", higher_is_better=False)
         self.bandwidth = bandwidth
 
     def __call__(self, prediction: Tensor, target: Tensor) -> MetricResult:
-        x = prediction.reshape(prediction.shape[0], -1)
-        y = target.reshape(target.shape[0], -1)
-        scale = 2.0 * self.bandwidth**2
+        x = prediction.reshape(prediction.shape[0], -1).detach().float()
+        y = target.reshape(target.shape[0], -1).detach().float()
+        pooled = torch.cat([x, y], dim=0)
+        if self.bandwidth == "median":
+            if pooled.shape[0] > 512:
+                generator = torch.Generator().manual_seed(0)
+                index = torch.randperm(pooled.shape[0], generator=generator)[:512]
+                pooled = pooled[index]
+            pairwise = torch.cdist(pooled, pooled).pow(2)
+            positive = pairwise[pairwise > 0]
+            scale = float(positive.median()) if positive.numel() else 1.0
+            scale = max(scale, 1e-12)
+        else:
+            scale = 2.0 * float(self.bandwidth) ** 2
 
         def kernel(a: Tensor, b: Tensor) -> Tensor:
-            diff = a.unsqueeze(1) - b.unsqueeze(0)
-            return torch.exp(-(diff**2).sum(-1) / scale)
+            return torch.exp(-torch.cdist(a, b).pow(2) / scale)
 
         value = (
             kernel(x, x).mean() + kernel(y, y).mean() - 2.0 * kernel(x, y).mean()
@@ -663,28 +702,61 @@ class CDSMetric(Metric):
 
 
 class MIGMetric(Metric):
-    """Mutual-Information-Gap-style score from the latent/factor importance matrix.
+    """Mutual-Information Gap (MIG) for continuous latents and factors.
 
-    For each ground-truth factor we rank the normalised importances of the
-    latents and average the gap between the top two, so that a factor explained
-    by a single latent scores high and a factor spread over many scores low.
+    For each ground-truth factor ``v_i`` the metric compares the mutual
+    information carried by the best latent ``z_{j*}`` with that of the
+    second-best latent, normalised by the differential entropy of ``v_i``:
+
+    ``MIG = (1/K) sum_i [I(z_{j*}; v_i) - max_{j != j*} I(z_j; v_i)] / H(v_i)``.
+
+    Mutual information is estimated with a k-nearest-neighbour regressor
+    (``sklearn.feature_selection.mutual_info_regression``); the entropy is the
+    Gaussian differential entropy ``0.5 log(2 pi e Var(v_i))``.  The previous
+    implementation used the gap between the top two normalised feature
+    importances, which is not MIG and is not comparable across dimensions.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, seed: int = 0) -> None:
         super().__init__("mig", "L1_generalisation", higher_is_better=True)
+        self.seed = seed
 
     def __call__(self, prediction: Tensor, target: Tensor) -> MetricResult:
-        matrix = _importance_matrix(prediction, target)
-        gaps = []
-        for i in range(matrix.shape[0]):
-            row = matrix[i]
-            total = row.sum()
-            if total <= 0:
-                gaps.append(0.0)
+        from sklearn.feature_selection import mutual_info_regression
+
+        x = prediction.reshape(-1, prediction.shape[-1]).detach().cpu().numpy()
+        y = target.reshape(-1, target.shape[-1]).detach().cpu().numpy()
+        if not np.isfinite(x).all() or not np.isfinite(y).all():
+            return MetricResult(self.name, float("nan"), self.level, self.higher_is_better)
+        scores: list[float] = []
+        for i in range(y.shape[1]):
+            entropy = 0.5 * float(np.log(2.0 * np.pi * np.e * (np.var(y[:, i]) + 1e-12)))
+            if entropy <= 1e-8:
                 continue
-            normalised = np.sort(row / total)[::-1]
-            gaps.append(float(normalised[0] - normalised[1]) if normalised.size > 1 else 0.0)
-        return MetricResult(self.name, float(np.mean(gaps)), self.level, self.higher_is_better)
+            information = np.array(
+                [
+                    max(
+                        0.0,
+                        float(
+                            mutual_info_regression(
+                                x[:, j : j + 1], y[:, i], random_state=self.seed
+                            )[0]
+                        ),
+                    )
+                    for j in range(x.shape[1])
+                ]
+            )
+            if information.size == 0:
+                continue
+            best = float(information.max())
+            second = (
+                float(np.partition(information, -2)[-2])
+                if information.size > 1
+                else 0.0
+            )
+            scores.append((best - second) / entropy)
+        value = float(np.mean(scores)) if scores else float("nan")
+        return MetricResult(self.name, value, self.level, self.higher_is_better)
 
 
 # --- Adjacent-branch metrics (III.A structure discovery) ---------------------
@@ -765,26 +837,33 @@ class HypervolumeMetric(Metric):
     r"""Hypervolume of a Pareto front relative to a reference point.
 
     ``prediction`` is an ``(N, m)`` set of objective vectors; ``target`` is a
-    dictionary with a ``reference`` vector ``(m,)`` (default all zeros). For
-    ``m >= 2`` the hypervolume is estimated by Monte-Carlo sampling in the
-    bounding box ``[min, reference]``. Higher is better.
+    dictionary with a ``reference`` vector ``(m,)``.  For a maximisation front
+    (the default) the reference must be the *worst* corner (a lower bound); the
+    dominated region is the set of points ``x`` with ``x <= p`` componentwise
+    for some front point ``p``.  The volume is estimated by Monte-Carlo sampling
+    in the bounding box between the reference and the front's upper corner.
+    Set ``maximize=False`` for a minimisation front.  Higher is better.
     """
 
-    def __init__(self, *, n_samples: int = 20000, seed: int = 0) -> None:
+    def __init__(self, *, n_samples: int = 20000, seed: int = 0, maximize: bool = True) -> None:
         super().__init__("hypervolume", "L2_decision", higher_is_better=True)
         self.n_points = n_samples
         self.seed = seed
+        self.maximize = maximize
 
     def __call__(self, prediction: Tensor, target: dict[str, Tensor]) -> MetricResult:
         front = prediction.reshape(prediction.shape[0], -1).detach().cpu()
+        if not self.maximize:
+            front = -front
         reference = target["reference"].reshape(-1).detach().cpu()
-        lower = front.min(dim=0).values
-        scale = (reference - lower).clamp(min=1e-8)
+        lower = reference
+        upper = front.max(dim=0).values
+        scale = (upper - lower).clamp(min=1e-8)
         generator = torch.Generator().manual_seed(self.seed)
         samples = lower + torch.rand(self.n_points, front.shape[1], generator=generator) * scale
         dominated = torch.zeros(self.n_points, dtype=torch.bool)
         for point in front:
-            dominated |= (samples >= point).all(dim=1)
+            dominated |= (samples <= point).all(dim=1)
         box = float(torch.prod(scale))
         value = box * float(dominated.float().mean())
         return MetricResult(self.name, value, self.level, self.higher_is_better)

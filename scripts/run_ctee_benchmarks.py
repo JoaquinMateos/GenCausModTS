@@ -32,6 +32,7 @@ from gcmts.data.semi_synthetic import TumourGrowthSimulator
 from gcmts.data.synthetic_effect import HarmonicOscillatorGenerator
 from gcmts.effect_estimation.base import BaseEffectEstimator
 from gcmts.effect_estimation.methods import CEPAE, CRN, GANITE, CaTSG, WuIPTW
+from gcmts.evaluation.benchmarks import EMA_DECAY
 from gcmts.evaluation.metrics import (
     CFMAEMetric,
     MBEMetric,
@@ -176,6 +177,9 @@ class CaseResult:
     effectiveness: float
     effectiveness_ok: float
     reversibility: float
+    pehe_zero: float
+    pehe_mean: float
+    ate_zero: float
     seconds: float
     device: str = "auto"
 
@@ -225,6 +229,14 @@ def evaluate(
     ite_true = y_cf_true - y_f_true
     pehe = PEHEMetric()(ite_hat, ite_true).value
     ate_error = abs(ite_hat.mean().item() - ite_true.mean().item())
+    # Reference predictors that no model can beat without estimating the
+    # individual effect: predicting no effect and predicting the oracle mean
+    # effect.  Without these rows a PEHE of 1.1 on a benchmark whose ITE
+    # standard deviation is 0.3 looks like a modelling result rather than a
+    # failure to learn anything.
+    pehe_zero = float(torch.sqrt((ite_true**2).mean()).item())
+    pehe_mean = float(ite_true.std(unbiased=False).item())
+    ate_zero = float(abs(ite_true.mean().item()))
     cf_mae = CFMAEMetric()(cf_hat, true_cf).value
     cf_mbe = MBEMetric()(cf_hat, true_cf).value
     mmd2 = MMD2Metric()(cf_hat[:256], true_cf[:256]).value
@@ -247,6 +259,9 @@ def evaluate(
         "effectiveness": effectiveness,
         "effectiveness_ok": effectiveness_ok,
         "reversibility": reversibility,
+        "pehe_zero": pehe_zero,
+        "pehe_mean": pehe_mean,
+        "ate_zero": ate_zero,
     }
 
 
@@ -278,6 +293,7 @@ def run_case(
         scheduler="cosine",
         val_size=512,
         val_every=20,
+        ema_decay=EMA_DECAY,
     )
     start = time.perf_counter()
     history = trainer.fit(model, generator)

@@ -14,7 +14,7 @@ Use it only for throughput experiments, e.g. via ``run_crl_shared.py
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 import torch
 
@@ -113,7 +113,7 @@ class PooledGenerator(BaseDataGenerator):
     def _ensure_pool(self) -> Batch:
         if self._pool is None:
             assert self.generator is not None
-            self._pool = cast(Batch, self.generator.sample(self.pool_size))
+            self._pool = self.generator.sample(self.pool_size)
             self._move_pool()
         return self._pool
 

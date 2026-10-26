@@ -50,6 +50,55 @@ def random_invertible_mixing(
     return _ForwardOnly(flow)
 
 
+def _companion_radius(matrices: Tensor) -> float:
+    """Spectral radius of the companion matrix of a lag-``p`` VAR."""
+    p, d, _ = matrices.shape
+    companion = torch.zeros(p * d, p * d, dtype=matrices.dtype)
+    for lag in range(p):
+        companion[:d, lag * d : (lag + 1) * d] = matrices[lag]
+    for lag in range(1, p):
+        companion[lag * d : (lag + 1) * d, (lag - 1) * d : lag * d] = torch.eye(d)
+    return float(torch.linalg.eigvals(companion).abs().max())
+
+
+def sample_stable_lagged_adjacency(
+    dim: int,
+    *,
+    max_lag: int,
+    sparsity: float,
+    scale: float,
+    max_radius: float,
+    generator: torch.Generator,
+) -> Tensor:
+    """Sample a stationary lagged adjacency with real self-persistence.
+
+    The lag-1 block has a positive diagonal (autocorrelation) and sparse
+    lower-triangular cross-edges (a causal order); higher lags use sparse
+    off-diagonal blocks.  The blocks are rescaled by a common factor whenever
+    the companion spectral radius exceeds ``max_radius``, which guarantees
+    stationarity without changing the graph support.  At least one cross-edge
+    is forced for ``dim > 1`` so that a sparsity draw does not silently create
+    an empty graph (for which SHD/AUPRC are undefined).
+    """
+    blocks = torch.zeros(max_lag, dim, dim)
+    diagonal = 0.2 + 0.5 * torch.rand(dim, generator=generator)
+    off = torch.rand(dim, dim, generator=generator)
+    off_mask = (torch.rand(dim, dim, generator=generator) < sparsity).float()
+    off = off * off_mask * torch.tril(torch.ones(dim, dim), diagonal=-1)
+    if dim > 1 and float(off.abs().sum()) == 0.0:
+        off[1, 0] = 1.0
+    blocks[0] = torch.diag(diagonal) + 0.5 * scale * off
+    for lag in range(1, max_lag):
+        cross = torch.rand(dim, dim, generator=generator)
+        cross_mask = (torch.rand(dim, dim, generator=generator) < sparsity).float()
+        cross = cross * cross_mask * torch.tril(torch.ones(dim, dim), diagonal=-1)
+        blocks[lag] = 0.25 * scale * cross / float(lag + 1)
+    radius = _companion_radius(blocks)
+    if radius > max_radius:
+        blocks = blocks * (max_radius / radius)
+    return blocks.permute(1, 2, 0).contiguous()
+
+
 class _ForwardOnly(nn.Module):
     """Wrap a flow so ``forward`` returns only the transformed tensor."""
 
@@ -89,11 +138,16 @@ class VARGenerator(BaseDataGenerator):
         self.adjacency = self._sample_dag(adjacency_sparsity)
 
     def _sample_dag(self, sparsity: float) -> Tensor:
-        # Upper-triangular adjacency ensures acyclicity for contemporaneous.
-        adj = torch.rand(self.observed_dim, self.observed_dim, generator=self.rng)
-        mask = torch.rand_like(adj) < sparsity
-        adj = adj * mask * torch.triu(torch.ones_like(adj), diagonal=1)
-        return adj.unsqueeze(-1).expand(-1, -1, self.max_lag)
+        # A strictly upper-triangular mask is nilpotent and gives a process with
+        # no memory; use a stationary lower-triangular VAR with self-persistence.
+        return sample_stable_lagged_adjacency(
+            self.observed_dim,
+            max_lag=self.max_lag,
+            sparsity=sparsity,
+            scale=1.0,
+            max_radius=0.85,
+            generator=self.rng,
+        )
 
     def sample(self, n_samples: int, horizon: int | None = None, **kwargs: Any) -> Batch:
         horizon = horizon or self.horizon
@@ -150,10 +204,14 @@ class LTSCMGenerator(BaseDataGenerator):
         )
 
     def _sample_dag(self, sparsity: float) -> Tensor:
-        adj = torch.rand(self.latent_dim, self.latent_dim, generator=self.rng)
-        mask = torch.rand_like(adj) < sparsity
-        adj = adj * mask * torch.triu(torch.ones_like(adj), diagonal=1)
-        return adj.unsqueeze(-1).expand(-1, -1, self.max_lag)
+        return sample_stable_lagged_adjacency(
+            self.latent_dim,
+            max_lag=self.max_lag,
+            sparsity=sparsity,
+            scale=1.0,
+            max_radius=0.85,
+            generator=self.rng,
+        )
 
     def sample(
         self,
@@ -306,6 +364,8 @@ class TemporalNonlinearGenerator(BaseDataGenerator):
         adjacency_sparsity: float = 0.4,
         mechanism_scale: float = 0.7,
         noise_std: float = 0.1,
+        max_radius: float = 0.85,
+        burn_in: int = 32,
         hidden: int = 64,
         seed: int | None = None,
     ) -> None:
@@ -314,6 +374,8 @@ class TemporalNonlinearGenerator(BaseDataGenerator):
             raise ValueError("regime_mode must be 'trajectory' or 'time'.")
         if mixing not in {"mlp", "linear"}:
             raise ValueError("mixing must be 'mlp' or 'linear'.")
+        if not 0.0 < max_radius < 1.0:
+            raise ValueError("max_radius must lie in (0, 1) for a stationary process.")
         self.latent_dim = latent_dim
         self.max_lag = max_lag
         self.n_regimes = n_regimes
@@ -321,12 +383,20 @@ class TemporalNonlinearGenerator(BaseDataGenerator):
         self.mixing_type = mixing
         self.obs_shift = obs_shift
         self.noise_std = noise_std
+        self.max_radius = max_radius
+        self.burn_in = max(int(burn_in), 0)
         self.rng = torch.Generator().manual_seed(seed or 0)
-        adj = torch.rand(latent_dim, latent_dim, generator=self.rng)
-        mask = (torch.rand_like(adj) < adjacency_sparsity).float()
-        adj = adj * mask * torch.triu(torch.ones_like(adj), diagonal=1)
-        self.latent_adjacency = (adj * mechanism_scale).unsqueeze(-1).expand(
-            -1, -1, max_lag
+        # A genuine lagged VAR requires persistence: a strictly upper-triangular
+        # coefficient matrix is nilpotent (A^d = 0), so the process has no
+        # memory beyond d steps and its lag-1 autocorrelation is ~0.  We sample
+        # a diagonally dominant, lower-triangular mechanism (a causal order)
+        # and rescale its companion matrix to a user-controlled spectral radius.
+        self.latent_adjacency = self._sample_stable_adjacency(
+            latent_dim,
+            max_lag=max_lag,
+            sparsity=adjacency_sparsity,
+            scale=mechanism_scale,
+            max_radius=max_radius,
         )
         self.regime_noise = torch.linspace(0.5, 1.5, max(n_regimes, 1))
         self.linear_weight = torch.randn(observed_dim, latent_dim, generator=self.rng)
@@ -334,22 +404,61 @@ class TemporalNonlinearGenerator(BaseDataGenerator):
         self.obs_bias = torch.randn(n_regimes, observed_dim, generator=self.rng)
         self.mixing = _frozen_mlp(latent_dim, observed_dim, hidden=hidden, generator=self.rng)
 
+    @staticmethod
+    def _companion_radius(matrices: Tensor) -> float:
+        """Spectral radius of the companion matrix of a lag-``p`` VAR.
+
+        ``matrices`` has shape ``(p, d, d)`` with ``matrices[0]`` the lag-1
+        coefficient block. The companion matrix has the lag blocks in its first
+        block row and identity blocks on the sub-diagonal.
+        """
+        p, d, _ = matrices.shape
+        companion = torch.zeros(p * d, p * d, dtype=matrices.dtype)
+        for lag in range(p):
+            companion[:d, lag * d : (lag + 1) * d] = matrices[lag]
+        for lag in range(1, p):
+            companion[lag * d : (lag + 1) * d, (lag - 1) * d : lag * d] = torch.eye(d)
+        return float(torch.linalg.eigvals(companion).abs().max())
+
+    def _sample_stable_adjacency(
+        self,
+        dim: int,
+        *,
+        max_lag: int,
+        sparsity: float,
+        scale: float,
+        max_radius: float,
+    ) -> Tensor:
+        """Sample a stationary lagged adjacency with real self-persistence."""
+        return sample_stable_lagged_adjacency(
+            dim,
+            max_lag=max_lag,
+            sparsity=sparsity,
+            scale=scale,
+            max_radius=max_radius,
+            generator=self.rng,
+        )
+
     def sample(self, n_samples: int, horizon: int | None = None, **kwargs: Any) -> Batch:
         horizon = horizon or self.horizon
         p = self.max_lag
-        z = torch.zeros(n_samples, horizon + p, self.latent_dim)
+        burn = self.burn_in
+        total = horizon + p + burn
+        z = torch.zeros(n_samples, total, self.latent_dim)
         z[:, :p] = torch.randn(n_samples, p, self.latent_dim, generator=self.rng)
         if self.n_regimes > 1:
             if self.regime_mode == "time":
-                u = torch.randint(0, self.n_regimes, (n_samples, horizon), generator=self.rng)
-                scale = self.regime_noise[u] * self.noise_std  # (N, T)
+                u = torch.randint(
+                    0, self.n_regimes, (n_samples, total), generator=self.rng
+                )
+                scale = self.regime_noise[u] * self.noise_std  # (N, total)
             else:
                 u = torch.randint(0, self.n_regimes, (n_samples,), generator=self.rng)
                 scale = (self.regime_noise[u] * self.noise_std).unsqueeze(1)
         else:
             u = torch.zeros(n_samples, dtype=torch.long)
             scale = torch.full((n_samples, 1), self.noise_std)
-        for t in range(p, horizon + p):
+        for t in range(p, total):
             parents = z[:, t - p : t]
             contrib = torch.zeros(n_samples, self.latent_dim)
             for lag in range(p):
@@ -359,7 +468,9 @@ class TemporalNonlinearGenerator(BaseDataGenerator):
                 scale[:, 0] if scale.shape[1] == 1 else scale[:, t - p]
             ).unsqueeze(-1)
             z[:, t] = contrib + eps * step_scale
-        z_obs = z[:, p:]
+        z_obs = z[:, p + burn :]
+        if self.regime_mode == "time" and u.ndim == 2:
+            u = u[:, p + burn :]
         # Standardise each latent dimension (a component-wise invertible transform
         # that preserves identifiability) so the benchmark is well-conditioned:
         # unit-variance latents and observation noise that is small relative to
@@ -428,6 +539,11 @@ class InterventionalTemporalGenerator(BaseDataGenerator):
         self.shared_mechanism = _frozen_mlp(
             latent_dim, n_shared, hidden=hidden, generator=self.rng
         )
+        # See VoronoiGenerator: default-init MLP outputs are too weak to drive
+        # the latent state relative to the process noise.
+        for mechanism in [*self.mechanisms, self.shared_mechanism]:
+            with torch.no_grad():
+                mechanism[-1].weight.mul_(5.0)
         self.mechanism_scale = mechanism_scale
         if observed_dim == latent_dim:
             self.mixing = random_invertible_mixing(latent_dim, generator=self.rng)
@@ -455,14 +571,14 @@ class InterventionalTemporalGenerator(BaseDataGenerator):
             parents = z[:, t - 1]
             for i, group in enumerate(groups[:-1]):
                 intervened = targets[:, t, i].bool()
-                mean = self.mechanism_scale * self.mechanisms[i](parents)
+                mean = 3.0 * self.mechanism_scale * self.mechanisms[i](parents)
                 noise = self.noise_std * torch.randn(n_samples, self.var_dim, generator=self.rng)
                 fresh = self.noise_std * torch.randn(n_samples, self.var_dim, generator=self.rng)
                 updated = mean + noise
                 updated[intervened] = fresh[intervened]
                 z[:, t, group] = updated
             shared_group = groups[-1]
-            mean_shared = self.mechanism_scale * self.shared_mechanism(parents)
+            mean_shared = 3.0 * self.mechanism_scale * self.shared_mechanism(parents)
             z[:, t, shared_group] = mean_shared + self.noise_std * torch.randn(
                 n_samples, self.n_shared, generator=self.rng
             )
@@ -650,6 +766,7 @@ class NCTRLGenerator(BaseDataGenerator):
         mechanism_scale: float = 0.7,
         regime_skew: float = 0.7,
         noise_std: float = 0.1,
+        max_radius: float = 0.8,
         hidden: int = 64,
         seed: int | None = None,
     ) -> None:
@@ -658,9 +775,19 @@ class NCTRLGenerator(BaseDataGenerator):
         self.n_regimes = n_regimes
         self.noise_std = noise_std
         self.rng = torch.Generator().manual_seed(seed or 0)
-        self.transition_matrices = mechanism_scale * torch.randn(
+        raw = mechanism_scale * torch.randn(
             n_regimes, latent_dim, latent_dim, generator=self.rng
         )
+        # A random regime-specific transition matrix is often explosive: with
+        # d=3 and scale 0.7 the spectral radius is typically > 1, so the latent
+        # process diverges and every method scores badly for a generator reason.
+        # Rescale each regime to a stable radius (stationarity), preserving the
+        # direction of the mechanism.
+        for r in range(n_regimes):
+            radius = float(torch.linalg.eigvals(raw[r]).abs().max())
+            if radius > max_radius:
+                raw[r] = raw[r] * (max_radius / radius)
+        self.transition_matrices = raw
         logits = 0.5 * torch.randn(n_regimes, n_regimes, generator=self.rng)
         self.regime_transition = torch.softmax(logits, dim=-1)
         self.regime_skew = regime_skew
@@ -731,11 +858,13 @@ class Causal3DIdentGenerator(BaseDataGenerator):
         self.mixing_type = mixing
         self.noise_std = noise_std
         self.rng = torch.Generator().manual_seed(seed or 0)
-        adj = torch.rand(latent_dim, latent_dim, generator=self.rng)
-        mask = (torch.rand_like(adj) < adjacency_sparsity).float()
-        adj = adj * mask * torch.triu(torch.ones_like(adj), diagonal=1)
-        self.latent_adjacency = (adj * mechanism_scale).unsqueeze(-1).expand(
-            -1, -1, max_lag
+        self.latent_adjacency = sample_stable_lagged_adjacency(
+            latent_dim,
+            max_lag=max_lag,
+            sparsity=adjacency_sparsity,
+            scale=mechanism_scale,
+            max_radius=0.85,
+            generator=self.rng,
         )
         if mixing == "invertible":
             self.mixing: nn.Module = random_invertible_mixing(
@@ -749,16 +878,21 @@ class Causal3DIdentGenerator(BaseDataGenerator):
     def sample(self, n_samples: int, horizon: int | None = None, **kwargs: Any) -> Batch:
         horizon = horizon or self.horizon
         p = self.max_lag
-        z = torch.zeros(n_samples, horizon + p, self.latent_dim)
+        burn = 16
+        total = horizon + p + burn
+        z = torch.zeros(n_samples, total, self.latent_dim)
         z[:, :p] = torch.randn(n_samples, p, self.latent_dim, generator=self.rng)
-        for t in range(p, horizon + p):
+        for t in range(p, total):
             parents = z[:, t - p : t]
             contrib = torch.zeros(n_samples, self.latent_dim)
             for lag in range(p):
                 contrib = contrib + parents[:, lag] @ self.latent_adjacency[:, :, lag].T
             eps = torch.randn(n_samples, self.latent_dim, generator=self.rng)
             z[:, t] = contrib + eps * self.noise_std
-        z_obs = z[:, p:]
+        z_obs = z[:, p + burn :]
+        z_obs = (z_obs - z_obs.mean(dim=(0, 1), keepdim=True)) / (
+            z_obs.std(dim=(0, 1), keepdim=True) + 1e-6
+        )
         with torch.no_grad():
             x = cast(Tensor, self.mixing(z_obs.reshape(-1, self.latent_dim))).reshape(
                 n_samples, horizon, self.observed_dim

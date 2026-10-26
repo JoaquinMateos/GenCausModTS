@@ -73,7 +73,7 @@ class TDRL(BaseCausalRepresentationLearner):
         self.dyn_dim = latent_dyn_dim
         self.obs_dim = latent_obs_dim
         self.u_dim = u_dim
-        self.kl_weight = kl_weight
+        self.kl_weight: float = kl_weight
         self.encoder = GaussianHead(observed_dim + u_dim, latent_dim, hidden_dims=hidden_dims)
         self.decoder = MLP(latent_dim, observed_dim, hidden_dims=decoder_hidden)
         self.fix_transition = GaussianHead(

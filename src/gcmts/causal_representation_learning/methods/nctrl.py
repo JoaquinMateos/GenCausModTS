@@ -65,7 +65,7 @@ class NCTRL(BaseCausalRepresentationLearner):
             raise ValueError("obs_noise must be positive.")
         super().__init__(observed_dim=observed_dim, latent_dim=latent_dim, max_lag=1)
         self.n_regimes = n_regimes
-        self.kl_weight = kl_weight
+        self.kl_weight: float = kl_weight
         self.encoder = GaussianHead(observed_dim, latent_dim, hidden_dims=hidden_dims)
         self.decoder = MLP(latent_dim, observed_dim, hidden_dims=decoder_hidden)
         self.transition_nets = nn.ModuleList(
@@ -101,7 +101,7 @@ class NCTRL(BaseCausalRepresentationLearner):
 
     def _log_emissions(self, z_seq: Tensor) -> Tensor:
         batch, time, dim = z_seq.shape
-        logvar = self.transition_logvar.clamp(-12.0, 8.0).expand(dim)
+        logvar = self.transition_logvar.clamp(-12.0, 4.0).expand(dim)
         log_emission = torch.zeros(batch, time, self.n_regimes, device=z_seq.device)
         log_emission[:, 0] = gaussian_logpdf(
             z_seq[:, 0], torch.zeros_like(z_seq[:, 0]), torch.zeros_like(z_seq[:, 0])

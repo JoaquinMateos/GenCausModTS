@@ -60,6 +60,16 @@ SCPERTURB_URL = (
 )
 CLIMATEBENCH_BASE = "https://zenodo.org/api/records/7064308/files"
 CLIMATEBENCH_FILES = ["test.tar.gz"]
+STATIC_BASE = "https://www.fredjo.com/files"
+STATIC_FILES = {
+    "jobs_train.npz": f"{STATIC_BASE}/jobs_DW_bin.new.10.train.npz",
+    "jobs_test.npz": f"{STATIC_BASE}/jobs_DW_bin.new.10.test.npz",
+    "news.zip": f"{STATIC_BASE}/NEWS_csv.zip",
+}
+TWINS_URL = (
+    "https://bitbucket.org/mvdschaar/mlforhealthlabpub/raw/"
+    "0b0190bcd38a76c405c805f1ca774971fcd85233/data/twins/Twin_Data.csv.gz"
+)
 
 
 def _download(url: str, dest: Path) -> None:
@@ -85,6 +95,25 @@ def download_real(out: Path) -> None:
         with zipfile.ZipFile(jena_zip) as archive:
             archive.extractall(out)
         print(f"unzipped {jena_csv}")
+
+
+def download_static(out: Path) -> None:
+    """Canonical real-covariate static effect benchmarks (Twins/Jobs/News)."""
+    out.mkdir(parents=True, exist_ok=True)
+    for name, url in STATIC_FILES.items():
+        _download(url, out / name)
+    _download(TWINS_URL, out / "twins.csv.gz")
+    news_dir = out / "news"
+    marker = news_dir / "csv" / "topic_doc_mean_n5000_k3477_seed_1.csv.x"
+    if not marker.exists():
+        with zipfile.ZipFile(out / "news.zip") as archive:
+            archive.extractall(out)
+        extracted = out / "csv"
+        if extracted.exists() and not news_dir.exists():
+            extracted.rename(news_dir)
+        print(f"unzipped {news_dir}")
+    else:
+        print(f"exists   {marker}")
 
 
 def download_effects(out: Path) -> None:
@@ -220,8 +249,15 @@ def main() -> int:
     download_policy(root / "real")
     download_dense(root / "real")
     download_single_cell(root / "real")
-    download_climate(root / "real")
+    download_static(root / "static")
     download_semi_synthetic(root / "semi_synthetic")
+    try:
+        download_climate(root / "real")
+    except ImportError as error:
+        print(
+            f"skipping CESM2 CSV conversion: {error}. The archive is downloaded; "
+            "install the optional real dependencies with `uv sync --extra real`."
+        )
     if args.generate:
         generate_synthetic(root)
     document_manual()

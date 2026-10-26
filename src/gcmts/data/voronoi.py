@@ -94,23 +94,43 @@ class VoronoiGenerator(BaseDataGenerator):
         self.rng = torch.Generator().manual_seed(seed or 0)
 
         # Instantaneous edges strictly in the causal order (acyclic by
-        # construction); lagged edges are unstructured.
+        # construction).  The mechanism for node ``i`` reads ``current[j]`` for
+        # ``j < i``, so the graph must be strictly *lower* triangular: an upper
+        # triangular mask would read nodes that have not been sampled yet (they
+        # are zero), silently deleting every instantaneous effect.
         inst = torch.rand(self.latent_dim, self.latent_dim, generator=self.rng)
         inst_draw = torch.rand(self.latent_dim, self.latent_dim, generator=self.rng)
         inst_mask = (inst_draw < instantaneous_sparsity).float()
-        self.instantaneous = inst * inst_mask * torch.triu(
-            torch.ones(self.latent_dim, self.latent_dim), diagonal=1
+        inst_mask = inst_mask * torch.tril(
+            torch.ones(self.latent_dim, self.latent_dim), diagonal=-1
         )
+        # The shared factor is intervention-independent and is not a parent of
+        # the causal variables; keep its row and column out of the same-time graph.
+        inst_mask[self.n_vars :, :] = 0.0
+        inst_mask[:, self.n_vars :] = 0.0
+        self.instantaneous = inst * inst_mask
         lagged = torch.rand(self.latent_dim, self.latent_dim, generator=self.rng)
         lag_draw = torch.rand(self.latent_dim, self.latent_dim, generator=self.rng)
         lag_mask = (lag_draw < lagged_sparsity).float()
         self.lagged = lagged * lag_mask
+        # Guarantee first-order persistence: a variable with no sampled parent
+        # would otherwise be white noise, and a benchmark with no temporal
+        # signal cannot separate temporal methods.  The diagonal self-edge is
+        # part of the ground-truth graph.
+        self.lagged = self.lagged + 0.5 * torch.eye(self.latent_dim)
         self.adjacency = torch.stack([self.instantaneous, self.lagged], dim=-1)
 
         self.mechanisms = torch.nn.ModuleList(
             _frozen_mlp(2 * self.latent_dim, 1, hidden=hidden, generator=self.rng)
             for _ in range(self.latent_dim)
         )
+        # A default-initialised MLP has an output standard deviation of ~0.05,
+        # far below the process noise; the resulting latent process had almost
+        # no temporal autocorrelation (0.00--0.09).  Amplify the last layer so
+        # the mechanisms actually drive the state.
+        for mechanism in self.mechanisms:
+            with torch.no_grad():
+                mechanism[-1].weight.mul_(5.0)  # type: ignore[index]
         if mixing == "invertible":
             self.mixing: torch.nn.Module = random_invertible_mixing(
                 self.latent_dim, generator=self.rng
@@ -133,7 +153,7 @@ class VoronoiGenerator(BaseDataGenerator):
                     ],
                     dim=-1,
                 )
-                mean = self.mechanism_scale * cast(
+                mean = 3.0 * self.mechanism_scale * cast(
                     Tensor, self.mechanisms[i](parents)
                 ).squeeze(-1)
                 fresh = soft_limit(
@@ -157,7 +177,7 @@ class VoronoiGenerator(BaseDataGenerator):
                     ],
                     dim=-1,
                 )
-                mean = self.mechanism_scale * cast(
+                mean = 3.0 * self.mechanism_scale * cast(
                     Tensor, self.mechanisms[i](parents)
                 ).squeeze(-1)
                 current[:, i] = soft_limit(
@@ -193,4 +213,5 @@ class VoronoiGenerator(BaseDataGenerator):
             z=z_obs,
             context={"I": targets},
             adjacency=self.adjacency,
+            instantaneous_adjacency=self.instantaneous,
         )

@@ -126,6 +126,8 @@ def test_adjacent_metrics():
     ).value == 1.0
     assert StructuralViolationMetric()({"paths": paths}, {"graph": graph}).value >= 0
     front = torch.tensor([[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]])
-    assert HypervolumeMetric(n_samples=500)(front, {"reference": torch.ones(2)}).value > 0
+    # Hypervolume of a maximisation front takes the worst (lower) corner as
+    # its reference; an upper reference measures the complementary region.
+    assert HypervolumeMetric(n_samples=500)(front, {"reference": torch.zeros(2)}).value > 0
     attributions = torch.tensor([[1.0, 0.0, 1.0, 0.0]])
     assert FaithfulnessMetric()(attributions, {"causal_concepts": torch.tensor([0, 2])}).value > 0

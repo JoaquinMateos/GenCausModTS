@@ -25,6 +25,7 @@ import torch
 
 from gcmts.core import SimpleTrainer, move_batch, save_training_report
 from gcmts.data.synthetic_sdd import MultiDomainGenerator
+from gcmts.evaluation.benchmarks import EMA_DECAY
 from gcmts.evaluation.metrics import CDSMetric, MIGMetric
 from gcmts.evaluation.progress import ProgressTracker
 from gcmts.evaluation.report import (
@@ -183,6 +184,7 @@ def run_case(
         scheduler="cosine",
         val_size=512,
         val_every=20,
+        ema_decay=EMA_DECAY,
     )
     start = time.perf_counter()
     history = trainer.fit(model, _SplitGenerator(generator, TRAIN_DOMAINS))

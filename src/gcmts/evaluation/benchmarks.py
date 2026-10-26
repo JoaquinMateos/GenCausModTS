@@ -30,11 +30,19 @@ __all__ = [
     "CRL_BENCHMARKS",
     "CTEE_BENCHMARKS",
     "CTEE_STATIC_BENCHMARKS",
+    "CTEE_OPTIONAL_STATIC_BENCHMARKS",
     "CTEE_REAL_BENCHMARKS",
     "METHODS_FOR_KIND",
     "crl_label",
     "ctee_label",
+    "EMA_DECAY",
 ]
+
+# Single EMA setting for every learned run in the benchmark.  The pre-audit run
+# used 0.99 for six benchmarks and no EMA for sixteen; the audited protocol
+# applies it uniformly (and the trainer makes the averaged weights the final
+# state, so every reported metric is computed from the EMA weights).
+EMA_DECAY = 0.99
 
 
 @dataclass(frozen=True)
@@ -45,6 +53,7 @@ class CrlBenchmark:
     description: str
     kind: str  # "temporal" | "voronoi" | "sde" | "child"
     shd_available: bool
+    summary: bool = True  # include in the compact main-text MCC matrix
 
 
 METHODS_FOR_KIND: dict[str, list[str]] = {
@@ -56,7 +65,19 @@ METHODS_FOR_KIND: dict[str, list[str]] = {
 
 # key -> CrlBenchmark
 CRL_BENCHMARKS: dict[str, CrlBenchmark] = {
-    "npvar": CrlBenchmark("A.1", "discrete-time L-TSCM process (NP/VAR)", "temporal", True),
+    "npvar": CrlBenchmark(
+        "A.1",
+        "nonlinear persistent L-TSCM process (NP/VAR)",
+        "temporal",
+        True,
+    ),
+    "npvar_linear": CrlBenchmark(
+        "A.1b",
+        "linear-mixing NP/VAR (linear-Gaussian baseline)",
+        "temporal",
+        True,
+        summary=False,
+    ),
     "npvar_hard": CrlBenchmark(
         "A.2", "non-stationary nonlinear NP/VAR (hard)", "temporal", True
     ),
@@ -92,14 +113,20 @@ CTEE_BENCHMARKS: dict[str, str] = {
 
 CTEE_STATIC_BENCHMARKS: dict[str, str] = {
     "ihdp": "IHDP",
+    "acic": "ACIC 2018",
     "twins": "Twins",
-    "jobs": "Jobs (LaLonde)",
     "news": "News",
-    "cps": "CPS",
+}
+
+# Documented optional panel: the exact CFRNet CPS file is not publicly
+# mirrored.  Supply data/static/cps.csv to enable it.
+CTEE_OPTIONAL_STATIC_BENCHMARKS: dict[str, str] = {
+    "cps": "CPS (manual)",
 }
 
 CTEE_REAL_BENCHMARKS: dict[str, str] = {
     "lalonde_rct": "LaLonde RCT (NSW)",
+    "jobs_rct": "Jobs (LaLonde, binary)",
     "oregon_rct": "Oregon Health Insurance",
     "nhefs": "NHEFS",
 }

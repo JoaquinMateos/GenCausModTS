@@ -93,7 +93,12 @@ class HierarchicalTemporalGenerator(BaseDataGenerator):
             if level == self.n_layers - 1:
                 parents = lagged
             else:
-                parents = torch.cat([lagged, layers[level + 1]], dim=-1)
+                # The higher layer at the *same* time step is already available
+                # because we advance top-down; using ``layers[level+1]`` here
+                # would make the hierarchical edge lagged instead of
+                # contemporaneous, contradicting the generative model in the
+                # docstring and the CHiLD benchmark.
+                parents = torch.cat([lagged, new[level + 1]], dim=-1)
             mean = self.mechanism_scale * self.mechanisms[level](parents)
             noise = self.noise_std * torch.randn(
                 lagged.shape[0], self.width, generator=self.rng

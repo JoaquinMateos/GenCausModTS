@@ -46,6 +46,7 @@ class TimeVaryingSEMGenerator(BaseDataGenerator):
         horizon: int = 20,
         history: int = 2,
         noise_std: float = 0.1,
+        max_radius: float = 0.8,
         seed: int | None = None,
     ) -> None:
         observed_dim = 1 + n_covariates + 1  # [Y, X_1..X_h, A]
@@ -57,7 +58,20 @@ class TimeVaryingSEMGenerator(BaseDataGenerator):
         self.rng = torch.Generator().manual_seed(seed or 0)
         h = n_covariates
         self.gamma_a = 0.4 * torch.randn(history, generator=self.rng)
-        self.gamma_x = 0.3 * torch.randn(history, h, h, generator=self.rng)
+        gamma_x = 0.3 * torch.randn(history, h, h, generator=self.rng)
+        # A random VAR(h) covariate process is often explosive; rescale the
+        # lag blocks to a stationary companion radius.  Without this, a few
+        # seeds produce outcomes two orders of magnitude larger than the rest
+        # and dominate every aggregated PEHE.
+        companion = torch.zeros(history * h, history * h)
+        for lag in range(history):
+            companion[:h, lag * h : (lag + 1) * h] = gamma_x[lag]
+        for lag in range(1, history):
+            companion[lag * h : (lag + 1) * h, (lag - 1) * h : lag * h] = torch.eye(h)
+        radius = float(torch.linalg.eigvals(companion).abs().max())
+        if radius > max_radius:
+            gamma_x = gamma_x * (max_radius / radius)
+        self.gamma_x = gamma_x
         self.beta_a = 0.8 * torch.randn(history, generator=self.rng)
         self.beta_x = 0.6 * torch.randn(history, h, generator=self.rng)
         self.alpha_a = 0.7 * torch.randn(history, generator=self.rng)
@@ -108,6 +122,22 @@ class TimeVaryingSEMGenerator(BaseDataGenerator):
 
         zeros = torch.zeros_like(actions)
         cov_cf, out_cf = self._roll(zeros, noise_x, noise_y)
+
+        # Standardise the factual observations dimension-wise and apply the
+        # *same* transform to the counterfactual.  The raw linear SEM can
+        # produce outcomes an order of magnitude larger than the covariates,
+        # which made the neural encoders emit NaNs for some seeds; the
+        # component-wise affine transform leaves the causal effect identified
+        # and is the same normalisation used by the other semi-synthetic
+        # benchmarks.
+        out_mean = out.mean()
+        out_scale = out.std() + 1e-6
+        cov_mean = cov.mean(dim=(0, 1), keepdim=True)
+        cov_scale = cov.std(dim=(0, 1), keepdim=True) + 1e-6
+        out = (out - out_mean) / out_scale
+        cov = (cov - cov_mean) / cov_scale
+        out_cf = (out_cf - out_mean) / out_scale
+        cov_cf = (cov_cf - cov_mean) / cov_scale
 
         x = torch.cat([out.unsqueeze(-1), cov, actions.unsqueeze(-1)], dim=-1)
         x_cf = torch.cat([out_cf.unsqueeze(-1), cov_cf, zeros.unsqueeze(-1)], dim=-1)

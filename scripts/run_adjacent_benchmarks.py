@@ -35,6 +35,7 @@ from gcmts.data.multi_objective import MultiObjectiveMDPGenerator
 from gcmts.data.propagation import PropagationGenerator
 from gcmts.decision_making.methods import LacaDM
 from gcmts.effect_estimation.methods import CausalGAN
+from gcmts.evaluation.benchmarks import EMA_DECAY
 from gcmts.evaluation.metrics import (
     CFMAEMetric,
     FaithfulnessMetric,
@@ -66,6 +67,7 @@ def _train(model: Any, generator: Any, epochs: int, device: str, seed: int) -> f
         lr=1e-3,
         batch_size=64,
         steps_per_epoch=20,
+        ema_decay=EMA_DECAY,
         log_every=0,
         seed=seed,
         device=device,
@@ -99,7 +101,10 @@ def _lacadm(device: str, epochs: int, seed: int) -> dict[str, float]:
     batch = move_batch(generator.sample(32), next(model.parameters()).device)
     front = model.act(batch.x)
     rewards = batch.context["reward"][:, -1, :]
-    reference = rewards.max(dim=0).values + 0.1
+    # Hypervolume uses the worst corner (lower bound) as its reference for a
+    # maximisation front; the previous upper reference inverted the dominated
+    # region and measured the complement.
+    reference = rewards.min(dim=0).values - 0.1
     return {
         "seconds": seconds,
         "hypervolume": HypervolumeMetric()(front, {"reference": reference}).value,

@@ -54,7 +54,11 @@ _ACTIVATIONS: dict[str, type[nn.Module]] = {
 }
 
 LOGVAR_MIN = -12.0
-LOGVAR_MAX = 8.0
+# Cap the posterior log-variance at 4 (std <= ~7.4).  The previous cap of 8
+# allowed a standard deviation of ~54, which makes a sampled latent large
+# enough to overflow the downstream classifier/reconstruction and produced
+# intermittent NaN validation losses in the effect-estimation benchmarks.
+LOGVAR_MAX = 4.0
 
 
 class MLP(nn.Module):
@@ -112,7 +116,11 @@ class GaussianHead(nn.Module):
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
         mean, logvar = self.net(x).chunk(2, dim=-1)
-        return mean, logvar.clamp(LOGVAR_MIN, LOGVAR_MAX)
+        # Numerical guard: an unbounded posterior mean makes one extreme
+        # validation sample enough to overflow the decoder/classifier and turn
+        # the validation loss into NaN while the averaged training loss looks
+        # finite.
+        return mean.clamp(-10.0, 10.0), logvar.clamp(LOGVAR_MIN, LOGVAR_MAX)
 
 
 class ExpFamilyPrior(nn.Module):
@@ -509,4 +517,4 @@ def reparameterise(
     """Sample ``z = mean + eps * std`` with ``eps ~ N(0, I)``."""
     std = torch.exp(0.5 * logvar)
     eps = torch.randn(mean.shape, generator=generator, device=mean.device, dtype=mean.dtype)
-    return mean + eps * std
+    return (mean + eps * std).clamp(-20.0, 20.0)

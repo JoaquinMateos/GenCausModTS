@@ -189,7 +189,7 @@ class iCITRIS(BaseCausalRepresentationLearner):  # noqa: N801
                     mean = mask * self.intervention_mean + (1.0 - mask) * mean
                     logvar = mask * self.intervention_logvar + (1.0 - mask) * logvar
                 log_prob[:, t - 1] = log_prob[:, t - 1] + gaussian_logpdf(
-                    current[:, group], mean, logvar.clamp(-12.0, 8.0)
+                    current[:, group], mean, logvar.clamp(-12.0, 4.0)
                 )
             if self.n_shared > 0 and self.shared_net is not None:
                 masked_previous = previous * self._group_expand(temp[:, -1])
@@ -197,7 +197,7 @@ class iCITRIS(BaseCausalRepresentationLearner):  # noqa: N801
                 log_prob[:, t - 1] = log_prob[:, t - 1] + gaussian_logpdf(
                     current[:, groups[-1]],
                     shared_mean,
-                    shared_logvar.clamp(-12.0, 8.0),
+                    shared_logvar.clamp(-12.0, 4.0),
                 )
         return log_prob.sum(dim=1)
 
@@ -291,7 +291,9 @@ class iCITRIS(BaseCausalRepresentationLearner):  # noqa: N801
 
     def _expanded_adjacency(self, inst: Tensor, temp: Tensor) -> Tensor:
         """Expand group gates to a ``(M, M, 2)`` latent adjacency (lag 0 / lag 1)."""
-        m = self.latent_dim
+        latent_dim = self.latent_dim
+        assert latent_dim is not None
+        m = int(latent_dim)
         expanded = torch.zeros(m, m, 2, device=inst.device, dtype=inst.dtype)
         groups = self._groups()
         for i in range(self.n_groups):

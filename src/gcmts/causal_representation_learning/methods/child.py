@@ -101,7 +101,7 @@ class CHiLD(BaseCausalRepresentationLearner):
         self.width = latent_dim
         self.n_layers = n_layers
         self.half_window = context_window if context_window is not None else n_layers
-        self.kl_weight = kl_weight
+        self.kl_weight: float = kl_weight
         kernel = 2 * self.half_window + 1
         self.features = nn.Conv1d(
             observed_dim, hidden_dims[0], kernel_size=kernel, padding=self.half_window

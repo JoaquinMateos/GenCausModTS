@@ -155,7 +155,7 @@ class CITRIS(BaseCausalRepresentationLearner):
             else:
                 mean, logvar = mean_all, logvar_all
             log_prob = log_prob + gaussian_logpdf(
-                prediction[:, :, group], mean, logvar.clamp(-12.0, 8.0)
+                prediction[:, :, group], mean, logvar.clamp(-12.0, 4.0)
             )
 
         if self.n_shared > 0 and self.shared_net is not None:
@@ -165,7 +165,7 @@ class CITRIS(BaseCausalRepresentationLearner):
             log_prob = log_prob + gaussian_logpdf(
                 prediction[:, :, groups[-1]],
                 shared_mean,
-                shared_logvar.clamp(-12.0, 8.0),
+                shared_logvar.clamp(-12.0, 4.0),
             )
         return log_prob.sum(dim=1)
 

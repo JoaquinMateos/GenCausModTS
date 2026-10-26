@@ -2,6 +2,7 @@
 
 from gcmts.data.base import BaseDataGenerator
 from gcmts.data.binary_scm import BinarySCMGenerator
+from gcmts.data.canonical_static import CPSLoader, NewsLoader, TwinsLoader, load_jobs
 from gcmts.data.causal3dident import Causal3DIdentImageGenerator
 from gcmts.data.concept_ts import ConceptTimeSeriesGenerator
 from gcmts.data.control import MountainCarGenerator, PendulumGenerator
@@ -62,6 +63,10 @@ __all__ = [
     "BaseDataGenerator",
     "BinarySCMGenerator",
     "Causal3DIdentImageGenerator",
+    "CPSLoader",
+    "NewsLoader",
+    "TwinsLoader",
+    "load_jobs",
     "ConceptTimeSeriesGenerator",
     "HierarchicalTemporalGenerator",
     "MultiObjectiveMDPGenerator",

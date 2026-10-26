@@ -58,7 +58,7 @@ class GBTPL(BaseStructureDiscovery):
         self.horizon = horizon
         self.recon_weight = recon_weight
         self.path_weight = path_weight
-        self.kl_weight = kl_weight
+        self.kl_weight: float = kl_weight
         self.embed = MLP(horizon, hidden_dims[-1], hidden_dims=hidden_dims)
         layer = nn.TransformerEncoderLayer(
             d_model=hidden_dims[-1],

@@ -52,6 +52,7 @@ class Batch:
     context: TensorDict | None = None  # regimes, interventions, domains
     mask: Tensor | None = None  # missingness / padding mask (B, T)
     adjacency: Tensor | None = None  # ground-truth (d, d, p) latent adjacency
+    instantaneous_adjacency: Tensor | None = None  # ground-truth (d, d) same-time graph
     counterfactual: Tensor | None = None  # ground-truth counterfactual (B, T, D)
     outcome: Tensor | None = None  # ground-truth scalar outcome / target (B, ...)
     domain: Tensor | None = None  # ground-truth domain/regime index (B,) or (B, T)

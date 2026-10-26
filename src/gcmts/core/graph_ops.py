@@ -27,6 +27,7 @@ __all__ = [
     "aligned_shd",
     "latent_permutation",
     "estimate_latent_adjacency",
+    "estimate_instantaneous_adjacency",
     "edge_auprc",
     "topological_order",
     "lagged_adjacency_to_dag",
@@ -87,14 +88,28 @@ def shd(
 ) -> int:
     """Structural Hamming Distance (edge add + delete + reverse).
 
-    Reversed edges are counted as two structural differences, matching the
-    convention used in the review. Adjacency matrices must share a shape.
+    A reversed edge (``i -> j`` in the estimate where the truth has
+    ``j -> i``) is one structural edit, the convention of Tsamardinos et al.
+    (2006), not two.  For a lagged adjacency ``(d, d, p)`` reversals are
+    counted within each lag slice.  Adjacency matrices must share a shape.
     """
     if adj_est.shape != adj_true.shape:
         raise ValueError("Adjacency matrices must share a shape.")
     est = _binarise(adj_est, threshold)
     true = _binarise(adj_true.to(est.device), threshold)
-    return int((est != true).sum().item())
+    if est.ndim == 2:
+        est = est.unsqueeze(-1)
+        true = true.unsqueeze(-1)
+    total = 0
+    for lag in range(est.shape[-1]):
+        e = est[..., lag]
+        t = true[..., lag]
+        differing = int((e != t).sum().item())
+        reversed_edges = int(
+            ((e == 1) & (t == 0) & (e.T == 0) & (t.T == 1)).sum().item()
+        )
+        total += differing - reversed_edges
+    return total
 
 
 def weighted_shd(
@@ -103,12 +118,30 @@ def weighted_shd(
     *,
     threshold: float = 1e-3,
 ) -> float:
-    """SHD variant that weights each structural difference by edge magnitude."""
+    """SHD variant that weights each structural difference by edge magnitude.
+
+    A reversal is one weighted edit, matching :func:`shd`; the weight is the
+    maximum of the two opposing edge magnitudes.
+    """
     adj_true = adj_true.to(adj_est.device)
     est = _binarise(adj_est, threshold)
     true = _binarise(adj_true, threshold)
     weight = torch.maximum(adj_est.abs(), adj_true.abs())
-    return float(((est != true).float() * weight).sum().item())
+    if est.ndim == 2:
+        est = est.unsqueeze(-1)
+        true = true.unsqueeze(-1)
+        weight = weight.unsqueeze(-1)
+    total = 0.0
+    for lag in range(est.shape[-1]):
+        e, t, w = est[..., lag], true[..., lag], weight[..., lag]
+        value = float(((e != t).float() * w).sum().item())
+        reversal = (e == 1) & (t == 0) & (e.T == 0) & (t.T == 1)
+        if bool(reversal.any()):
+            # The two differing cells are weighted by the two opposing
+            # magnitudes; keep one edit with the larger weight.
+            value -= float(torch.minimum(w, w.T)[reversal].sum().item())
+        total += value
+    return total
 
 
 def _sparse_lagged_coefficients(design: Tensor, target: Tensor, p: int) -> Tensor:
@@ -199,6 +232,59 @@ def estimate_latent_adjacency(
     if threshold > 0:
         adj = torch.where(adj.abs() > threshold, adj, torch.zeros_like(adj))
     return adj.to(z.dtype)
+
+
+def estimate_instantaneous_adjacency(
+    z: Tensor,
+    *,
+    max_lag: int = 1,
+    threshold: float = 0.0,
+) -> Tensor:
+    r"""Recover a same-time (instantaneous) latent graph from aligned latents.
+
+    The latent factors are assumed to be in a known causal order (the module
+    calls this *after* :func:`latent_permutation`, which aligns the learned
+    coordinates to the true factors).  For each node ``i`` we regress
+    ``z_{i,t}`` on the same-time values of the lower-index nodes
+    ``z_{j,t}, j < i`` together with all lagged latents.  Restricting the
+    same-time parents to ``j < i`` enforces acyclicity and matches the
+    lower-triangular generators used by the interventional benchmarks.
+
+    Returns an ``(d, d)`` tensor whose entry ``A[i, j]`` is the debiased
+    coefficient of ``z_{j,t}`` in the mechanism for ``z_{i,t}`` (zero for
+    ``j >= i``).  This is the post-hoc analogue of the lagged
+    :func:`estimate_latent_adjacency`; it is a support estimate, not a proof of
+    direction, because the causal order is supplied by the generator.
+    """
+    if z.ndim != 3:
+        raise ValueError("estimate_instantaneous_adjacency expects z of shape (B, T, d).")
+    batch, time, dim = z.shape
+    p = max(1, int(max_lag))
+    if time <= p:
+        return torch.zeros(dim, dim, dtype=z.dtype)
+    zc = z.to(torch.float64)
+    mean = zc.mean(dim=(0, 1), keepdim=True)
+    scale = zc.std(dim=(0, 1), keepdim=True) + 1e-8
+    zc = (zc - mean) / scale
+    current = zc[:, p:]  # (B, T-p, d)
+    lagged = torch.stack(
+        [zc[:, p - 1 - lag : time - 1 - lag, :] for lag in range(p)], dim=-1
+    ).reshape(batch, time - p, dim * p)
+    adjacency = torch.zeros(dim, dim, dtype=z.dtype)
+    for i in range(1, dim):
+        design = torch.cat([current[:, :, :i], lagged], dim=-1)  # (B, T-p, i + d*p)
+        x_np = design.reshape(-1, design.shape[-1]).numpy()
+        y_np = current[:, :, i].reshape(-1).numpy()
+        coefficients = _sparse_lagged_coefficients(
+            torch.from_numpy(x_np), torch.from_numpy(y_np).unsqueeze(-1), p
+        )
+        same_time = coefficients[:i, 0]
+        if threshold > 0:
+            same_time = torch.where(
+                same_time.abs() > threshold, same_time, torch.zeros_like(same_time)
+            )
+        adjacency[i, :i] = same_time.to(adjacency.dtype)
+    return adjacency
 
 
 def latent_permutation(z_pred: Tensor, z_true: Tensor) -> Tensor:

@@ -41,7 +41,15 @@ from gcmts.causal_representation_learning.methods import (
     iCITRIS,
 )
 from gcmts.core import SimpleTrainer, move_batch, save_training_report
-from gcmts.core.graph_ops import edge_auprc, estimate_latent_adjacency, latent_permutation
+from gcmts.core.graph_ops import (
+    edge_auprc,
+    estimate_instantaneous_adjacency,
+    estimate_latent_adjacency,
+    latent_permutation,
+)
+from gcmts.core.graph_ops import (
+    shd as plain_shd,
+)
 from gcmts.data.control import MountainCarGenerator, PendulumGenerator
 from gcmts.data.hierarchical import HierarchicalTemporalGenerator
 from gcmts.data.linear_processes import OUProcessGenerator, VARMAProcessGenerator
@@ -57,7 +65,7 @@ from gcmts.data.synthetic import (
 from gcmts.data.synthetic_store import dataset_path, load_dataset
 from gcmts.data.voronoi import VoronoiGenerator
 from gcmts.evaluation import BenchmarkTask, CrlBenchmarkRunner
-from gcmts.evaluation.benchmarks import crl_label
+from gcmts.evaluation.benchmarks import EMA_DECAY, crl_label
 from gcmts.evaluation.metrics import SHDMetric, TripletDistanceMetric
 from gcmts.evaluation.progress import ProgressTracker
 from gcmts.evaluation.report import (
@@ -96,6 +104,23 @@ class Suite:
 SUITES: dict[str, Suite] = {
     "npvar": Suite(
         name="npvar",
+        observed_dim=6,
+        latent_dim=3,
+        horizon=16,
+        n_regimes=4,
+        make_generator=lambda seed: TemporalNonlinearGenerator(
+            observed_dim=6,
+            latent_dim=3,
+            horizon=16,
+            max_lag=1,
+            n_regimes=4,
+            regime_mode="time",
+            mixing="mlp",
+            seed=seed,
+        ),
+    ),
+    "npvar_linear": Suite(
+        name="npvar_linear",
         observed_dim=6,
         latent_dim=3,
         horizon=16,
@@ -277,7 +302,7 @@ class GridConfig:
                 max_lag=1,
                 n_regimes=self.n_regimes,
                 regime_mode="time",
-                mixing="linear",
+                mixing="mlp",
                 adjacency_sparsity=self.sparsity,
                 noise_std=self.noise_std,
                 seed=seed,
@@ -333,14 +358,15 @@ def build_methods(suite: Suite, *, epochs_scale: float = 1.0) -> list[MethodSpec
     u = max(r, 1)  # stationary suites expose a constant, one-dimensional context
     fix, dyn, obs = _tdrl_blocks(d)
 
-    def scale(value: int) -> int:
-        return max(int(value * epochs_scale), 200)
-
+    # One common optimisation budget for every method in a block: a comparison
+    # in which iVAE gets 1500 epochs, LEAP/TDRL/NCTRL 2000* and MOSAIC 1200 is
+    # not a comparison of inductive biases.
+    common_epochs = max(int(2000 * epochs_scale), 200)
     return [
         (
             "iVAE",
             lambda: IVAE(observed_dim=D, latent_dim=d, u_dim=u, obs_noise=0.1),
-            scale(1500),
+            common_epochs,
         ),
         (
             "LEAP",
@@ -352,7 +378,7 @@ def build_methods(suite: Suite, *, epochs_scale: float = 1.0) -> list[MethodSpec
                 kl_weight=0.01,
                 obs_noise=0.1,
             ),
-            scale(2000),
+            common_epochs,
         ),
         (
             "TDRL",
@@ -365,19 +391,19 @@ def build_methods(suite: Suite, *, epochs_scale: float = 1.0) -> list[MethodSpec
                 kl_weight=0.01,
                 obs_noise=0.1,
             ),
-            scale(2000),
+            common_epochs,
         ),
         (
             "NCTRL",
             lambda: NCTRL(
                 observed_dim=D, latent_dim=d, n_regimes=u, kl_weight=0.01, obs_noise=0.1
             ),
-            scale(2000),
+            common_epochs,
         ),
         (
             "MOSAIC",
             lambda: MOSAIC(observed_dim=D, latent_dim=d, u_dim=u, kl_weight=0.1, obs_noise=0.1),
-            scale(1200),
+            common_epochs,
         ),
     ]
 
@@ -653,11 +679,32 @@ def _run(
         )
         adj_est = estimate_latent_adjacency(z_pred, max_lag=max_lag)
         adjacency = batch.adjacency[..., -max_lag:].to(adj_est.device)
-        if batch.z is not None:
-            perm = latent_permutation(z_pred, batch.z)
-            adj_est = adj_est[perm][:, perm]
-        shd = SHDMetric()(adj_est, adjacency).value
+        perm = (
+            latent_permutation(z_pred, batch.z)
+            if batch.z is not None
+            else torch.arange(adj_est.shape[0])
+        )
+        adj_est = adj_est[perm][:, perm]
+        # The latents are already aligned by the correlation-based Hungarian
+        # assignment, so do not re-optimise the permutation against the true
+        # graph inside the metric.
+        shd = SHDMetric(aligned=False)(adj_est, adjacency).value
         auprc = edge_auprc(adj_est, adjacency)
+        if batch.instantaneous_adjacency is not None:
+            # Interventional benchmarks (Voronoi/Causal Pinball) also contain
+            # same-time edges.  Estimate them in the aligned causal order and
+            # add them to the structural score so SHD/AUPRC are not silently
+            # restricted to the lagged subgraph.
+            inst_est = estimate_instantaneous_adjacency(z_pred, max_lag=max_lag)
+            inst_est = inst_est[perm][:, perm].to(adj_est.device)
+            inst_true = batch.instantaneous_adjacency.to(adj_est.device)
+            shd = float(shd) + float(plain_shd(inst_est, inst_true))
+            # Average the two threshold-free rankings instead of concatenating
+            # raw coefficients: instantaneous and lagged blocks have different
+            # scales, so a concatenated AUPRC would be dominated by one block.
+            auprc_lag = edge_auprc(adj_est, adjacency)
+            auprc_inst = edge_auprc(inst_est, inst_true)
+            auprc = float(np.nanmean([auprc_lag, auprc_inst]))
     triplet = _triplet_score(model, batch)
     forecast1 = _forecast_mse(model, batch, 1)
     forecast4 = _forecast_mse(model, batch, 4)
@@ -1189,14 +1236,14 @@ def main() -> int:
         help="train under CUDA automatic mixed precision (fp16) with a GradScaler",
     )
     parser.add_argument(
-        "--ema-decay", type=float, default=0.0,
+        "--ema-decay", type=float, default=EMA_DECAY,
         help=(
             "decay for an exponential moving average of the weights, evaluated "
             "and returned as the final model (0 disables; e.g. 0.99)"
         ),
     )
     parser.add_argument(
-        "--kl-warmup-epochs", type=int, default=0,
+        "--kl-warmup-epochs", type=int, default=50,
         help=(
             "linearly ramp each VAE method's KL weight from 0 to its configured "
             "value over this many epochs (beta warm-up; 0 disables)"

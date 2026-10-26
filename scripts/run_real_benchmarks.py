@@ -29,6 +29,7 @@ from gcmts.causal_representation_learning.base import BaseCausalRepresentationLe
 from gcmts.causal_representation_learning.methods import IVAE, LEAP, MOSAIC, NCTRL, TDRL
 from gcmts.core import SimpleTrainer, save_training_report
 from gcmts.data.real import RealTimeSeries, RealTSGenerator
+from gcmts.evaluation.benchmarks import EMA_DECAY
 from gcmts.evaluation.progress import ProgressTracker
 from gcmts.evaluation.report import (
     aggregate_rows,
@@ -211,6 +212,7 @@ def run_case(
         scheduler="cosine",
         val_size=512,
         val_every=20,
+        ema_decay=EMA_DECAY,
     )
     start = time.perf_counter()
     history = trainer.fit(model, RealTSGenerator(series))

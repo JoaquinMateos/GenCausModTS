@@ -33,6 +33,7 @@ import torch
 from scipy.spatial.distance import cdist
 
 from gcmts.core import SimpleTrainer, move_batch, save_training_report
+from gcmts.data.canonical_static import CPSLoader, NewsLoader, TwinsLoader, load_jobs
 from gcmts.data.real_panels import load_lalonde, load_nhefs, load_oregon
 from gcmts.data.semi_synthetic import (
     ACICLoader,
@@ -43,7 +44,11 @@ from gcmts.data.semi_synthetic import (
 from gcmts.data.static_effect import STATIC_CATE_BENCHMARKS, StaticCateLoader
 from gcmts.effect_estimation.base import BaseEffectEstimator
 from gcmts.effect_estimation.methods import CEPAE, CRN, GANITE, CaTSG
-from gcmts.evaluation.benchmarks import CTEE_REAL_BENCHMARKS
+from gcmts.evaluation.benchmarks import (
+    CTEE_OPTIONAL_STATIC_BENCHMARKS,
+    CTEE_REAL_BENCHMARKS,
+    EMA_DECAY,
+)
 from gcmts.evaluation.metrics import PolicyRiskMetric
 from gcmts.evaluation.progress import ProgressTracker
 from gcmts.evaluation.report import (
@@ -64,6 +69,7 @@ Replication = IHDPReplication
 # metrics (PEHE, policy risk) are undefined and reported as n/a.
 REAL_COHORTS: dict[str, tuple[str, Callable[[Path], object]]] = {
     "lalonde_rct": ("nsw_mixtape.dta", load_lalonde),
+    "jobs_rct": ("jobs_train.npz", load_jobs),
     "oregon_rct": ("dataverse_files/Oregon/oregon_puf.zip", load_oregon),
     "nhefs": ("NHEFS.csv", load_nhefs),
 }
@@ -117,6 +123,19 @@ def _load_replication(dataset: str, index: int, directory: Path) -> Replication:
         test_file = directory / "ihdp_npci_1-100.test.npz"
         loader = IHDPLoader(train_file, test_file)
         return loader.replication(index, split="test")
+    if dataset in {"twins", "news", "cps"}:
+        loader = {
+            "twins": lambda: TwinsLoader(
+                directory / "twins.csv.gz", replications=index + 1, seed=0
+            ),
+            "news": lambda: NewsLoader(
+                directory / "news", replications=index + 1, seed=0
+            ),
+            "cps": lambda: CPSLoader(
+                directory / "cps.csv", replications=index + 1, seed=0
+            ),
+        }[dataset]()
+        return loader.load()[index]
     if dataset in STATIC_CATE_BENCHMARKS:
         loader = StaticCateLoader(dataset, replications=index + 1, seed=0)
         return loader.load()[index]
@@ -192,11 +211,21 @@ def _metrics(
     tau_true = replication.mu1 - replication.mu0
     pehe = float(np.sqrt(np.mean((tau_hat - tau_true) ** 2)))
     ate_error = float(abs(np.mean(tau_hat) - np.mean(tau_true)))
+    # Policy risk is defined on the noiseless potential outcomes; using the
+    # noisy factual/counterfactual outcomes adds observation noise to the
+    # decision rule and makes the score depend on the noise draw.
+    if np.isfinite(replication.mu0).all() and np.isfinite(replication.mu1).all():
+        treated = replication.t > 0.5
+        yf_policy = np.where(treated, replication.mu1, replication.mu0)
+        ycf_policy = np.where(treated, replication.mu0, replication.mu1)
+    else:
+        yf_policy = replication.yf
+        ycf_policy = replication.ycf
     policy = PolicyRiskMetric()(
         torch.from_numpy(tau_hat).float(),
         {
-            "yf": torch.from_numpy(replication.yf).float(),
-            "ycf": torch.from_numpy(replication.ycf).float(),
+            "yf": torch.from_numpy(yf_policy).float(),
+            "ycf": torch.from_numpy(ycf_policy).float(),
             "t": torch.from_numpy(replication.t).float(),
         },
     ).value
@@ -231,6 +260,47 @@ def _nearest_neighbour(
     return (y_treated[nearest_treated] - y_control[nearest_control]) * float(train.y_std)
 
 
+def _split_replication(
+    replication: Replication, *, train_fraction: float = 0.7, seed: int = 0
+) -> tuple[Replication, Replication]:
+    """Deterministically split units into disjoint train and test replications."""
+    rng = np.random.default_rng(seed)
+    n = int(replication.t.shape[0])
+    order = rng.permutation(n)
+    cut = max(1, min(n - 1, int(round(train_fraction * n))))
+
+    def subset(index: np.ndarray) -> Replication:
+        return Replication(
+            x=replication.x[index],
+            t=replication.t[index],
+            yf=replication.yf[index],
+            ycf=replication.ycf[index],
+            mu0=replication.mu0[index],
+            mu1=replication.mu1[index],
+        )
+
+    return subset(order[:cut]), subset(order[cut:])
+
+
+def _load_pair(
+    dataset: str, index: int, directory: Path
+) -> tuple[Replication, Replication]:
+    """Return disjoint (train, test) replications for one benchmark instance."""
+    if dataset == "ihdp":
+        train_file = directory / "ihdp_npci_1-100.train.npz"
+        test_file = directory / "ihdp_npci_1-100.test.npz"
+        loader = IHDPLoader(train_file, test_file)
+        return (
+            loader.replication(index, split="train"),
+            loader.replication(index, split="test"),
+        )
+    replication = _load_replication(dataset, index, directory)
+    if dataset in STATIC_CATE_BENCHMARKS or dataset == "acic":
+        return _split_replication(replication, seed=index)
+    # Real cohorts expose only the marginal effect; keep the single cohort.
+    return replication, replication
+
+
 def run_replication(
     dataset: str,
     index: int,
@@ -242,8 +312,12 @@ def run_replication(
     *,
     save_curves: bool = False,
 ) -> list[StaticResult]:
-    replication = _load_replication(dataset, index, data_dir)
+    train_replication, test_replication = _load_pair(dataset, index, data_dir)
     results: list[StaticResult] = []
+    train_generator = IHDPGenerator(train_replication, seed=index)
+    test_generator = IHDPGenerator(
+        test_replication, seed=index + 10_000, reference=train_generator
+    )
     for method_name in methods:
         factory, epochs, note = METHODS[method_name]
         logger.info("=" * 72)
@@ -251,8 +325,6 @@ def run_replication(
             "CASE %s_%s replication=%d | %s", method_name, dataset, index, note
         )
         torch.manual_seed(index)
-        train_generator = IHDPGenerator(replication, seed=index)
-        test_generator = IHDPGenerator(replication, seed=index + 10_000)
         model = factory(train_generator)
         n_params = sum(p.numel() for p in model.parameters())
         exp_dir = out_dir / f"{method_name}_{dataset}_{index}"
@@ -268,6 +340,7 @@ def run_replication(
             scheduler="cosine",
             val_size=512,
             val_every=20,
+            ema_decay=EMA_DECAY,
         )
         start = time.perf_counter()
         history = trainer.fit(model, train_generator)
@@ -276,7 +349,7 @@ def run_replication(
             save_training_report(history, exp_dir, title=f"{method_name}_{dataset}")
         resolved = trainer.resolve_device(model)
         tau_hat, _ = _tau_from_model(model, test_generator, resolved)
-        metrics = _metrics(tau_hat, replication, reference_ate=_REFERENCE_ATE.get(dataset))
+        metrics = _metrics(tau_hat, test_replication, reference_ate=_REFERENCE_ATE.get(dataset))
         logger.info(
             "RESULT %s_%s rep=%d pehe=%.3f ate=%.3f risk=%.3f (%.1fs)",
             method_name,
@@ -304,7 +377,7 @@ def run_replication(
         ("nearest_neighbour", _nearest_neighbour),
     ):
         tau_hat = estimator(train_generator, test_generator)
-        metrics = _metrics(tau_hat, replication, reference_ate=_REFERENCE_ATE.get(dataset))
+        metrics = _metrics(tau_hat, test_replication, reference_ate=_REFERENCE_ATE.get(dataset))
         logger.info(
             "RESULT %s_%s rep=%d pehe=%.3f ate=%.3f risk=%.3f (baseline)",
             baseline_name,
@@ -365,7 +438,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run static CTEE benchmarks.")
     parser.add_argument(
         "--dataset",
-        choices=["ihdp", "acic", *STATIC_CATE_BENCHMARKS, *CTEE_REAL_BENCHMARKS],
+        choices=["ihdp", "acic", *CTEE_OPTIONAL_STATIC_BENCHMARKS, *CTEE_REAL_BENCHMARKS],
         default="ihdp",
     )
     parser.add_argument("--data-dir", type=Path, default=None)
@@ -388,7 +461,9 @@ def main() -> int:
     elif args.dataset == "ihdp":
         data_dir = Path("data/semi_synthetic")
     elif args.dataset in REAL_COHORTS:
-        data_dir = Path("data/real")
+        data_dir = Path("data/static") if args.dataset == "jobs_rct" else Path("data/real")
+    elif args.dataset in {"twins", "news", "cps"}:
+        data_dir = Path("data/static")
     else:
         data_dir = Path("data/acic")
     configure_logging(args.out_dir, args.dataset)

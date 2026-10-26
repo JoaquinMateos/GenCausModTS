@@ -157,7 +157,12 @@ def test_voronoi_generator_interventions_and_graph():
     assert targets.sum(-1).max() <= 1  # single-target interventions
     assert batch.adjacency is not None and batch.adjacency.shape == (6, 6, 2)
     instantaneous = batch.adjacency[..., 0]
-    assert torch.all(instantaneous.tril() == 0)  # acyclic causal order
+    # The mechanism fills nodes in ascending causal order and reads
+    # ``current[j]`` for j < i, so the same-time graph is strictly lower
+    # triangular.  An upper-triangular graph would read unsampled zeros.
+    assert torch.all(instantaneous.triu() == 0)
+    assert batch.instantaneous_adjacency is not None
+    assert torch.equal(batch.instantaneous_adjacency, instantaneous)
     assert torch.isfinite(batch.x).all()
 
 

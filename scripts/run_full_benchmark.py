@@ -72,6 +72,7 @@ from gcmts.evaluation.benchmarks import (
     CRL_BENCHMARKS,
     CTEE_REAL_BENCHMARKS,
     CTEE_STATIC_BENCHMARKS,
+    EMA_DECAY,
     crl_label,
 )
 from gcmts.evaluation.progress import format_duration, read_progress
@@ -705,11 +706,11 @@ def main() -> int:
         help="enable CUDA automatic mixed precision for the CRL steps",
     )
     parser.add_argument(
-        "--ema-decay", type=float, default=0.0,
+        "--ema-decay", type=float, default=EMA_DECAY,
         help="EMA decay for the CRL weights (0 disables; e.g. 0.99)",
     )
     parser.add_argument(
-        "--kl-warmup-epochs", type=int, default=0,
+        "--kl-warmup-epochs", type=int, default=50,
         help="beta warm-up epochs for the CRL VAE methods (0 disables)",
     )
     args = parser.parse_args()
