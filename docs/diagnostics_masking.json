@@ -350,5 +350,93 @@
     "pehe": 2.9775850772857666,
     "ate_error": 2.400068998336792,
     "policy_risk": 12.371627807617188
+  },
+  {
+    "dataset": "ihdp",
+    "replication": 4,
+    "method": "ganite",
+    "mask_outcome": true,
+    "tau_hat_mean": 4.289008617401123,
+    "tau_hat_sd": 3.0425028800964355,
+    "pehe": 1.1268141269683838,
+    "ate_error": 0.12531280517578125,
+    "policy_risk": 11.374650955200195
+  },
+  {
+    "dataset": "ihdp",
+    "replication": 4,
+    "method": "ganite",
+    "mask_outcome": false,
+    "tau_hat_mean": 0.7141778469085693,
+    "tau_hat_sd": 1.1793134212493896,
+    "pehe": 3.954526424407959,
+    "ate_error": 3.4495179653167725,
+    "policy_risk": 10.629788398742676
+  },
+  {
+    "dataset": "ihdp",
+    "replication": 4,
+    "method": "crn",
+    "mask_outcome": true,
+    "tau_hat_mean": 4.051556587219238,
+    "tau_hat_sd": 1.8349735736846924,
+    "pehe": 1.8881515264511108,
+    "ate_error": 0.11213922500610352,
+    "policy_risk": 11.2556791305542
+  },
+  {
+    "dataset": "ihdp",
+    "replication": 4,
+    "method": "crn",
+    "mask_outcome": false,
+    "tau_hat_mean": 2.580221652984619,
+    "tau_hat_sd": 1.1962381601333618,
+    "pehe": 2.561976194381714,
+    "ate_error": 1.5834741592407227,
+    "policy_risk": 11.26710033416748
+  },
+  {
+    "dataset": "ihdp",
+    "replication": 4,
+    "method": "cepae",
+    "mask_outcome": true,
+    "tau_hat_mean": 4.920166015625,
+    "tau_hat_sd": 2.122098922729492,
+    "pehe": 1.7688850164413452,
+    "ate_error": 0.7564702033996582,
+    "policy_risk": 11.251420974731445
+  },
+  {
+    "dataset": "ihdp",
+    "replication": 4,
+    "method": "cepae",
+    "mask_outcome": false,
+    "tau_hat_mean": 5.155965805053711,
+    "tau_hat_sd": 1.679691195487976,
+    "pehe": 2.0959362983703613,
+    "ate_error": 0.9922699928283691,
+    "policy_risk": 11.223862648010254
+  },
+  {
+    "dataset": "ihdp",
+    "replication": 4,
+    "method": "catsg",
+    "mask_outcome": true,
+    "tau_hat_mean": 1.6711441278457642,
+    "tau_hat_sd": 0.6606457233428955,
+    "pehe": 3.2021870613098145,
+    "ate_error": 2.492551803588867,
+    "policy_risk": 11.239542961120605
+  },
+  {
+    "dataset": "ihdp",
+    "replication": 4,
+    "method": "catsg",
+    "mask_outcome": false,
+    "tau_hat_mean": 1.7030521631240845,
+    "tau_hat_sd": 0.6923348307609558,
+    "pehe": 3.1416823863983154,
+    "ate_error": 2.460643768310547,
+    "policy_risk": 11.239542961120605
   }
 ]

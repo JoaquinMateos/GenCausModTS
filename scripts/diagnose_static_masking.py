@@ -63,7 +63,7 @@ def main() -> int:
     parser.add_argument("--reps", nargs="*", type=int, default=[0, 1, 2])
     parser.add_argument("--methods", nargs="*", default=["ganite", "crn", "cepae", "catsg"])
     parser.add_argument("--epochs-scale", type=float, default=0.5)
-    parser.add_argument("--out", type=Path, default=Path("diagnostics_masking.json"))
+    parser.add_argument("--out", type=Path, default=Path("docs/diagnostics_masking.json"))
     args = parser.parse_args()
 
     rows = []

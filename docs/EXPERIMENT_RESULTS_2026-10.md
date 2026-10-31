@@ -37,7 +37,7 @@ same values as the 2080 production run.
 | CRL A.9 Lotka–Volterra | **(running)** | 50 | `outputs_shared/crl_shared_lotka_volterra.json` |
 | CTEE static NEWS (50 replications) | Complete | 300 | `outputs/ctee_static_news.json` |
 | CTEE real Oregon | Complete, **needs rerun** after the masking fix | 6 | `outputs/ctee_static_oregon_rct.json` |
-| Static-masking A/B (IHDP reps 0–4) | **(running)** | 40 | `diagnostics_masking.json` |
+| Static-masking A/B (IHDP reps 0–4) | Complete | 40 | `docs/diagnostics_masking.json` |
 | CRL reset check (Duffing, 10 seeds) | **(running)** | 50 | scratch |
 | MPS↔CUDA equivalence (Duffing, seed 0) | Complete | 5 | scratch |
 
@@ -154,10 +154,15 @@ which strengthens rather than weakens the claim.
 
 | Panel | Best | Worst | Friedman p |
 |---|---|---|---|
-| IHDP | ridge_t 2.397 | nearest_neighbour 5.475 | 1.2×10⁻¹⁰ |
-| ACIC | crn 0.311 | ganite 1.066 | 1.2×10⁻¹⁰ |
-| Twins | catsg 0.319 | nearest_neighbour 0.536 | 1.6×10⁻¹⁰ |
-| NEWS | cepae 3.432 | ganite 12.728 | 9.7×10⁻¹¹ |
+| IHDP (legacy input, being rerun) | ridge_t 2.397 | nearest_neighbour 5.475 | 1.2×10⁻¹⁰ |
+| ACIC (legacy input) | crn 0.311 | ganite 1.066 | 1.2×10⁻¹⁰ |
+| Twins (legacy input) | catsg 0.319 | nearest_neighbour 0.536 | 1.6×10⁻¹⁰ |
+| NEWS (legacy input) | cepae 3.432 | ganite 12.728 | 9.7×10⁻¹¹ |
+
+The ACIC, Twins and NEWS rows predate the masking fix; the IHDP rerun under the
+masked protocol is in progress (30 replications). The first replications show the
+masked ordering ridge < CRN ≈ CEPAE < nearest-neighbour < GANITE < CaTSG, i.e.
+CRN moves from last to second, but the block is not final.
 
 On IHDP, ridge beats every neural method (Holm p < 10⁻⁸ for all five). This is the
 opposite of the published IHDP ordering (§5) and is the signature of the outcome
@@ -255,11 +260,20 @@ not have. The two variants must not be mixed in one table.
 | CEPAE | 4.57 | 4.54 | 1.23 | **1.04** |
 | CaTSG | 1.40 | 1.40 | 2.74 | 2.74 |
 
-Over replications 0–3 at 400 epochs, the mean change is: GANITE 3.65 → 1.27,
-CRN 1.71 → 1.35, CEPAE 0.97 → 1.22, CaTSG unchanged. Masking is not uniformly
-better: CEPAE was exploiting the outcome input, and its *masked* score is the one
-that belongs in a CATE table. GANITE's collapse is the opposite case — it has no
-abduction mechanism, so copying the factual outcome is simply wrong.
+Over replications 0–4 at 400 epochs, the mean √PEHE changes as follows:
+
+| Method | Masked (CATE) | Legacy (outcome as input) | Δ |
+|---|---|---|---|
+| GANITE | **1.24** | 3.71 | −2.47 |
+| CRN | **1.46** | 1.88 | −0.42 |
+| CEPAE | 1.33 | 1.37 | −0.04 |
+| CaTSG | 3.00 | 2.98 | +0.02 |
+
+Masking is not uniformly better. CEPAE is essentially unaffected — its entropy
+penalty already limits copying — and CaTSG is unaffected because its diffusion
+prior dominates the outcome coordinate. GANITE's collapse under the legacy input
+is the clearest case: it has no abduction mechanism, so copying the factual
+outcome is simply wrong. CRN benefits from being forced to use covariates.
 
 **Real cohorts.** LaLonde (NSW) ATE error, before and after masking (single
 deterministic cohort; ridge 213 and nearest-neighbour 528 are unaffected because
@@ -278,6 +292,22 @@ The paper's claim that all four neural estimators predict essentially no effect 
 LaLonde is therefore an artefact of the leak for three of them; after the fix
 CEPAE is the best estimator on the cohort and GANITE is second, while CaTSG still
 predicts almost no effect.
+
+Masked results for all four real cohorts (ε_ATE; lower is better; single run):
+
+| Method | LaLonde | Jobs | Oregon | NHEFS |
+|---|---|---|---|---|
+| CEPAE | **61.8** | 0.201 | **0.003** | 0.771 |
+| GANITE | 120.1 | 0.049 | 0.125 | 1.051 |
+| ridge T-learner | 212.9 | **0.047** | 0.090 | **0.077** |
+| nearest neighbour | 528.2 | 0.101 | 0.062 | 0.112 |
+| CRN | 707.5 | 0.137 | 0.100 | 0.617 |
+| CaTSG | 1633.7 | 0.077 | 0.014 | 3.107 |
+
+No method wins on all four cohorts. CEPAE leads on the two largest-effect
+cohorts (LaLonde, Oregon); the ridge baseline leads on Jobs and NHEFS; GANITE is
+within 0.002 of ridge on Jobs. The Oregon reference ATE is 0.09 (ED visits), so
+the absolute errors are on that scale, not comparable to LaLonde dollars.
 
 ### 6.2 Pool-reset defect (see §3.3)
 
@@ -354,3 +384,44 @@ Adjacent: GBTPL path-F1 0.805, source accuracy 0.197, zero structural violations
 CausalGAN CF MAE 0.414 (paper 0.41). LacaDM hypervolume **4.79**, not the
 pre-audit 8.43: the paper's red caveat is correct and the corrected value should
 replace it.
+
+---
+
+## 10. Reproduction
+
+```bash
+# environment
+export GCMTS_PREFETCH=1 GCMTS_LIGHT_BATCH=1
+
+# A.9 Lotka-Volterra (MPS)
+uv run python scripts/run_crl_shared.py --device mps --suite lotka_volterra \
+    --seeds 10 --epochs-scale 1.0 --data-source pool --dataset-dir data/synthetic \
+    --scheduler adaptive --early-stopping-patience 300 --ema-decay 0.99 \
+    --kl-warmup-epochs 50 --out-dir outputs_shared
+
+# static CATE rerun under the masked protocol
+uv run python scripts/run_ctee_static.py --device mps --dataset ihdp \
+    --replications 100 --out-dir outputs
+
+# real cohorts (one replication each)
+for d in lalonde_rct jobs_rct nhefs oregon_rct; do
+  uv run python scripts/run_ctee_static.py --device mps --dataset "$d" \
+      --replications 1 --out-dir outputs
+done
+
+# static-masking A/B
+uv run python scripts/diagnose_static_masking.py --device mps --reps 0 1 2 3 4 \
+    --epochs-scale 0.5 --out docs/diagnostics_masking.json
+
+# statistics and reference floors
+uv run python scripts/statds_report.py --outputs outputs --shared outputs_shared \
+    --out docs/statistical_analysis.md --json-out docs/statistical_analysis.json
+uv run python scripts/reference_floors.py --outputs outputs
+
+# audit (exit 1 on any FAIL)
+uv run python scripts/verify_outputs.py --pools --report docs/audit_2026-10.md
+```
+
+The p-values in `docs/statistical_analysis.md` are recomputed with the exact
+χ² tail; `docs/statistical_analysis.json` keeps the raw StaTDS value for
+comparison.

@@ -922,8 +922,9 @@ def configure_logging(out_dir: Path, name: str) -> None:
 def run_suite(args: argparse.Namespace) -> int:
     suite = SUITES[args.suite]
     methods = _methods_for(suite, args.epochs_scale)
-    if args.only:
-        methods = [m for m in methods if m[0] in set(args.only)]
+    only = getattr(args, "only", None)
+    if only:
+        methods = [m for m in methods if m[0] in set(only)]
     stem = f"crl_shared_{suite.name}"
     logger.info(
         "=== %s | methods: %s | seeds: %d | epochs_scale: %.2f ===",
