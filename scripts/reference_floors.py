@@ -88,8 +88,8 @@ def main() -> int:
             n = min(len(pehe), len(valid))
             beats = float(np.mean(pehe[:n] < valid[:n, 1]))
             lines.append(
-                f"| {panel} | {len(valid)} | {valid[:, 0].mean():.3f} | "
-                f"{valid[:, 1].mean():.3f} | {method} | {pehe.mean():.3f} | "
+                f"| {panel} | {n} | {valid[:n, 0].mean():.3f} | "
+                f"{valid[:n, 1].mean():.3f} | {method} | {pehe.mean():.3f} | "
                 f"{np.median(pehe):.3f} | {100 * beats:.0f}% |"
             )
     text = "\n".join(lines)

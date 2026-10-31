@@ -1,0 +1,1002 @@
+[
+  {
+    "name": "CRL representation quality (MCC, higher is better)",
+    "skipped": false,
+    "dropped": 0,
+    "n_cases": 18,
+    "n_methods": 5,
+    "ranks": {
+      "NCTRL": 2.0555555555555554,
+      "LEAP": 2.1666666666666665,
+      "TDRL": 2.888888888888889,
+      "MOSAIC": 3.0555555555555554,
+      "iVAE": 4.833333333333333
+    },
+    "statistic": 35.73333333333335,
+    "p_value": 3.283637182160959e-07,
+    "p_value_exact": 3.2832233905142107e-07,
+    "critical_value": 9.488,
+    "hypothesis": "Reject H0 with alpha = 0.05 (Different distributions)",
+    "critical_difference": 1.4376635082568705,
+    "posthoc": [
+      {
+        "Comparison": "NCTRL vs iVAE",
+        "Statistic (Z)": 5.270462766947299,
+        "p-value": 1.3608022908506712e-07,
+        "Adjusted alpha": 0.0125,
+        "Adjusted p-value": 5.443209163402685e-07,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "NCTRL vs LEAP",
+        "Statistic (Z)": 0.21081851067789203,
+        "p-value": 0.8330288937195214,
+        "Adjusted alpha": 0.05,
+        "Adjusted p-value": 0.8330288937195214,
+        "alpha": 0.05,
+        "Results": "Fail to Reject H0"
+      },
+      {
+        "Comparison": "NCTRL vs TDRL",
+        "Statistic (Z)": 1.5811388300841898,
+        "p-value": 0.11384629800665813,
+        "Adjusted alpha": 0.025,
+        "Adjusted p-value": 0.22769259601331626,
+        "alpha": 0.05,
+        "Results": "Fail to Reject H0"
+      },
+      {
+        "Comparison": "NCTRL vs MOSAIC",
+        "Statistic (Z)": 1.8973665961010275,
+        "p-value": 0.05777957112359733,
+        "Adjusted alpha": 0.016666666666666666,
+        "Adjusted p-value": 0.17333871337079199,
+        "alpha": 0.05,
+        "Results": "Fail to Reject H0"
+      }
+    ],
+    "means": {
+      "iVAE": 0.572098289637102,
+      "LEAP": 0.7567499856154123,
+      "TDRL": 0.7303212793336974,
+      "NCTRL": 0.7700542198287116,
+      "MOSAIC": 0.728189404639933
+    },
+    "medians": {
+      "iVAE": 0.5014811024069786,
+      "LEAP": 0.7555538952350617,
+      "TDRL": 0.7226718872785569,
+      "NCTRL": 0.7795185297727585,
+      "MOSAIC": 0.7508910864591598
+    },
+    "std": {
+      "iVAE": 0.20064314700474326,
+      "LEAP": 0.1269618145287842,
+      "TDRL": 0.14859690977616258,
+      "NCTRL": 0.12974702142365763,
+      "MOSAIC": 0.13852052935696924
+    }
+  },
+  {
+    "name": "CRL one-step forecasting (MSE, lower is better)",
+    "skipped": false,
+    "dropped": 0,
+    "n_cases": 18,
+    "n_methods": 5,
+    "ranks": {
+      "NCTRL": 1.8888888888888888,
+      "LEAP": 2.0,
+      "TDRL": 2.8333333333333335,
+      "MOSAIC": 3.6666666666666665,
+      "iVAE": 4.611111111111111
+    },
+    "statistic": 38.177777777777806,
+    "p_value": 1.0303009689849318e-07,
+    "p_value_exact": 1.0298092930203294e-07,
+    "critical_value": 9.488,
+    "hypothesis": "Reject H0 with alpha = 0.05 (Different distributions)",
+    "critical_difference": 1.4376635082568705,
+    "posthoc": [
+      {
+        "Comparison": "NCTRL vs iVAE",
+        "Statistic (Z)": 5.165053511608352,
+        "p-value": 2.403701460096386e-07,
+        "Adjusted alpha": 0.0125,
+        "Adjusted p-value": 9.614805840385543e-07,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "NCTRL vs LEAP",
+        "Statistic (Z)": 0.21081851067789203,
+        "p-value": 0.8330288937195214,
+        "Adjusted alpha": 0.05,
+        "Adjusted p-value": 0.8330288937195214,
+        "alpha": 0.05,
+        "Results": "Fail to Reject H0"
+      },
+      {
+        "Comparison": "NCTRL vs TDRL",
+        "Statistic (Z)": 1.791957340762082,
+        "p-value": 0.07313979965890893,
+        "Adjusted alpha": 0.025,
+        "Adjusted p-value": 0.14627959931781787,
+        "alpha": 0.05,
+        "Results": "Fail to Reject H0"
+      },
+      {
+        "Comparison": "NCTRL vs MOSAIC",
+        "Statistic (Z)": 3.373096170846271,
+        "p-value": 0.0007432798688491449,
+        "Adjusted alpha": 0.016666666666666666,
+        "Adjusted p-value": 0.0022298396065474346,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      }
+    ],
+    "means": {
+      "iVAE": 0.5357876825948349,
+      "LEAP": 0.3070982704611702,
+      "TDRL": 0.4377897978275238,
+      "NCTRL": 0.3104030097569598,
+      "MOSAIC": 0.5381665268822365
+    },
+    "medians": {
+      "iVAE": 0.019395178533159196,
+      "LEAP": 0.00792473591864109,
+      "TDRL": 0.008022239035926759,
+      "NCTRL": 0.009466214966960252,
+      "MOSAIC": 0.016959956567734483
+    },
+    "std": {
+      "iVAE": 1.5291463215064733,
+      "LEAP": 0.8548933073606444,
+      "TDRL": 1.2635626983026043,
+      "NCTRL": 0.864630047833539,
+      "MOSAIC": 1.5433326784128165
+    }
+  },
+  {
+    "name": "18-problem grid, MCC (higher is better)",
+    "skipped": false,
+    "dropped": 0,
+    "n_cases": 18,
+    "n_methods": 5,
+    "ranks": {
+      "LEAP": 2.5555555555555554,
+      "TDRL": 2.7222222222222223,
+      "iVAE": 2.8333333333333335,
+      "NCTRL": 3.4444444444444446,
+      "MOSAIC": 3.4444444444444446
+    },
+    "statistic": 5.02222222222224,
+    "p_value": 0.2850249473904003,
+    "p_value_exact": 0.28502494738663675,
+    "critical_value": 9.488,
+    "hypothesis": "Fail to Reject H0 with alpha = 0.05 (Same distributions)",
+    "critical_difference": 1.4376635082568705,
+    "posthoc": [
+      {
+        "Comparison": "LEAP vs iVAE",
+        "Statistic (Z)": 0.5270462766947305,
+        "p-value": 0.5981614526835277,
+        "Adjusted alpha": 0.025,
+        "Adjusted p-value": 1.0,
+        "alpha": 0.05,
+        "Results": "Fail to Reject H0"
+      },
+      {
+        "Comparison": "LEAP vs TDRL",
+        "Statistic (Z)": 0.3162277660168385,
+        "p-value": 0.751829634045849,
+        "Adjusted alpha": 0.05,
+        "Adjusted p-value": 1.0,
+        "alpha": 0.05,
+        "Results": "Fail to Reject H0"
+      },
+      {
+        "Comparison": "LEAP vs NCTRL",
+        "Statistic (Z)": 1.6865480854231363,
+        "p-value": 0.09169028154942915,
+        "Adjusted alpha": 0.0125,
+        "Adjusted p-value": 0.3667611261977166,
+        "alpha": 0.05,
+        "Results": "Fail to Reject H0"
+      },
+      {
+        "Comparison": "LEAP vs MOSAIC",
+        "Statistic (Z)": 1.6865480854231363,
+        "p-value": 0.09169028154942915,
+        "Adjusted alpha": 0.016666666666666666,
+        "Adjusted p-value": 0.3667611261977166,
+        "alpha": 0.05,
+        "Results": "Fail to Reject H0"
+      }
+    ],
+    "means": {
+      "iVAE": 0.738879940079318,
+      "LEAP": 0.75206109351582,
+      "TDRL": 0.7514162838459015,
+      "NCTRL": 0.7379111975431442,
+      "MOSAIC": 0.7331232739819422
+    },
+    "medians": {
+      "iVAE": 0.754789263010025,
+      "LEAP": 0.7503932356834412,
+      "TDRL": 0.756953975558281,
+      "NCTRL": 0.72553770840168,
+      "MOSAIC": 0.7338221222162247
+    },
+    "std": {
+      "iVAE": 0.09275174579730386,
+      "LEAP": 0.08492943786256799,
+      "TDRL": 0.08389189672156182,
+      "NCTRL": 0.08335717874397429,
+      "MOSAIC": 0.09480366822684842
+    }
+  },
+  {
+    "name": "18-problem grid, one-step forecasting (MSE, lower is better)",
+    "skipped": false,
+    "dropped": 0,
+    "n_cases": 18,
+    "n_methods": 5,
+    "ranks": {
+      "LEAP": 1.0,
+      "NCTRL": 2.0,
+      "TDRL": 3.0,
+      "iVAE": 4.0,
+      "MOSAIC": 5.0
+    },
+    "statistic": 72.0,
+    "p_value": 3.5431102496374933e-11,
+    "p_value_exact": 8.58223447190119e-15,
+    "critical_value": 9.488,
+    "hypothesis": "Reject H0 with alpha = 0.05 (Different distributions)",
+    "critical_difference": 1.4376635082568705,
+    "posthoc": [
+      {
+        "Comparison": "LEAP vs iVAE",
+        "Statistic (Z)": 5.692099788303082,
+        "p-value": 1.2548647454480033e-08,
+        "Adjusted alpha": 0.016666666666666666,
+        "Adjusted p-value": 3.76459423634401e-08,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "LEAP vs TDRL",
+        "Statistic (Z)": 3.794733192202055,
+        "p-value": 0.00014780231033451052,
+        "Adjusted alpha": 0.025,
+        "Adjusted p-value": 0.00029560462066902105,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "LEAP vs NCTRL",
+        "Statistic (Z)": 1.8973665961010275,
+        "p-value": 0.05777957112359733,
+        "Adjusted alpha": 0.05,
+        "Adjusted p-value": 0.05777957112359733,
+        "alpha": 0.05,
+        "Results": "Fail to Reject H0"
+      },
+      {
+        "Comparison": "LEAP vs MOSAIC",
+        "Statistic (Z)": 7.58946638440411,
+        "p-value": 3.219646771412954e-14,
+        "Adjusted alpha": 0.0125,
+        "Adjusted p-value": 1.2878587085651816e-13,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      }
+    ],
+    "means": {
+      "iVAE": 9.109672580824958,
+      "LEAP": 4.515477562612958,
+      "TDRL": 5.585812275939517,
+      "NCTRL": 4.622179018126593,
+      "MOSAIC": 9.197608705361684
+    },
+    "medians": {
+      "iVAE": 9.070471286773682,
+      "LEAP": 4.503090083599091,
+      "TDRL": 5.563493299484254,
+      "NCTRL": 4.5879084944725035,
+      "MOSAIC": 9.152638411521911
+    },
+    "std": {
+      "iVAE": 3.2584957371999055,
+      "LEAP": 1.5870689148899488,
+      "TDRL": 1.530668916558551,
+      "NCTRL": 1.5816401666669446,
+      "MOSAIC": 3.2865254474469587
+    }
+  },
+  {
+    "name": "Temporal CTEE, harmonic (sqrt-PEHE, lower is better)",
+    "skipped": false,
+    "dropped": 0,
+    "n_cases": 10,
+    "n_methods": 5,
+    "ranks": {
+      "CRN": 1.0,
+      "CEPAE": 2.0,
+      "CaTSG": 3.5,
+      "GANITE": 4.1,
+      "WuIPTW": 4.4
+    },
+    "statistic": 33.68000000000001,
+    "p_value": 8.667632009906612e-07,
+    "p_value_exact": 8.667139262110572e-07,
+    "critical_value": 9.488,
+    "hypothesis": "Reject H0 with alpha = 0.05 (Different distributions)",
+    "critical_difference": 1.9288279999399156,
+    "posthoc": [
+      {
+        "Comparison": "CRN vs CEPAE",
+        "Statistic (Z)": 1.414213562373095,
+        "p-value": 0.15729920705028522,
+        "Adjusted alpha": 0.05,
+        "Adjusted p-value": 0.15729920705028522,
+        "alpha": 0.05,
+        "Results": "Fail to Reject H0"
+      },
+      {
+        "Comparison": "CRN vs CaTSG",
+        "Statistic (Z)": 3.5355339059327373,
+        "p-value": 0.00040695201744500586,
+        "Adjusted alpha": 0.025,
+        "Adjusted p-value": 0.0008139040348900117,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "CRN vs GANITE",
+        "Statistic (Z)": 4.384062043356594,
+        "p-value": 1.164865736713594e-05,
+        "Adjusted alpha": 0.016666666666666666,
+        "Adjusted p-value": 3.494597210140782e-05,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "CRN vs WuIPTW",
+        "Statistic (Z)": 4.8083261120685235,
+        "p-value": 1.5219933628962679e-06,
+        "Adjusted alpha": 0.0125,
+        "Adjusted p-value": 6.087973451585071e-06,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      }
+    ],
+    "means": {
+      "CEPAE": 0.6342536449432373,
+      "CRN": 0.27013573348522185,
+      "CaTSG": 1.098325827717781,
+      "GANITE": 1.130357787013054,
+      "WuIPTW": 1.4791641891002656
+    },
+    "medians": {
+      "CEPAE": 0.4540274888277054,
+      "CRN": 0.27985015511512756,
+      "CaTSG": 0.8642013669013977,
+      "GANITE": 0.8909679651260376,
+      "WuIPTW": 1.6297240853309631
+    },
+    "std": {
+      "CEPAE": 0.3640292935230225,
+      "CRN": 0.10110785049379613,
+      "CaTSG": 0.6824669825307377,
+      "GANITE": 0.7005340747924597,
+      "WuIPTW": 0.5762710188120937
+    }
+  },
+  {
+    "name": "Temporal CTEE, tumour (sqrt-PEHE, lower is better)",
+    "skipped": false,
+    "dropped": 0,
+    "n_cases": 10,
+    "n_methods": 5,
+    "ranks": {
+      "CRN": 1.7,
+      "CaTSG": 2.6,
+      "CEPAE": 3.1,
+      "WuIPTW": 3.1,
+      "GANITE": 4.5
+    },
+    "statistic": 16.480000000000018,
+    "p_value": 0.0024382904811145467,
+    "p_value_exact": 0.002438290464961575,
+    "critical_value": 9.488,
+    "hypothesis": "Reject H0 with alpha = 0.05 (Different distributions)",
+    "critical_difference": 1.9288279999399156,
+    "posthoc": [
+      {
+        "Comparison": "CRN vs CEPAE",
+        "Statistic (Z)": 1.9798989873223332,
+        "p-value": 0.047714880237351265,
+        "Adjusted alpha": 0.016666666666666666,
+        "Adjusted p-value": 0.1431446407120538,
+        "alpha": 0.05,
+        "Results": "Fail to Reject H0"
+      },
+      {
+        "Comparison": "CRN vs CaTSG",
+        "Statistic (Z)": 1.2727922061357857,
+        "p-value": 0.20309178757716784,
+        "Adjusted alpha": 0.05,
+        "Adjusted p-value": 0.1431446407120538,
+        "alpha": 0.05,
+        "Results": "Fail to Reject H0"
+      },
+      {
+        "Comparison": "CRN vs GANITE",
+        "Statistic (Z)": 3.9597979746446654,
+        "p-value": 7.501319466540757e-05,
+        "Adjusted alpha": 0.0125,
+        "Adjusted p-value": 0.20309178757716784,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "CRN vs WuIPTW",
+        "Statistic (Z)": 1.9798989873223332,
+        "p-value": 0.047714880237351265,
+        "Adjusted alpha": 0.025,
+        "Adjusted p-value": 0.00030005277866163027,
+        "alpha": 0.05,
+        "Results": "Fail to Reject H0"
+      }
+    ],
+    "means": {
+      "CEPAE": 6.72571291923523,
+      "CRN": 6.416440773010254,
+      "CaTSG": 6.653273677825927,
+      "GANITE": 7.291452407836914,
+      "WuIPTW": 6.840066719055176
+    },
+    "medians": {
+      "CEPAE": 6.697036981582642,
+      "CRN": 6.299165725708008,
+      "CaTSG": 6.741320610046387,
+      "GANITE": 7.224020957946777,
+      "WuIPTW": 6.836042881011963
+    },
+    "std": {
+      "CEPAE": 0.381227201559692,
+      "CRN": 0.4297452082807285,
+      "CaTSG": 0.40564691979892253,
+      "GANITE": 0.46451588550837997,
+      "WuIPTW": 0.46937374584045916
+    }
+  },
+  {
+    "name": "Temporal CTEE, linear_sem (sqrt-PEHE, lower is better)",
+    "skipped": false,
+    "dropped": 0,
+    "n_cases": 10,
+    "n_methods": 5,
+    "ranks": {
+      "CRN": 1.0,
+      "CaTSG": 2.6,
+      "CEPAE": 2.9,
+      "GANITE": 3.9,
+      "WuIPTW": 4.6
+    },
+    "statistic": 30.159999999999997,
+    "p_value": 4.540764056093494e-06,
+    "p_value_exact": 4.540725593841659e-06,
+    "critical_value": 9.488,
+    "hypothesis": "Reject H0 with alpha = 0.05 (Different distributions)",
+    "critical_difference": 1.9288279999399156,
+    "posthoc": [
+      {
+        "Comparison": "CRN vs CEPAE",
+        "Statistic (Z)": 2.68700576850888,
+        "p-value": 0.007209570764742601,
+        "Adjusted alpha": 0.025,
+        "Adjusted p-value": 0.014419141529485202,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "CRN vs CaTSG",
+        "Statistic (Z)": 2.262741699796952,
+        "p-value": 0.023651616655355978,
+        "Adjusted alpha": 0.05,
+        "Adjusted p-value": 0.023651616655355978,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "CRN vs GANITE",
+        "Statistic (Z)": 4.1012193308819755,
+        "p-value": 4.109787809936094e-05,
+        "Adjusted alpha": 0.016666666666666666,
+        "Adjusted p-value": 0.00012329363429808282,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "CRN vs WuIPTW",
+        "Statistic (Z)": 5.091168824543141,
+        "p-value": 3.5586299307333036e-07,
+        "Adjusted alpha": 0.0125,
+        "Adjusted p-value": 1.4234519722933214e-06,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      }
+    ],
+    "means": {
+      "CEPAE": 1.3797061026096344,
+      "CRN": 0.1096272872760892,
+      "CaTSG": 1.0527593672275544,
+      "GANITE": 1.4112532436847687,
+      "WuIPTW": 1.4436722695827484
+    },
+    "medians": {
+      "CEPAE": 1.4558038711547852,
+      "CRN": 0.05932334624230862,
+      "CaTSG": 1.0473288893699646,
+      "GANITE": 1.4825536608695984,
+      "WuIPTW": 1.4845567345619202
+    },
+    "std": {
+      "CEPAE": 0.2597968975658889,
+      "CRN": 0.1221511231585998,
+      "CaTSG": 0.4692104770180186,
+      "GANITE": 0.28007607441266935,
+      "WuIPTW": 0.2831165041433294
+    }
+  },
+  {
+    "name": "Static CATE, IHDP (sqrt-PEHE, lower is better)",
+    "skipped": false,
+    "dropped": 0,
+    "n_cases": 30,
+    "n_methods": 6,
+    "ranks": {
+      "ridge_t": 1.4,
+      "cepae": 3.066666666666667,
+      "crn": 3.2666666666666666,
+      "ganite": 3.466666666666667,
+      "catsg": 4.866666666666666,
+      "nearest_neighbour": 4.933333333333334
+    },
+    "statistic": 73.50476190476195,
+    "p_value": 6.135247865302063e-11,
+    "p_value_exact": 1.907819850648361e-14,
+    "critical_value": 11.07,
+    "hypothesis": "Reject H0 with alpha = 0.05 (Different distributions)",
+    "critical_difference": 1.376538476873523,
+    "posthoc": [
+      {
+        "Comparison": "ridge_t vs catsg",
+        "Statistic (Z)": 7.176681817160484,
+        "p-value": 7.143174940438257e-13,
+        "Adjusted alpha": 0.0125,
+        "Adjusted p-value": 2.857269976175303e-12,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "ridge_t vs cepae",
+        "Statistic (Z)": 3.450327796711772,
+        "p-value": 0.0005599062480061701,
+        "Adjusted alpha": 0.05,
+        "Adjusted p-value": 0.0005599062480061701,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "ridge_t vs crn",
+        "Statistic (Z)": 3.8643671323171835,
+        "p-value": 0.00011137759605439612,
+        "Adjusted alpha": 0.025,
+        "Adjusted p-value": 0.00022275519210879224,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "ridge_t vs ganite",
+        "Statistic (Z)": 4.278406467922597,
+        "p-value": 1.882360552496465e-05,
+        "Adjusted alpha": 0.016666666666666666,
+        "Adjusted p-value": 5.6470816574893945e-05,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "ridge_t vs nearest_neighbour",
+        "Statistic (Z)": 7.314694929028955,
+        "p-value": 2.580158309228864e-13,
+        "Adjusted alpha": 0.01,
+        "Adjusted p-value": 1.290079154614432e-12,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      }
+    ],
+    "means": {
+      "catsg": 7.026586429278056,
+      "cepae": 4.71086638768514,
+      "crn": 5.509033006429672,
+      "ganite": 3.295223418871562,
+      "ridge_t": 3.2295505235592525,
+      "nearest_neighbour": 6.90589105685552
+    },
+    "medians": {
+      "catsg": 2.908441662788391,
+      "cepae": 1.9601234793663025,
+      "crn": 1.977366328239441,
+      "ganite": 2.446601390838623,
+      "ridge_t": 1.1130162477493286,
+      "nearest_neighbour": 2.71334707736969
+    },
+    "std": {
+      "catsg": 12.411072089119294,
+      "cepae": 6.635109323829469,
+      "crn": 9.232888520016889,
+      "ganite": 3.0286706784332686,
+      "ridge_t": 5.98095746736333,
+      "nearest_neighbour": 11.682524519048705
+    }
+  },
+  {
+    "name": "Static CATE, ACIC (sqrt-PEHE, lower is better)",
+    "skipped": false,
+    "dropped": 0,
+    "n_cases": 100,
+    "n_methods": 6,
+    "ranks": {
+      "catsg": 1.95,
+      "crn": 2.16,
+      "cepae": 3.28,
+      "ridge_t": 3.45,
+      "nearest_neighbour": 5.06,
+      "ganite": 5.1
+    },
+    "statistic": 264.0742857142859,
+    "p_value": 1.227569157435937e-10,
+    "p_value_exact": 5.239981985475655e-55,
+    "critical_value": 11.07,
+    "hypothesis": "Reject H0 with alpha = 0.05 (Different distributions)",
+    "critical_difference": 0.753961175057432,
+    "posthoc": [
+      {
+        "Comparison": "catsg vs cepae",
+        "Statistic (Z)": 5.026927491022721,
+        "p-value": 4.98400693160761e-07,
+        "Adjusted alpha": 0.025,
+        "Adjusted p-value": 9.96801386321522e-07,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "catsg vs crn",
+        "Statistic (Z)": 0.7937253933193779,
+        "p-value": 0.42735531389780723,
+        "Adjusted alpha": 0.05,
+        "Adjusted p-value": 0.42735531389780723,
+        "alpha": 0.05,
+        "Results": "Fail to Reject H0"
+      },
+      {
+        "Comparison": "catsg vs ganite",
+        "Statistic (Z)": 11.905880899790654,
+        "p-value": 0.0,
+        "Adjusted alpha": 0.01,
+        "Adjusted p-value": 0.0,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "catsg vs ridge_t",
+        "Statistic (Z)": 5.669467095138408,
+        "p-value": 1.4324235575458033e-08,
+        "Adjusted alpha": 0.016666666666666666,
+        "Adjusted p-value": 4.29727067263741e-08,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "catsg vs nearest_neighbour",
+        "Statistic (Z)": 11.754695110586963,
+        "p-value": 0.0,
+        "Adjusted alpha": 0.0125,
+        "Adjusted p-value": 0.0,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      }
+    ],
+    "means": {
+      "catsg": 0.3539184913155623,
+      "cepae": 0.554443747214973,
+      "crn": 0.3114943533018231,
+      "ganite": 1.065983007401228,
+      "ridge_t": 0.655843759663403,
+      "nearest_neighbour": 0.9798108727484941
+    },
+    "medians": {
+      "catsg": 0.16161908209323883,
+      "cepae": 0.42084747552871704,
+      "crn": 0.2708611488342285,
+      "ganite": 0.965971052646637,
+      "ridge_t": 0.627172589302063,
+      "nearest_neighbour": 0.9984123110771179
+    },
+    "std": {
+      "catsg": 0.49923995493601026,
+      "cepae": 0.4629803037059704,
+      "crn": 0.24506453656359006,
+      "ganite": 0.4926168489534878,
+      "ridge_t": 0.6502025263093392,
+      "nearest_neighbour": 0.3778786398798744
+    }
+  },
+  {
+    "name": "Static CATE, TWINS (sqrt-PEHE, lower is better)",
+    "skipped": false,
+    "dropped": 0,
+    "n_cases": 100,
+    "n_methods": 6,
+    "ranks": {
+      "catsg": 1.81,
+      "crn": 2.07,
+      "cepae": 2.26,
+      "ridge_t": 3.88,
+      "ganite": 4.98,
+      "nearest_neighbour": 6.0
+    },
+    "statistic": 429.2399999999998,
+    "p_value": 1.570353846958028e-10,
+    "p_value_exact": 1.474413009846818e-90,
+    "critical_value": 11.07,
+    "hypothesis": "Reject H0 with alpha = 0.05 (Different distributions)",
+    "critical_difference": 0.753961175057432,
+    "posthoc": [
+      {
+        "Comparison": "catsg vs cepae",
+        "Statistic (Z)": 1.7008401285415213,
+        "p-value": 0.08897301170181349,
+        "Adjusted alpha": 0.025,
+        "Adjusted p-value": 0.17794602340362697,
+        "alpha": 0.05,
+        "Results": "Fail to Reject H0"
+      },
+      {
+        "Comparison": "catsg vs crn",
+        "Statistic (Z)": 0.9827076298239898,
+        "p-value": 0.32575135447871695,
+        "Adjusted alpha": 0.05,
+        "Adjusted p-value": 0.32575135447871695,
+        "alpha": 0.05,
+        "Results": "Fail to Reject H0"
+      },
+      {
+        "Comparison": "catsg vs ganite",
+        "Statistic (Z)": 11.981473794392503,
+        "p-value": 0.0,
+        "Adjusted alpha": 0.01,
+        "Adjusted p-value": 0.0,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "catsg vs ridge_t",
+        "Statistic (Z)": 7.823864591291002,
+        "p-value": 5.10702591327572e-15,
+        "Adjusted alpha": 0.016666666666666666,
+        "Adjusted p-value": 1.532107773982716e-14,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "catsg vs nearest_neighbour",
+        "Statistic (Z)": 15.836711419086617,
+        "p-value": 0.0,
+        "Adjusted alpha": 0.0125,
+        "Adjusted p-value": 0.0,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      }
+    ],
+    "means": {
+      "catsg": 0.31938523590564727,
+      "cepae": 0.3198379895091057,
+      "crn": 0.3194527232646942,
+      "ganite": 0.3291299098730087,
+      "ridge_t": 0.3214664426445961,
+      "nearest_neighbour": 0.5359551870822906
+    },
+    "medians": {
+      "catsg": 0.3199010640382767,
+      "cepae": 0.32054606080055237,
+      "crn": 0.31986984610557556,
+      "ganite": 0.3279694765806198,
+      "ridge_t": 0.3223019540309906,
+      "nearest_neighbour": 0.5362583994865417
+    },
+    "std": {
+      "catsg": 0.006915002701355149,
+      "cepae": 0.007077155298598405,
+      "crn": 0.0069131593254098825,
+      "ganite": 0.010890216085068419,
+      "ridge_t": 0.006903964471719535,
+      "nearest_neighbour": 0.010050035370284975
+    }
+  },
+  {
+    "name": "Static CATE, NEWS (sqrt-PEHE, lower is better)",
+    "skipped": false,
+    "dropped": 0,
+    "n_cases": 50,
+    "n_methods": 6,
+    "ranks": {
+      "cepae": 1.2,
+      "crn": 2.04,
+      "catsg": 3.32,
+      "nearest_neighbour": 3.44,
+      "ridge_t": 5.14,
+      "ganite": 5.86
+    },
+    "statistic": 224.52571428571423,
+    "p_value": 9.667300293614289e-11,
+    "p_value_exact": 1.5935597355851541e-46,
+    "critical_value": 11.07,
+    "hypothesis": "Reject H0 with alpha = 0.05 (Different distributions)",
+    "critical_difference": 1.0662621192689756,
+    "posthoc": [
+      {
+        "Comparison": "cepae vs catsg",
+        "Statistic (Z)": 5.665938328543397,
+        "p-value": 1.4622211441661648e-08,
+        "Adjusted alpha": 0.025,
+        "Adjusted p-value": 2.9244422883323296e-08,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "cepae vs crn",
+        "Statistic (Z)": 2.244994432064365,
+        "p-value": 0.024768490009319022,
+        "Adjusted alpha": 0.05,
+        "Adjusted p-value": 0.024768490009319022,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "cepae vs ganite",
+        "Statistic (Z)": 12.454373873118977,
+        "p-value": 0.0,
+        "Adjusted alpha": 0.01,
+        "Adjusted p-value": 0.0,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "cepae vs ridge_t",
+        "Statistic (Z)": 10.530092931349518,
+        "p-value": 0.0,
+        "Adjusted alpha": 0.0125,
+        "Adjusted p-value": 0.0,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "cepae vs nearest_neighbour",
+        "Statistic (Z)": 5.986651818838307,
+        "p-value": 2.142046540143383e-09,
+        "Adjusted alpha": 0.016666666666666666,
+        "Adjusted p-value": 6.426139620430149e-09,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      }
+    ],
+    "means": {
+      "catsg": 4.325992746353149,
+      "cepae": 3.4317355871200563,
+      "crn": 3.8045887613296507,
+      "ganite": 12.72763967514038,
+      "ridge_t": 9.57021689414978,
+      "nearest_neighbour": 4.6411710500717165
+    },
+    "medians": {
+      "catsg": 4.1299498081207275,
+      "cepae": 3.1851001977920532,
+      "crn": 3.657824993133545,
+      "ganite": 12.167119979858398,
+      "ridge_t": 8.723682880401611,
+      "nearest_neighbour": 4.589376449584961
+    },
+    "std": {
+      "catsg": 1.1838049569132958,
+      "cepae": 1.3189497644952803,
+      "crn": 0.9767807752497335,
+      "ganite": 4.388050984417632,
+      "ridge_t": 3.1413613748556126,
+      "nearest_neighbour": 1.3329844248831166
+    }
+  },
+  {
+    "name": "Real panels, one-step forecasting (MSE, lower is better)",
+    "skipped": false,
+    "dropped": 0,
+    "n_cases": 11,
+    "n_methods": 5,
+    "ranks": {
+      "LEAP": 2.3636363636363638,
+      "MOSAIC": 2.3636363636363638,
+      "NCTRL": 2.5454545454545454,
+      "TDRL": 3.0,
+      "iVAE": 4.7272727272727275
+    },
+    "statistic": 17.599999999999994,
+    "p_value": 0.0014771841578851141,
+    "p_value_exact": 0.0014771841359356745,
+    "critical_value": 9.488,
+    "hypothesis": "Reject H0 with alpha = 0.05 (Different distributions)",
+    "critical_difference": 1.839065339032109,
+    "posthoc": [
+      {
+        "Comparison": "LEAP vs iVAE",
+        "Statistic (Z)": 3.505839284808859,
+        "p-value": 0.0004551699698851497,
+        "Adjusted alpha": 0.0125,
+        "Adjusted p-value": 0.0018206798795405987,
+        "alpha": 0.05,
+        "Results": "Reject H0"
+      },
+      {
+        "Comparison": "LEAP vs TDRL",
+        "Statistic (Z)": 0.9438798074485388,
+        "p-value": 0.3452310717718401,
+        "Adjusted alpha": 0.016666666666666666,
+        "Adjusted p-value": 1.0,
+        "alpha": 0.05,
+        "Results": "Fail to Reject H0"
+      },
+      {
+        "Comparison": "LEAP vs NCTRL",
+        "Statistic (Z)": 0.2696799449852966,
+        "p-value": 0.7874064906662694,
+        "Adjusted alpha": 0.025,
+        "Adjusted p-value": 1.0,
+        "alpha": 0.05,
+        "Results": "Fail to Reject H0"
+      },
+      {
+        "Comparison": "LEAP vs MOSAIC",
+        "Statistic (Z)": 0.0,
+        "p-value": 1.0,
+        "Adjusted alpha": 0.05,
+        "Adjusted p-value": 1.0,
+        "alpha": 0.05,
+        "Results": "Fail to Reject H0"
+      }
+    ],
+    "means": {
+      "iVAE": 1.0602808157393078,
+      "LEAP": 0.43842198723441256,
+      "TDRL": 0.44618792935556634,
+      "NCTRL": 0.41146477243262786,
+      "MOSAIC": 0.48956199406998235
+    },
+    "medians": {
+      "iVAE": 0.6369471805504665,
+      "LEAP": 0.31191689348467044,
+      "TDRL": 0.3123582742026806,
+      "NCTRL": 0.2987018635883424,
+      "MOSAIC": 0.26143156585101496
+    },
+    "std": {
+      "iVAE": 1.2344787146768816,
+      "LEAP": 0.36066850589810556,
+      "TDRL": 0.36590273631344095,
+      "NCTRL": 0.33452967377652554,
+      "MOSAIC": 0.45333851672673786
+    }
+  }
+]

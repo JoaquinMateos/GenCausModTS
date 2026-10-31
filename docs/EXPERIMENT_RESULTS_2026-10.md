@@ -34,11 +34,12 @@ same values as the 2080 production run.
 
 | Block | Status | Runs | Where |
 |---|---|---|---|
-| CRL A.9 Lotka–Volterra | **(running)** | 50 | `outputs_shared/crl_shared_lotka_volterra.json` |
+| CRL A.9 Lotka–Volterra | Complete | 50 | `outputs_shared/crl_shared_lotka_volterra.json` |
 | CTEE static NEWS (50 replications) | Complete | 300 | `outputs/ctee_static_news.json` |
-| CTEE real Oregon | Complete, **needs rerun** after the masking fix | 6 | `outputs/ctee_static_oregon_rct.json` |
+| CTEE real cohorts (LaLonde, Jobs, Oregon, NHEFS) | Complete, masked | 24 | `outputs/ctee_static_{lalonde_rct,jobs_rct,oregon_rct,nhefs}.json` |
 | Static-masking A/B (IHDP reps 0–4) | Complete | 40 | `docs/diagnostics_masking.json` |
-| CRL reset check (Duffing, 10 seeds) | **(running)** | 50 | scratch |
+| CRL reset check (Duffing, 10 seeds) | Complete | 50 | scratch (§3.3) |
+| CTEE static IHDP (masked) | Complete | 180 (30 rep × 6) | `outputs/ctee_static_ihdp.json` |
 | MPS↔CUDA equivalence (Duffing, seed 0) | Complete | 5 | scratch |
 
 The 17 other CRL shared suites, the grid, CTEE temporal, the static panels and the
@@ -119,19 +120,19 @@ or a panel (real data).
 
 ### 4.1 CRL representation quality (MCC, higher better)
 
-17 shared suites (A.9 excluded until its rerun finishes).
+18 shared suites, including the completed A.9 Lotka–Volterra rerun.
 
 | Method | Mean rank | Mean MCC | Median |
 |---|---|---|---|
-| NCTRL | 2.06 | 0.775 | 0.791 |
-| LEAP | 2.24 | 0.759 | 0.788 |
-| TDRL | 2.82 | 0.735 | 0.773 |
-| MOSAIC | 3.06 | 0.732 | 0.802 |
-| iVAE | 4.82 | 0.580 | 0.539 |
+| NCTRL | 2.06 | 0.770 | 0.780 |
+| LEAP | 2.17 | 0.757 | 0.756 |
+| TDRL | 2.89 | 0.730 | 0.723 |
+| MOSAIC | 3.06 | 0.728 | 0.751 |
+| iVAE | 4.83 | 0.572 | 0.501 |
 
-Friedman χ² = 32.85, p = 1.28×10⁻⁶. Holm: NCTRL beats only iVAE
-(adjusted p = 1.4×10⁻⁶); NCTRL–LEAP (p = 0.75), NCTRL–TDRL (p = 0.32) and
-NCTRL–MOSAIC (p = 0.20) are not distinguishable. **The four
+Friedman χ² = 35.73, p = 3.3×10⁻⁷. Holm: NCTRL beats only iVAE
+(adjusted p = 5.4×10⁻⁷); NCTRL–LEAP (p = 0.83), NCTRL–TDRL (p = 0.23) and
+NCTRL–MOSAIC (p = 0.17) are not distinguishable. **The four
 temporally-aware methods form one group; iVAE is separated.** This is exactly the
 qualitative prediction of the methods' own assumptions: iVAE assumes stationary
 i.i.d. latents and has no mechanism for time.
@@ -140,13 +141,13 @@ i.i.d. latents and has no mechanism for time.
 
 | Method | Mean rank | Mean MSE | Median |
 |---|---|---|---|
-| NCTRL | 1.88 | 0.328 | 0.010 |
-| LEAP | 1.94 | 0.325 | 0.009 |
-| TDRL | 2.76 | 0.463 | 0.009 |
-| MOSAIC | 3.82 | 0.570 | 0.017 |
-| iVAE | 4.59 | 0.567 | 0.021 |
+| NCTRL | 1.89 | 0.310 | 0.009 |
+| LEAP | 2.00 | 0.307 | 0.008 |
+| TDRL | 2.83 | 0.438 | 0.008 |
+| MOSAIC | 3.67 | 0.538 | 0.017 |
+| iVAE | 4.61 | 0.536 | 0.019 |
 
-Friedman χ² = 38.26, p = 9.91×10⁻⁸; NCTRL–iVAE and NCTRL–MOSAIC survive Holm.
+Friedman χ² = 38.18, p = 1.03×10⁻⁷; NCTRL–iVAE and NCTRL–MOSAIC survive Holm.
 The ranks agree with MCC, so representation quality and downstream utility point
 the same way across suites (they do not on the grid; §4.3).
 
@@ -167,15 +168,16 @@ which strengthens rather than weakens the claim.
 
 | Panel | Best | Worst | Friedman p |
 |---|---|---|---|
-| IHDP (legacy input, being rerun) | ridge_t 2.397 | nearest_neighbour 5.475 | 1.2×10⁻¹⁰ |
+| IHDP (masked, 30 replications) | ridge_t 3.230 | catsg 7.027 | 1.9×10⁻¹⁴ |
 | ACIC (legacy input) | crn 0.311 | ganite 1.066 | 1.2×10⁻¹⁰ |
 | Twins (legacy input) | catsg 0.319 | nearest_neighbour 0.536 | 1.6×10⁻¹⁰ |
 | NEWS (legacy input) | cepae 3.432 | ganite 12.728 | 9.7×10⁻¹¹ |
 
-The ACIC, Twins and NEWS rows predate the masking fix; the IHDP rerun under the
-masked protocol is in progress (30 replications). The first replications show the
-masked ordering ridge < CRN ≈ CEPAE < nearest-neighbour < GANITE < CaTSG, i.e.
-CRN moves from last to second, but the block is not final.
+IHDP is the masked 30-replication rerun; ACIC, Twins and NEWS still predate the
+masking fix. On IHDP the masked ordering is ridge_t (rank 1.40, mean 3.230),
+then CEPAE (3.07, 4.711), CRN (3.27, 5.509), GANITE (3.47, 3.295), CaTSG (4.87,
+7.027) and nearest neighbour (4.93, 6.906). GANITE's mean is close to ridge's but
+its rank is not: it wins on few individual replications and loses badly on others.
 
 On IHDP, ridge beats every neural method (Holm p < 10⁻⁸ for all five). This is the
 opposite of the published IHDP ordering (§5) and is the signature of the outcome
@@ -190,12 +192,18 @@ constant-ATE floor has learned no heterogeneity.
 
 | Panel | Zero-effect floor | Constant-ATE floor | Best method | Beats constant-ATE |
 |---|---|---|---|---|
-| IHDP | 7.96 | 5.64 | ridge 2.40 | 87% of replications |
+| IHDP (masked, 30 replications) | 9.10 | 6.82 | ridge 3.23 | 93% of replications |
 | ACIC | 0.199 | 0.053 | crn 0.311 | 7% |
 | Twins | 0.319 | 0.319 | catsg 0.319 | 0% |
 | NEWS | 4.33 | 3.33 | cepae 3.43 | 4% |
 
 Three consequences:
+
+On IHDP with masking, the constant-ATE reference is 6.82 (mean over the 30
+replications) and the zero-effect reference 9.10; ridge beats the constant-ATE
+reference on 93% of replications, CRN on 67%, CEPAE on 53%, GANITE on 40% and
+CaTSG on 37%. So CRN does learn heterogeneity once the outcome is no longer an
+input, but only ridge does so consistently.
 
 1. **Twins is saturated.** The constant-ATE floor equals the zero-effect floor
    (0.319), because the treatment effect is nearly homogeneous across the 11 400
@@ -208,7 +216,7 @@ Three consequences:
    zero-effect predictor on average. This is a finding about the implementations,
    not about the methods' published settings.
 4. Only IHDP shows genuine heterogeneity learning, and only ridge does it
-   consistently (87% of replications).
+   consistently (93% of the masked replications; CRN 67%).
 
 ---
 
@@ -326,6 +334,24 @@ LaLonde is therefore an artefact of the leak for three of them; after the fix
 CEPAE is the best estimator on the cohort and GANITE is second, while CaTSG still
 predicts almost no effect.
 
+**IHDP, same 30 replications, masked against legacy** (√PEHE):
+
+| Method | Masked | Legacy | Δ |
+|---|---|---|---|
+| ridge T-learner | 3.230 | 3.230 | 0 |
+| GANITE | **3.295** | 5.402 | −2.11 |
+| CEPAE | 4.711 | 5.050 | −0.34 |
+| CRN | 5.509 | 6.188 | −0.68 |
+| nearest neighbour | 6.906 | 6.906 | 0 |
+| CaTSG | 7.027 | 5.001 | +2.03 |
+
+The masked ordering is ridge ≈ GANITE < CEPAE < CRN < nearest neighbour ≈ CaTSG.
+GANITE moves from fourth to a statistical tie with ridge; CaTSG moves the other
+way — its median is unchanged (2.91 versus 2.85) but a few masked replications are
+catastrophic, so the mean rises by two units. The block is a 30-replication
+corrected rerun; the full 100-replication rerun is still required for the paper's
+primary table.
+
 Masked results for all four real cohorts (ε_ATE; lower is better; single run):
 
 | Method | LaLonde | Jobs | Oregon | NHEFS |
@@ -391,6 +417,7 @@ process except Ornstein–Uhlenbeck.
 | lorenz96 (A.6) | 0.40 | 0.60 | 0.54 | 0.65 | 0.57 | NCTRL |
 | pcl (A.7) | 0.36 | 0.65 | 0.59 | 0.66 | 0.58 | NCTRL |
 | kuramoto (A.8) | 0.45 | 0.65 | 0.63 | 0.62 | 0.62 | LEAP |
+| lotka_volterra (A.9) | 0.44 | 0.72 | 0.65 | 0.69 | 0.66 | LEAP |
 | duffing (A.10) | 0.78 | 0.91 | 0.88 | 0.89 | 0.81 | LEAP |
 | fitzhugh_nagumo (A.11) | 0.73 | 0.90 | 0.89 | 0.90 | 0.81 | LEAP/NCTRL |
 | chua (A.12) | 0.54 | 0.72 | 0.64 | 0.77 | 0.64 | NCTRL |

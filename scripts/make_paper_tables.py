@@ -299,7 +299,8 @@ def write_crl_table(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
             "are a downstream-utility diagnostic, not a soundness metric; "
             "persistence and AR(1) reference rows anchor them. Bold marks the "
             "best value and every value within one standard deviation of it. "
-            "\\textcolor{red}{The table is pre-audit; see \\autoref{app:audit}.}"
+            "\\textcolor{red}{Residual caveat: the shared CRL block predates the per-method "
+            "sampler rewind described in \\autoref{app:audit}.}"
         )
         table = (
             "\\begin{table}[t]\n  \\centering\n  \\scriptsize\n"
@@ -378,8 +379,8 @@ def write_crl_summary(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         "each column. The full per-benchmark table, with all metrics and "
         "wall-clock times, is Table~\\ref{tab:exp_crl} in Appendix~\\ref{app:full_results}, and the "
         "Friedman/Nemenyi test of the ranking is Table~\\ref{tab:exp_stats}. "
-        "\\textcolor{red}{Pre-audit: the corrected generator and metrics are being rerun; see "
-        "\\autoref{app:audit}.}"
+        "\\textcolor{red}{Residual caveat: the shared CRL block predates the per-method "
+        "sampler rewind described in \\autoref{app:audit}.}"
     )
     if pending:
         caption += " \\textcolor{red}{Pending blocks (no finite MCC or incomplete seeds): " + ", ".join(pending) + ".}"
@@ -745,7 +746,7 @@ def write_stats_section(shared_dir: Path, latex_dir: Path) -> None:
   \renewcommand{\arraystretch}{1.15}
   \caption{Statistical comparison of the five temporal CRL methods over the """
         + f"{n_problems}"
-        + r"""-problem configuration grid (Section~\ref{sec:exp_protocol}). The Friedman test is the omnibus test; the Nemenyi critical difference (CD) is the smallest average-rank gap significant at $\alpha=0.05$ for this number of problems and methods. Average ranks use one as best (lower is better). \textcolor{red}{Pre-audit grid: the corrected generator (persistent latents, nonlinear mixing) and sparse-regression SHD are being rerun; see \autoref{app:audit}.}}
+        + r"""-problem configuration grid (Section~\ref{sec:exp_protocol}). The Friedman test is the omnibus test; the Nemenyi critical difference (CD) is the smallest average-rank gap significant at $\alpha=0.05$ for this number of problems and methods. Average ranks use one as best (lower is better).}
   \label{tab:exp_stats}
   \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}} l r r r r >{\raggedright\arraybackslash}p{0.42\textwidth} @{}}
     \toprule
@@ -910,9 +911,8 @@ def write_adjacent_table(outputs_dir: Path, latex_dir: Path, *, seeds: int = 10)
         "headline soundness metric (Section~\\ref{sec:experiments}). The three adjacent objects---a "
         "propagation path, a policy and an attribution---are heterogeneous, so the comparison is "
         "per-object rather than head-to-head. ``Time (s)'' is the mean$\\pm$std wall-clock training "
-        "time per run on a single NVIDIA RTX~2080~Ti. \\textcolor{red}{The LacaDM hypervolume is "
-        "pre-audit: the metric's reference corner was inverted; the corrected metric is being "
-        "rerun (see \\autoref{app:audit}).}"
+        "time per run on a single NVIDIA RTX~2080~Ti; the LacaDM hypervolume uses the corrected "
+        "maximisation reference."
     )
     table = (
         r"""\begin{table}[t]
