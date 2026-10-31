@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import os
 import time as _time
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "aggregate_rows",
@@ -100,12 +103,21 @@ def guard_resume(
         stored = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return True, ""
-    if stored.get("fingerprint") != fingerprint and not force:
-        return False, (
-            "existing rows were produced by a different configuration or code "
-            f"revision (stored code={stored.get('code_revision')}, "
-            f"current code={current['code_revision']})"
+    if stored.get("fingerprint") != fingerprint:
+        if not force:
+            return False, (
+                "existing rows were produced by a different configuration or code "
+                f"revision (stored code={stored.get('code_revision')}, "
+                f"current code={current['code_revision']})"
+            )
+        # A forced resume accepts the change; record the configuration that is
+        # actually being run, otherwise the stored metadata (and every caption
+        # derived from it) describes the previous run, not this one.
+        logger.warning(
+            "Forced resume of %s across a configuration change; rewriting the "
+            "stored config. Rows may mix protocols.", stem
         )
+        path.write_text(json.dumps(current, indent=2, default=str), encoding="utf-8")
     return True, ""
 
 

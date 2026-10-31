@@ -91,10 +91,23 @@ every fit, so every method in a block sees the same stream. After the fix NCTRL 
 0.706 both alone and after four methods, and within 0.007 of CUDA.
 
 **Consequence.** The CRL numbers in `outputs_shared/` were produced without the
-reset and share this confound. The reset changes individual cells by up to 0.05
-MCC (Duffing, seed 0, NCTRL). The statistical analysis in §4 is computed on those
-pre-reset rows and must be regenerated after the CRL rerun; the conclusions that
-depend on it are marked accordingly.
+reset and share this confound. A ten-seed Duffing rerun with the reset quantifies
+it:
+
+| Method | Reset | No reset | Δ |
+|---|---|---|---|
+| LEAP | 0.903 | 0.907 | −0.004 |
+| TDRL | 0.901 | 0.881 | +0.020 |
+| NCTRL | 0.853 | 0.892 | −0.039 |
+| MOSAIC | 0.806 | 0.806 | 0.000 |
+| iVAE | 0.760 | 0.777 | −0.016 |
+
+The largest move is 0.039 MCC (NCTRL) and TDRL/NCTRL swap adjacent ranks; the
+top (LEAP/TDRL) and bottom (iVAE) are unchanged. The reset therefore matters for
+exact reproducibility and for the validity of paired tests, but not for the
+qualitative CRL conclusions. The statistical analysis in §4 is computed on the
+pre-reset rows and must be regenerated after the CRL rerun; conclusions that
+depend on adjacent-rank order are marked accordingly.
 
 ---
 
@@ -198,6 +211,26 @@ Three consequences:
    consistently (87% of replications).
 
 ---
+
+### 4.6 Temporal CTEE: effect error versus counterfactual error
+
+PEHE (effect error) and CF MAE (counterfactual trajectory error) are different
+axes, and the two claims of CRN/CEPAE concern the second.
+
+| Benchmark | Axis | CRN | CEPAE | CaTSG | GANITE | Wu-IPTW |
+|---|---|---|---|---|---|---|
+| harmonic | √PEHE | **0.270** | 0.634 | 1.098 | 1.130 | 1.479 |
+| harmonic | CF MAE | **0.181** | 0.211 | 0.458 | 0.325 | 1.105 |
+| tumour | √PEHE | **6.416** | 6.726 | 6.653 | 7.291 | 6.840 |
+| tumour | CF MAE | 1.070 | 0.944 | **0.828** | 2.098 | 0.998 |
+| linear SEM | √PEHE | **0.110** | 1.380 | 1.053 | 1.411 | 1.444 |
+| linear SEM | CF MAE | **0.512** | 0.824 | 0.772 | 0.853 | 0.795 |
+
+CRN is best on both axes on the harmonic and linear-SEM blocks, which is what its
+counterfactual-recurrent construction predicts. On the tumour block CaTSG has the
+lower trajectory error (0.828 versus 1.070) while CRN has the lower effect error;
+this is the same inversion the paper reports at the block level, now visible at
+the metric level.
 
 ## 5. Consistency with the original papers
 

@@ -775,6 +775,16 @@ def write_stats_section(shared_dir: Path, latex_dir: Path) -> None:
     print(f"wrote {out}")
 
 
+def _panel_replications(outputs_dir: Path, dataset: str, default: int) -> int:
+    """Replication count recorded by the runner for one static panel."""
+    path = outputs_dir / f"ctee_static_{dataset}_config.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return int(payload.get("config", {}).get("replications", default))
+    except (OSError, ValueError, TypeError):
+        return default
+
+
 def write_ctee_static_table(
     outputs_dir: Path, latex_dir: Path, *, replications: int = 100
 ) -> None:
@@ -788,11 +798,15 @@ def write_ctee_static_table(
         ("nearest_neighbour_{d}", "Nearest neighbour", "baseline"),
     ]
     blocks: list[str] = []
+    counts = {
+        dataset: _panel_replications(outputs_dir, dataset, replications)
+        for dataset in CTEE_STATIC_BENCHMARKS
+    }
     for dataset, label in CTEE_STATIC_BENCHMARKS.items():
         rows = _load(outputs_dir / f"ctee_static_{dataset}.json")
         order = [(case.format(d=dataset), method, branch) for case, method, branch in order_template]
         complete = bool(rows) and all(
-            _case_complete(rows, case, replications) for case, _, _ in order
+            _case_complete(rows, case, counts[dataset]) for case, _, _ in order
         )
         if complete:
             aggregated = aggregate_rows(rows)
@@ -813,13 +827,16 @@ def write_ctee_static_table(
         else:
             blocks.append(
                 "    \\multicolumn{7}{@{}l}{\\textcolor{red}{"
-                + label + ": " + str(replications) + "-replication run pending.}} \\\\"
+                + label + ": " + str(counts[dataset]) + "-replication run pending.}} \\\\"
             )
         blocks.append("    \\cmidrule(l){1-7}")
+    count_text = ", ".join(
+        f"{label} {counts[dataset]}" for dataset, label in CTEE_STATIC_BENCHMARKS.items()
+    )
     caption = (
-        "Static counterfactual benchmarks: IHDP, ACIC 2018, Twins and News. Each of the "
-        + str(replications)
-        + " replications is a separate benchmark instance; estimators train on a disjoint "
+        "Static counterfactual benchmarks: IHDP, ACIC 2018, Twins and News (replications: "
+        + count_text
+        + "). Each replication is a separate benchmark instance; estimators train on a disjoint "
         "training split and are scored on the held-out split against the released potential "
         "means $\\mu_0,\\mu_1$ (noiseless for IHDP and News, realised for ACIC), with PEHE and $\\epsilon_{\\text{ATE}}$ for individual and "
         "marginal effects and the policy risk of the induced threshold rule (lower is better "
