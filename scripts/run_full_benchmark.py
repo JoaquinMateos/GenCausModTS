@@ -68,6 +68,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from gcmts.data.canonical_static import news_replications_available
 from gcmts.evaluation.benchmarks import (
     CRL_BENCHMARKS,
     CTEE_REAL_BENCHMARKS,
@@ -78,6 +79,16 @@ from gcmts.evaluation.benchmarks import (
 from gcmts.evaluation.progress import format_duration, read_progress
 
 LOGGER = logging.getLogger("gcmts.full")
+
+# Input file of each real cohort. Mirrors ``REAL_COHORTS`` in
+# ``scripts/run_ctee_static.py``; a cohort whose file is missing is skipped with a
+# warning instead of failing after the run has started.
+REAL_COHORT_INPUTS = {
+    "lalonde_rct": Path("data/real/nsw_mixtape.dta"),
+    "jobs_rct": Path("data/static/jobs_train.npz"),
+    "oregon_rct": Path("data/real/dataverse_files/Oregon/oregon_puf.zip"),
+    "nhefs": Path("data/real/NHEFS.csv"),
+}
 
 CRL_SUITES = list(CRL_BENCHMARKS)
 CTEE_DATASETS = ["harmonic", "tumour", "linear_sem"]
@@ -170,11 +181,21 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
             )
         )
         for dataset in CTEE_STATIC_BENCHMARKS:
+            replications = args.replications
+            if dataset == "news":
+                # The public News archive has 50 realisations, not 100.
+                available = news_replications_available(Path("data/static/news"))
+                if available < replications:
+                    LOGGER.warning(
+                        "CTEE static NEWS: %d realisations on disk; capping %d -> %d.",
+                        available, replications, available,
+                    )
+                    replications = available
             steps.append(
                 Step(
                     f"CTEE static {dataset.upper()}",
                     [py, "scripts/run_ctee_static.py", "--device", device, "--dataset", dataset,
-                     "--replications", str(args.replications), "--out-dir", "outputs"],
+                     "--replications", str(replications), "--out-dir", "outputs"],
                     progress=_progress("outputs", f"ctee_static_{dataset}"),
                 )
             )
@@ -195,6 +216,13 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
             )
         )
         for dataset in CTEE_REAL_BENCHMARKS:
+            missing = REAL_COHORT_INPUTS.get(dataset)
+            if missing is not None and not missing.exists():
+                LOGGER.warning(
+                    "SKIPPED CTEE real %s: missing input %s (see docs/RERUN_2026-10.md).",
+                    dataset, missing,
+                )
+                continue
             steps.append(
                 Step(
                     f"CTEE real {dataset}",

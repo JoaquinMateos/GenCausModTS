@@ -42,6 +42,7 @@ __all__ = [
     "dataset_exists",
     "dataset_path",
     "load_dataset",
+    "non_finite_fields",
     "read_manifest",
     "save_dataset",
 ]
@@ -158,6 +159,16 @@ def save_dataset(
     )
     _update_manifest(path.parents[1], record)
     return record
+
+
+def non_finite_fields(batch: Batch, names: tuple[str, ...] = ("x", "z")) -> list[str]:
+    """Names of the tensors in ``batch`` that contain NaN or infinite values."""
+    bad = []
+    for name in names:
+        value = getattr(batch, name, None)
+        if value is not None and not bool(torch.isfinite(value).all()):
+            bad.append(name)
+    return bad
 
 
 def load_dataset(path: str | Path) -> tuple[Batch, Batch, dict[str, Any]]:

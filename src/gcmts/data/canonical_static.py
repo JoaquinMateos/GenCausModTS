@@ -35,6 +35,7 @@ from gcmts.data.real_panels import EffectCohort
 from gcmts.data.semi_synthetic import IHDPReplication
 
 __all__ = [
+    "news_replications_available",
     "TwinsLoader",
     "NewsLoader",
     "load_jobs",
@@ -168,6 +169,22 @@ def _read_sparse_x(path: Path) -> np.ndarray:
     return np.asarray(matrix.toarray(), dtype=np.float32)
 
 
+def news_replications_available(path: str | Path) -> int:
+    """Number of consecutive News replications (``seed_1``, ``seed_2``, ...) on disk.
+
+    The public News archive ships 50 realisations, not the 100 of IHDP, so the
+    benchmark replication count must be capped with this value.
+    """
+    base = Path(path)
+    base = base if base.is_dir() else base.parent
+    count = 0
+    while (base / f"topic_doc_mean_n5000_k3477_seed_{count + 1}.csv.x").exists() and (
+        base / f"topic_doc_mean_n5000_k3477_seed_{count + 1}.csv.y"
+    ).exists():
+        count += 1
+    return count
+
+
 class NewsLoader:
     """Canonical News benchmark: real topic covariates, exact potential means.
 
@@ -196,6 +213,12 @@ class NewsLoader:
     def _one(self, index: int) -> IHDPReplication:
         base = self.path if self.path.is_dir() else self.path.parent
         seed = index + 1
+        available = news_replications_available(base)
+        if index >= available:
+            raise ValueError(
+                f"News has {available} realisations in {base}; replication {index} "
+                f"was requested. Cap the replications at {available}."
+            )
         x_path = base / f"topic_doc_mean_n5000_k3477_seed_{seed}.csv.x"
         y_path = base / f"topic_doc_mean_n5000_k3477_seed_{seed}.csv.y"
         if not x_path.exists() or not y_path.exists():

@@ -33,7 +33,13 @@ import torch
 from scipy.spatial.distance import cdist
 
 from gcmts.core import SimpleTrainer, move_batch, save_training_report
-from gcmts.data.canonical_static import CPSLoader, NewsLoader, TwinsLoader, load_jobs
+from gcmts.data.canonical_static import (
+    CPSLoader,
+    NewsLoader,
+    TwinsLoader,
+    load_jobs,
+    news_replications_available,
+)
 from gcmts.data.real_panels import load_lalonde, load_nhefs, load_oregon
 from gcmts.data.semi_synthetic import (
     ACICLoader,
@@ -75,6 +81,8 @@ REAL_COHORTS: dict[str, tuple[str, Callable[[Path], object]]] = {
     "nhefs": ("NHEFS.csv", load_nhefs),
 }
 _REFERENCE_ATE: dict[str, float] = {}
+
+BASELINE_NAMES = ("ridge_t", "nearest_neighbour")
 
 METHODS: dict[str, tuple[Callable[[IHDPGenerator], BaseEffectEstimator], int, str]] = {
     "catsg": (
@@ -125,6 +133,13 @@ def _load_replication(dataset: str, index: int, directory: Path) -> Replication:
         loader = IHDPLoader(train_file, test_file)
         return loader.replication(index, split="test")
     if dataset in {"twins", "news", "cps"}:
+        if dataset == "news":
+            available = news_replications_available(directory / "news")
+            if index >= available:
+                raise ValueError(
+                    f"News has {available} realisations on disk; replication {index} "
+                    f"was requested. Run with --replications {available} or fewer."
+                )
         loader = {
             "twins": lambda: TwinsLoader(
                 directory / "twins.csv.gz", replications=index + 1, seed=0
@@ -489,7 +504,7 @@ def main() -> int:
         )
         return 2
     done_replications = {row.get("seed") for row in rows}
-    total = args.replications * len(methods)
+    total = args.replications * (len(methods) + len(BASELINE_NAMES))
     progress = ProgressTracker(
         args.out_dir / f"{stem}_progress.json",
         f"CTEE static {args.dataset}",
@@ -507,33 +522,38 @@ def main() -> int:
         tags=["ctee", "static", args.dataset],
         progress=progress,
     )
-    for index in range(args.replications):
-        if index in done_replications:
-            continue
-        results = run_replication(
-            args.dataset,
-            index,
-            methods,
-            args.device,
-            args.batch_size,
-            args.out_dir,
-            data_dir,
-            save_curves=False,
-            epochs_scale=args.epochs_scale,
-        )
-        rows.extend(asdict(result) for result in results)
-        save_rows(rows, args.out_dir, stem=f"ctee_static_{args.dataset}")
-        progress.advance(len(results))
-        for result in results:
-            step.log_run(
-                method=result.method,
-                iteration=index,
-                metrics={
-                    "pehe": result.pehe,
-                    "ate_error": result.ate_error,
-                    "policy_risk": result.policy_risk,
-                },
+    try:
+        for index in range(args.replications):
+            if index in done_replications:
+                continue
+            results = run_replication(
+                args.dataset,
+                index,
+                methods,
+                args.device,
+                args.batch_size,
+                args.out_dir,
+                data_dir,
+                save_curves=False,
+                epochs_scale=args.epochs_scale,
             )
+            rows.extend(asdict(result) for result in results)
+            save_rows(rows, args.out_dir, stem=f"ctee_static_{args.dataset}")
+            progress.advance(len(results))
+            for result in results:
+                step.log_run(
+                    method=result.method,
+                    iteration=index,
+                    metrics={
+                        "pehe": result.pehe,
+                        "ate_error": result.ate_error,
+                        "policy_risk": result.policy_risk,
+                    },
+                )
+    except Exception:
+        progress.crash()
+        step.close(status="failed")
+        raise
     progress.finish()
     step.close()
     aggregated = aggregate_rows(rows)

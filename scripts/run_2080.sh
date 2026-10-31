@@ -59,6 +59,8 @@ uv run --no-sync python scripts/generate_synthetic_data.py \
   --suites npvar npvar_linear npvar_hard cartpole causal3d lorenz lorenz96 pcl \
            kuramoto lotka_volterra duffing fitzhugh_nagumo chua van_der_pol \
            pendulum mountain_car varma ou voronoi sde child
+# Gate: every pool must be finite before any method is trained on it.
+uv run --no-sync python scripts/verify_outputs.py --pools-only
 
 echo "== 5/6 full benchmark (${SEEDS} seeds, ${REPLICATIONS} replications, ${JOBS} workers) =="
 # The orchestrator writes outputs/ and outputs_shared/ and regenerates every

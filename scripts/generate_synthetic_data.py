@@ -38,7 +38,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import run_crl_shared as shared  # noqa: E402
 
-from gcmts.data.synthetic_store import dataset_exists, dataset_path, save_dataset  # noqa: E402
+from gcmts.data.synthetic_store import (  # noqa: E402
+    dataset_exists,
+    dataset_path,
+    load_dataset,
+    non_finite_fields,
+    save_dataset,
+)
 from gcmts.evaluation.progress import ProgressTracker  # noqa: E402
 
 logger = logging.getLogger("gcmts.generate_data")
@@ -69,6 +75,16 @@ def _assert_finite(suite: shared.Suite, seed: int, split: str, batch: object) ->
                 f"Non-finite {name} in the {split} pool for suite '{suite.name}' "
                 f"seed {seed}. Fix the generator before writing the dataset."
             )
+
+
+def _existing_is_usable(out_dir: Path, suite: str, seed: int) -> bool:
+    """True when a stored pool exists and is finite.
+
+    A pool written before the finiteness gate can be non-finite; skipping it
+    would make every later run train on NaNs, so it is regenerated instead.
+    """
+    train, eval_batch, _ = load_dataset(dataset_path(out_dir, suite, seed))
+    return not non_finite_fields(train) and not non_finite_fields(eval_batch)
 
 
 def generate_one(
@@ -150,9 +166,13 @@ def main() -> int:
     for suite in specs:
         for seed in range(args.seeds):
             if dataset_exists(args.out_dir, suite.name, seed) and not args.force:
-                logger.info("skip %s seed %d (already generated)", suite.name, seed)
-                progress.advance()
-                continue
+                if _existing_is_usable(args.out_dir, suite.name, seed):
+                    logger.info("skip %s seed %d (already generated)", suite.name, seed)
+                    progress.advance()
+                    continue
+                logger.warning(
+                    "regenerating %s seed %d: the stored pool is non-finite", suite.name, seed
+                )
             path = generate_one(
                 suite, seed,
                 train_size=args.train_size, eval_size=args.eval_size, out_dir=args.out_dir,

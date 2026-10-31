@@ -340,7 +340,13 @@ def write_crl_summary(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
     for key, _ in temporal:
         rows = _load(shared_dir / f"crl_shared_{key}.json")
         aggregated[key] = aggregate_rows(rows) if rows else {}
-        complete[key] = bool(rows) and all(_case_complete(rows, m, seeds) for m in methods)
+        # A block is reportable only when every method has its full seed schedule
+        # *and* a finite MCC; an all-NaN block (e.g. a diverged suite) is pending.
+        complete[key] = bool(rows) and all(
+            _case_complete(rows, m, seeds) and "mcc" in aggregated[key].get(m, {})
+            for m in methods
+        )
+    pending = [bench.label for key, bench in temporal if not complete[key]]
 
     ranks: dict[str, list[int]] = {m: [] for m in methods}
     for key, _ in temporal:
@@ -375,6 +381,8 @@ def write_crl_summary(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         "\\textcolor{red}{Pre-audit: the corrected generator and metrics are being rerun; see "
         "\\autoref{app:audit}.}"
     )
+    if pending:
+        caption += " \\textcolor{red}{Pending blocks (no finite MCC or incomplete seeds): " + ", ".join(pending) + ".}"
     table = (
         r"""\begin{table}[t]
   \centering

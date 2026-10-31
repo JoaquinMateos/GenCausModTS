@@ -22,7 +22,17 @@ from gcmts.typing import Batch
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["AdaptiveScheduler", "EMA", "SimpleTrainer", "move_batch"]
+__all__ = [
+    "AdaptiveScheduler",
+    "EMA",
+    "SimpleTrainer",
+    "TrainingDivergedError",
+    "move_batch",
+]
+
+
+class TrainingDivergedError(RuntimeError):
+    """Raised when training produces no usable loss (see ``SimpleTrainer``)."""
 
 #: Keys a training loss may read. CRL methods use ``x``/``context``; the
 #: static--dynamic methods (SYNC/DANN/VREx) also read ``outcome`` and ``domain``.
@@ -225,6 +235,10 @@ def _subset_batch(batch: Batch, indices: Tensor) -> Batch:
 
 
 class SimpleTrainer(BaseTrainer):
+    # Consecutive non-finite steps tolerated before the run is declared diverged.
+    # A healthy run skips at most a handful of steps; a sustained streak means the
+    # data or parameters are non-finite and every later step would be skipped too.
+    max_consecutive_nonfinite: int = 200
     """Plain PyTorch training loop with scheduling, validation and logging.
 
     Args:
@@ -459,6 +473,7 @@ class SimpleTrainer(BaseTrainer):
         history: dict[str, list[float]] = defaultdict(list)
         best_val = float("inf")
         best_epoch = 0
+        nonfinite_streak = 0
         best_state: dict[str, Tensor] | None = None
         stopped_epoch: int | None = None
 
@@ -513,10 +528,17 @@ class SimpleTrainer(BaseTrainer):
                         losses = model.loss(outputs, batch)
                         loss = losses["loss"]
                     if not torch.isfinite(loss):
+                        nonfinite_streak += 1
                         logger.warning("Non-finite loss at epoch %d; skipping step.", epoch)
+                        if nonfinite_streak > self.max_consecutive_nonfinite:
+                            raise TrainingDivergedError(
+                                f"{nonfinite_streak} consecutive non-finite losses "
+                                f"(epoch {epoch}); training has diverged"
+                            )
                         optimiser.zero_grad(set_to_none=True)
                         profiler.end_step()
                         continue
+                    nonfinite_streak = 0
                     with phase("backward"):
                         optimiser.zero_grad(set_to_none=True)
                         scaler.scale(loss).backward()  # type: ignore[no-untyped-call]
@@ -629,6 +651,10 @@ class SimpleTrainer(BaseTrainer):
             if prefetcher is not None:
                 prefetcher.close()
 
+        if val_batch is not None and not math.isfinite(best_val):
+            raise TrainingDivergedError(
+                "validation loss was never finite; training has diverged"
+            )
         if self.restore_best_weights and best_state is not None:
             model.load_state_dict(best_state)
         if self._ema is not None:

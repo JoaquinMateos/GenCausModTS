@@ -154,6 +154,11 @@ class ProgressTracker:
         self._touch()
         return self
 
+    def crash(self) -> ProgressTracker:
+        """Record that the step aborted outside any single run (one error, not finished)."""
+        self.errors += 1
+        return self.finish(status="failed")
+
     def finish(self, *, status: str = "finished") -> ProgressTracker:
         self.finished = status == "finished"
         self.updated_at = time.time()
