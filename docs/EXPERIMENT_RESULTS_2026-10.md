@@ -386,17 +386,21 @@ method silently ran all five. Fixed and used throughout this document.
 
 ## 7. What remains
 
-1. **Static rerun with masking** (IHDP, ACIC, Twins, NEWS, LaLonde/NHEFS/Oregon).
-   This is required before any static-CATE number enters the paper.
-2. **CRL rerun with the pool reset.** The current CRL table has an order
-   confound; the reset changes cells by up to 0.05 MCC.
-3. **A.9 Lotka–Volterra** (running) and its inclusion in the 18-suite statistics.
-4. **Grid rerun?** The grid reproduces its published contrast exactly, but it was
-   produced without the pool reset. The reset effect on the grid is unknown.
-5. **Wall-clock times.** All `seconds` are NaN under parallel runs; a sequential
-   rerun with `--keep-timing` is needed for the Time columns.
-6. **Rendered-image Causal3DIdent** and the remaining II.D/adjacent
-   implementations are still unimplemented.
+1. **Static rerun with masking for ACIC, Twins and News.** IHDP (30
+   replications) and the four real cohorts are final under the masked protocol.
+   ACIC and Twins need 100 masked replications each and News 50; on the M4 this
+   is roughly 25 GPU-hours.
+2. **CRL rerun with the pool reset.** The reset changes means by at most 0.039 MCC
+   and can swap adjacent ranks; the qualitative grouping is stable, but the
+   paired tests in the paper are not exactly paired until the block is rerun.
+   A.9 is already post-reset; the other 17 suites are not.
+3. **Grid rerun with the reset?** The grid reproduces its published contrast
+   exactly on the corrected generator, but it predates the reset. The reset effect
+   on the grid is unknown (it is bounded by the shared-suite measurement).
+4. **Wall-clock times.** All `seconds` are NaN under parallel runs; a sequential
+   rerun with `--keep-timing` is needed for the Time columns of the paper.
+5. **Rendered-image Causal3DIdent**, the remaining II.D/adjacent implementations
+   and the optional CPS panel remain unimplemented.
 
 ---
 
