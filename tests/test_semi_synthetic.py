@@ -88,11 +88,15 @@ def test_ihdp_generator_batches_and_rescaling() -> None:
     assert batch.outcome is not None and batch.outcome.shape == (32,)
     full = generator.sample_all()
     assert full.x.shape[0] == replication.x.shape[0]
-    # Counterfactual and factual outcomes differ only in the last coordinate.
-    factual = full.x[:, 0, :-1]
+    # The outcome is masked in the input and carried as the supervised target.
+    assert full.target is not None
+    assert torch.all(full.x[..., -1] == 0)
+    assert torch.allclose(full.target[:, 0, -1], full.outcome)
+    # Counterfactual and factual targets differ only in the last coordinate.
+    factual = full.target[:, 0, :-1]
     counterfactual = full.counterfactual[:, 0, :-1]
     assert torch.allclose(factual, counterfactual)
     # Rescaling recovers the original outcome units.
     raw = torch.from_numpy(replication.yf).float()
-    assert torch.allclose(generator.rescale_outcome(full.x[:, 0, -1]), raw, atol=1e-4)
+    assert torch.allclose(generator.rescale_outcome(full.target[:, 0, -1]), raw, atol=1e-4)
     assert generator.outcome_dim == 25

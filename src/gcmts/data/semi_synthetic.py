@@ -454,11 +454,17 @@ class IHDPGenerator(BaseDataGenerator):
         seed: int | None = None,
         standardize: bool = True,
         reference: IHDPGenerator | None = None,
+        mask_outcome: bool = True,
     ) -> None:
         covariates = replication.x.astype(np.float32)
         super().__init__(observed_dim=covariates.shape[1] + 1, horizon=1)
         self.replication = replication
         self.standardize = standardize
+        # The outcome must not be an input feature: the static CATE task is
+        # ``P(Y | X, A)``. Masking the outcome coordinate keeps the state shape
+        # (and therefore every method's architecture) while making the outcome a
+        # target (``batch.target``) rather than a leak.
+        self.mask_outcome = mask_outcome
         self.rng = torch.Generator().manual_seed(seed or 0)
         x = torch.from_numpy(covariates).float()
         yf = torch.from_numpy(replication.yf).float()
@@ -493,11 +499,16 @@ class IHDPGenerator(BaseDataGenerator):
         covariates = self.covariates[index]
         factual = self.outcomes[index]
         counterfactual = self.counterfactual_outcomes[index]
-        x = torch.cat([covariates, factual.unsqueeze(-1)], dim=-1).unsqueeze(1)
+        target = torch.cat([covariates, factual.unsqueeze(-1)], dim=-1).unsqueeze(1)
         x_cf = torch.cat([covariates, counterfactual.unsqueeze(-1)], dim=-1).unsqueeze(1)
         action = self.treatment[index].reshape(-1, 1, 1)
+        x = target
+        if self.mask_outcome:
+            x = target.clone()
+            x[..., -1] = 0.0
         return Batch(
             x=x,
+            target=target,
             context={"A": action},
             counterfactual=x_cf,
             outcome=factual,

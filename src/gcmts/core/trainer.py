@@ -37,7 +37,7 @@ class TrainingDivergedError(RuntimeError):
 #: Keys a training loss may read. CRL methods use ``x``/``context``; the
 #: static--dynamic methods (SYNC/DANN/VREx) also read ``outcome`` and ``domain``.
 #: ``z``, ``adjacency`` and ``counterfactual`` remain evaluation-only.
-TRAIN_BATCH_KEYS = frozenset({"x", "context", "outcome", "domain"})
+TRAIN_BATCH_KEYS = frozenset({"x", "context", "outcome", "domain", "target"})
 
 
 def _env_flag(name: str) -> bool:
@@ -100,6 +100,8 @@ def move_batch(
         batch.outcome = batch.outcome.to(device)
     if batch.domain is not None and want("domain"):
         batch.domain = batch.domain.to(device)
+    if batch.target is not None and want("target"):
+        batch.target = batch.target.to(device)
     return batch
 
 

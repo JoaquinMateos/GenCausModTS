@@ -623,6 +623,9 @@ def _run(
     # skips ``make_generator`` and would otherwise initialise from the ambient
     # RNG, making pool runs non-reproducible and incomparable to fresh runs.
     torch.manual_seed(seed)
+    if hasattr(source, "reset"):
+        # Same batch stream for every method in the block (see PooledGenerator.reset).
+        source.reset()
     model = factory()
     trainer = SimpleTrainer(
         max_epochs=epochs,
@@ -919,6 +922,8 @@ def configure_logging(out_dir: Path, name: str) -> None:
 def run_suite(args: argparse.Namespace) -> int:
     suite = SUITES[args.suite]
     methods = _methods_for(suite, args.epochs_scale)
+    if args.only:
+        methods = [m for m in methods if m[0] in set(args.only)]
     stem = f"crl_shared_{suite.name}"
     logger.info(
         "=== %s | methods: %s | seeds: %d | epochs_scale: %.2f ===",

@@ -167,6 +167,9 @@ class GANITE(BaseEffectEstimator):
         action = self._actions(batch)
         batch_size, time, dim = batch.x.shape
         flat_x = batch.x.reshape(batch_size * time, dim)
+        target = (batch.target if batch.target is not None else batch.x).reshape(
+            batch_size * time, dim
+        )
         flat_action = action.reshape(batch_size * time, self.treatment_dim)
         arm, index = self._one_hot(flat_action)
         noise = torch.randn(flat_x.shape[0], self.noise_dim, device=flat_x.device)
@@ -179,9 +182,9 @@ class GANITE(BaseEffectEstimator):
         generated_arms = generated.reshape(flat_x.shape[0], self.n_arms, self.observed_dim)
         g_supervised = nn.functional.mse_loss(
             generated_arms[torch.arange(flat_x.shape[0], device=flat_x.device), index],
-            flat_x,
+            target,
         )
-        potential = self._potential(generated, flat_x, index)
+        potential = self._potential(generated, target, index)
         completed = potential.reshape(flat_x.shape[0], -1)
         # The discriminator sees the completed vector through a gradient
         # reversal, so D_G minimises the classification loss while G maximises
@@ -198,11 +201,13 @@ class GANITE(BaseEffectEstimator):
             "action": flat_action,
             "index": index,
             "flat_x": flat_x,
+            "flat_target": target,
             "noise": noise,
         }
 
     def loss(self, outputs: dict[str, Tensor], batch: Batch) -> dict[str, Tensor]:
         flat_x = outputs["flat_x"]
+        flat_target = outputs["flat_target"]
         index = outputs["index"]
         noise = torch.randn(flat_x.shape[0], self.noise_dim, device=flat_x.device)
         generated_ite = cast(
@@ -214,7 +219,7 @@ class GANITE(BaseEffectEstimator):
         )
         ite_supervised = nn.functional.mse_loss(
             generated_ite_arms[torch.arange(flat_x.shape[0], device=flat_x.device), index],
-            flat_x,
+            flat_target,
         )
         real = outputs["potential"].detach().reshape(flat_x.shape[0], -1)
         fake = generated_ite

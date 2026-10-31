@@ -124,7 +124,8 @@ class CEPAE(BaseEffectEstimator):
         return {"z": z, "recon": recon, "action": action}
 
     def loss(self, outputs: dict[str, Tensor], batch: Batch) -> dict[str, Tensor]:
-        reconstruction = nn.functional.mse_loss(outputs["recon"], batch.x)
+        target = batch.target if batch.target is not None else batch.x
+        reconstruction = nn.functional.mse_loss(outputs["recon"], target)
         flat = outputs["z"].reshape(-1, self.z_dim)
         # Eq. (10): sum of the batch standard deviations of the latent
         # coordinates.  This is the paper's stable surrogate for S(Z).

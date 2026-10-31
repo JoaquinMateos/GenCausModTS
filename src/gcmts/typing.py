@@ -55,6 +55,7 @@ class Batch:
     instantaneous_adjacency: Tensor | None = None  # ground-truth (d, d) same-time graph
     counterfactual: Tensor | None = None  # ground-truth counterfactual (B, T, D)
     outcome: Tensor | None = None  # ground-truth scalar outcome / target (B, ...)
+    target: Tensor | None = None  # supervised target when ``x`` is masked (B, T, D)
     domain: Tensor | None = None  # ground-truth domain/regime index (B,) or (B, T)
 
     def __post_init__(self) -> None:

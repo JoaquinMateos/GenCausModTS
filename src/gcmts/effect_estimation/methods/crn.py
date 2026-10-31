@@ -232,22 +232,23 @@ class CRN(BaseEffectEstimator):
         }
 
     def loss(self, outputs: dict[str, Tensor], batch: Batch) -> dict[str, Tensor]:
-        recon = gaussian_reconstruction_nll(outputs["recon"], batch.x, self.obs_logvar)
-        target = outputs["action"].reshape(-1, self.treatment_dim)
+        target = batch.target if batch.target is not None else batch.x
+        recon = gaussian_reconstruction_nll(outputs["recon"], target, self.obs_logvar)
+        action_target = outputs["action"].reshape(-1, self.treatment_dim)
         adversarial = nn.functional.binary_cross_entropy_with_logits(
-            outputs["action_logits"], target
+            outputs["action_logits"], action_target
         )
         total = recon + self.adversarial_weight * adversarial
         decoder_loss = torch.zeros((), device=batch.x.device)
         if outputs.get("decoded") is not None:
             split = max(1, batch.x.shape[1] // 4)
             decoder_loss = gaussian_reconstruction_nll(
-                outputs["decoded"], batch.x[:, split:], self.obs_logvar
+                outputs["decoded"], target[:, split:], self.obs_logvar
             )
             total = total + decoder_loss
         if outputs.get("static") is not None:
             static_loss = gaussian_reconstruction_nll(
-                outputs["static"], batch.x[:, 0], self.obs_logvar
+                outputs["static"], target[:, 0], self.obs_logvar
             )
             total = total + static_loss
         else:

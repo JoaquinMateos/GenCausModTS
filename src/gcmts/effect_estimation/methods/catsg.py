@@ -227,12 +227,15 @@ class CaTSG(BaseEffectEstimator):
                 f"CaTSG was built for horizon={self.horizon} but received T={batch.x.shape[1]}."
             )
         action = self._actions(batch)
-        flat = batch.x.reshape(batch.x.shape[0], -1)
-        env_weights = self._env_weights(flat, action)
-        step = torch.randint(0, self.n_steps, (flat.shape[0],), device=flat.device)
+        observed = batch.x.reshape(batch.x.shape[0], -1)
+        target = (batch.target if batch.target is not None else batch.x).reshape(
+            batch.x.shape[0], -1
+        )
+        env_weights = self._env_weights(observed, action)
+        step = torch.randint(0, self.n_steps, (target.shape[0],), device=target.device)
         abar = self.alpha_bar[step].unsqueeze(-1)
-        noise = torch.randn_like(flat)
-        noisy = torch.sqrt(abar) * flat + torch.sqrt(1.0 - abar) * noise
+        noise = torch.randn_like(target)
+        noisy = torch.sqrt(abar) * target + torch.sqrt(1.0 - abar) * noise
         eps_pred = self._eps(noisy, step, action, env_weights)
         # Environment-balancing term: keep the bank diverse and avoid a
         # collapsed posterior (the paper's environment-bank regulariser).

@@ -69,7 +69,8 @@ class PooledGenerator(BaseDataGenerator):
         self.horizon = generator.horizon
         self._pool: Batch | None = None
         self._device = torch.device(device) if device is not None else None
-        self._rng = torch.Generator().manual_seed(resample_seed)
+        self.resample_seed = int(resample_seed)
+        self._rng = torch.Generator().manual_seed(self.resample_seed)
 
     @classmethod
     def from_batch(
@@ -87,9 +88,20 @@ class PooledGenerator(BaseDataGenerator):
         instance.horizon = int(batch.x.shape[1])
         instance._pool = batch
         instance._device = torch.device(device) if device is not None else None
-        instance._rng = torch.Generator().manual_seed(resample_seed)
+        instance.resample_seed = int(resample_seed)
+        instance._rng = torch.Generator().manual_seed(instance.resample_seed)
         instance._move_pool()
         return instance
+
+    def reset(self) -> PooledGenerator:
+        """Rewind the minibatch sampler to its initial state.
+
+        Every method must see the same batch stream for a fair comparison: the
+        sampler is shared within a (suite, seed) block, so without a reset a
+        method's data order would depend on how many methods ran before it.
+        """
+        self._rng = torch.Generator().manual_seed(self.resample_seed)
+        return self
 
     def to(self, device: torch.device | str) -> PooledGenerator:
         """Keep the pool resident on ``device`` (idempotent).

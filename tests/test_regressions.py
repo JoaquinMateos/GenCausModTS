@@ -283,3 +283,38 @@ def test_generator_regenerates_stored_nonfinite_pool(tmp_path: Path) -> None:
                  max_lag=1, generator="test")
     assert _existing_is_usable(tmp_path, "ok", 0)
     assert not _existing_is_usable(tmp_path, "bad", 0)
+
+
+def test_pool_reset_replays_the_same_batch_stream() -> None:
+    from gcmts.data.pool import PooledGenerator
+
+    batch = Batch(x=torch.arange(64, dtype=torch.float32).reshape(32, 1, 2))
+    pool = PooledGenerator.from_batch(batch, resample_seed=3)
+    first = [pool.sample(8).x.clone() for _ in range(3)]
+    pool.reset()
+    replay = [pool.sample(8).x.clone() for _ in range(3)]
+    for a, b in zip(first, replay, strict=True):
+        assert torch.equal(a, b)
+    # Without a reset the stream has advanced.
+    assert not torch.equal(first[0], pool.sample(8).x)
+
+
+def test_static_models_never_see_the_factual_outcome() -> None:
+    """The outcome coordinate of the input is zero; the target carries it."""
+    from gcmts.data.semi_synthetic import IHDPGenerator, IHDPReplication
+
+    rng = np.random.default_rng(0)
+    n = 64
+    rep = IHDPReplication(
+        x=rng.normal(size=(n, 4)).astype(np.float32),
+        t=rng.integers(0, 2, n),
+        yf=rng.normal(size=n).astype(np.float32),
+        ycf=rng.normal(size=n).astype(np.float32),
+        mu0=rng.normal(size=n).astype(np.float32),
+        mu1=rng.normal(size=n).astype(np.float32),
+    )
+    batch = IHDPGenerator(rep, seed=0).sample_all()
+    assert torch.all(batch.x[..., -1] == 0)
+    assert torch.allclose(batch.target[:, 0, -1], batch.outcome)
+    legacy = IHDPGenerator(rep, seed=0, mask_outcome=False).sample_all()
+    assert torch.allclose(legacy.x[:, 0, -1], legacy.outcome)
