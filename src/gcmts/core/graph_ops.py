@@ -258,6 +258,9 @@ def estimate_instantaneous_adjacency(
     """
     if z.ndim != 3:
         raise ValueError("estimate_instantaneous_adjacency expects z of shape (B, T, d).")
+    # The support estimate is a NumPy regression; move to CPU before the
+    # float64 cast, which MPS does not support.
+    z = z.detach().cpu()
     batch, time, dim = z.shape
     p = max(1, int(max_lag))
     if time <= p:

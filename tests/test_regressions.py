@@ -332,3 +332,13 @@ def test_child_kl_is_trajectory_level() -> None:
     expected = (extras["log_q"].sum(dim=1) - extras["prior"]).mean()
     assert torch.allclose(loss["kl"], expected, atol=1e-5)
     assert torch.isfinite(loss["kl"])
+
+
+@pytest.mark.skipif(not torch.backends.mps.is_available(), reason="needs MPS")
+def test_instantaneous_adjacency_accepts_mps_input() -> None:
+    from gcmts.core.graph_ops import estimate_instantaneous_adjacency
+
+    z = torch.randn(16, 8, 3, device="mps")
+    adjacency = estimate_instantaneous_adjacency(z)
+    assert adjacency.device.type == "cpu"
+    assert adjacency.shape == (3, 3)
