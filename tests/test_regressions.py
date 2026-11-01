@@ -318,3 +318,17 @@ def test_static_models_never_see_the_factual_outcome() -> None:
     assert torch.allclose(batch.target[:, 0, -1], batch.outcome)
     legacy = IHDPGenerator(rep, seed=0, mask_outcome=False).sample_all()
     assert torch.allclose(legacy.x[:, 0, -1], legacy.outcome)
+
+
+def test_child_kl_is_trajectory_level() -> None:
+    """The KL is sum_t log q_t - log p(trajectory), not a per-step broadcast."""
+    from gcmts.causal_representation_learning.methods.child import CHiLD
+
+    model = CHiLD(observed_dim=6, latent_dim=3, n_layers=2)
+    batch = Batch(x=torch.randn(4, 8, 6))
+    outputs = model.forward(batch)
+    loss = model.loss(outputs, batch)
+    extras = outputs.extras or {}
+    expected = (extras["log_q"].sum(dim=1) - extras["prior"]).mean()
+    assert torch.allclose(loss["kl"], expected, atol=1e-5)
+    assert torch.isfinite(loss["kl"])

@@ -210,8 +210,11 @@ class CHiLD(BaseCausalRepresentationLearner):
         )
         extras = outputs.extras or {}
         log_q = extras["log_q"]
-        prior = extras["prior"].unsqueeze(1)
-        kl = (log_q - prior).mean()
+        prior = extras["prior"]
+        # ``log_q`` is per timestep (B, T) and ``prior`` is already summed over
+        # the trajectory (B,); the KL is the trajectory-level difference, not a
+        # per-step broadcast of the whole prior (which made the term negative).
+        kl = (log_q.sum(dim=1) - prior).mean()
         total = recon + self.kl_weight * kl
         return {"loss": total, "recon": recon, "kl": kl}
 
