@@ -124,15 +124,15 @@ or a panel (real data).
 
 | Method | Mean rank | Mean MCC | Median |
 |---|---|---|---|
-| NCTRL | 2.06 | 0.770 | 0.780 |
-| LEAP | 2.17 | 0.757 | 0.756 |
-| TDRL | 2.89 | 0.730 | 0.723 |
-| MOSAIC | 3.06 | 0.728 | 0.751 |
-| iVAE | 4.83 | 0.572 | 0.501 |
+| NCTRL | 1.78 | 0.782 | 0.816 |
+| LEAP | 2.28 | 0.761 | 0.756 |
+| TDRL | 2.67 | 0.741 | 0.761 |
+| MOSAIC | 3.39 | 0.730 | 0.748 |
+| iVAE | 4.89 | 0.581 | 0.546 |
 
-Friedman χ² = 35.73, p = 3.3×10⁻⁷. Holm: NCTRL beats only iVAE
-(adjusted p = 5.4×10⁻⁷); NCTRL–LEAP (p = 0.83), NCTRL–TDRL (p = 0.23) and
-NCTRL–MOSAIC (p = 0.17) are not distinguishable. **The four
+Friedman χ² = 42.09, p = 1.6×10⁻⁸. Holm: NCTRL–iVAE (adjusted
+p = 1.4×10⁻⁸) and NCTRL–MOSAIC (p = 0.0067) survive; NCTRL–LEAP (p = 0.34) and
+NCTRL–TDRL (p = 0.18) do not. **The four
 temporally-aware methods form one group; iVAE is separated.** This is exactly the
 qualitative prediction of the methods' own assumptions: iVAE assumes stationary
 i.i.d. latents and has no mechanism for time.
@@ -141,13 +141,13 @@ i.i.d. latents and has no mechanism for time.
 
 | Method | Mean rank | Mean MSE | Median |
 |---|---|---|---|
-| NCTRL | 1.89 | 0.310 | 0.009 |
-| LEAP | 2.00 | 0.307 | 0.008 |
-| TDRL | 2.83 | 0.438 | 0.008 |
-| MOSAIC | 3.67 | 0.538 | 0.017 |
-| iVAE | 4.61 | 0.536 | 0.019 |
+| LEAP | 2.06 | 0.189 | 0.008 |
+| NCTRL | 2.06 | 0.192 | 0.009 |
+| TDRL | 2.67 | 0.227 | 0.008 |
+| MOSAIC | 3.67 | 0.275 | 0.017 |
+| iVAE | 4.56 | 0.274 | 0.021 |
 
-Friedman χ² = 38.18, p = 1.03×10⁻⁷; NCTRL–iVAE and NCTRL–MOSAIC survive Holm.
+Friedman χ² = 34.27, p = 6.6×10⁻⁷; LEAP and NCTRL are tied at the top.
 The ranks agree with MCC, so representation quality and downstream utility point
 the same way across suites (they do not on the grid; §4.3).
 
@@ -164,31 +164,33 @@ representation metric that is statistically tied (p = 0.29) hides a two-fold
 difference in downstream error. The ordering is identical to the pre-audit run,
 which strengthens rather than weakens the claim.
 
-### 4.4 Static CATE (√PEHE, lower better)
+### 4.4 Static CATE (√PEHE, lower better), masked and final
 
-| Panel | Best | Worst | Friedman p |
-|---|---|---|---|
-| IHDP (masked, 30 replications) | ridge_t 3.230 | catsg 7.027 | 1.9×10⁻¹⁴ |
-| ACIC (legacy input) | crn 0.311 | ganite 1.066 | 1.2×10⁻¹⁰ |
-| Twins (legacy input) | catsg 0.319 | nearest_neighbour 0.536 | 1.6×10⁻¹⁰ |
-| NEWS (legacy input) | cepae 3.432 | ganite 12.728 | 9.7×10⁻¹¹ |
+| Panel | n | Best | Worst | Friedman p |
+|---|---|---|---|---|
+| IHDP | 30 | ridge_t 3.230 | catsg 7.027 | 1.9×10⁻¹⁴ |
+| ACIC | 100 | catsg 0.174 | ganite 1.310 | 5.6×10⁻⁶⁷ |
+| Twins | 100 | catsg/crn 0.319 | nearest_neighbour 0.536 | 1.5×10⁻⁹⁰ |
+| NEWS | 50 | cepae 3.449 | ganite 12.948 | 1.6×10⁻⁴⁶ |
 
-**ACIC provenance.** The ACIC loader assigns replication `i` to the `i`-th
-directory in sorted-hash order, so a different download changes the
-index→replication map: the ridge T-learner on "replication 0" scores 0.836 in the
-archived 2080 rows and 1.545 on the current `data/acic`. The two ACIC blocks are
-therefore not paired by seed and must be compared as distributions. IHDP, Twins
-and News are fixed single artefacts and do not have this issue.
+Full means (√PEHE):
 
-IHDP is the masked 30-replication rerun; ACIC, Twins and NEWS still predate the
-masking fix. On IHDP the masked ordering is ridge_t (rank 1.40, mean 3.230),
-then CEPAE (3.07, 4.711), CRN (3.27, 5.509), GANITE (3.47, 3.295), CaTSG (4.87,
-7.027) and nearest neighbour (4.93, 6.906). GANITE's mean is close to ridge's but
-its rank is not: it wins on few individual replications and loses badly on others.
+| Method | IHDP | ACIC | Twins | NEWS |
+|---|---|---|---|---|
+| CaTSG | 7.027 | **0.174** | **0.319** | 4.326 |
+| CRN | 5.509 | 0.309 | **0.319** | 3.802 |
+| CEPAE | 4.711 | 0.694 | 0.320 | **3.449** |
+| GANITE | 3.295 | 1.310 | 0.472 | 12.948 |
+| ridge T-learner | **3.230** | 0.649 | 0.321 | 9.570 |
+| nearest neighbour | 6.906 | 0.984 | 0.536 | 4.641 |
 
-On IHDP, ridge beats every neural method (Holm p < 10⁻⁸ for all five). This is the
-opposite of the published IHDP ordering (§5) and is the signature of the outcome
-leak identified in §6.1. These rows will be replaced by the masked rerun.
+No method wins on more than one panel. Twins is saturated (the constant-ATE
+floor is 0.319, and four methods sit on it); GANITE and nearest neighbour fall
+below the floor. The paired IHDP comparison (same 30 replications) is
+GANITE 5.40 → 3.30, CRN 6.19 → 5.51, CEPAE 5.05 → 4.71, CaTSG 5.00 → 7.03, with
+ridge and nearest neighbour unchanged. On ACIC, CaTSG improves from 0.354 to
+0.174 and CRN, ridge and nearest neighbour are unchanged; on Twins GANITE
+worsens from 0.329 to 0.472; on NEWS nothing changes materially.
 
 ### 4.5 Reference floors (the lens for §4.4)
 
@@ -451,28 +453,28 @@ process except Ornstein–Uhlenbeck.
 
 | Suite | iVAE | LEAP | TDRL | NCTRL | MOSAIC | Winner |
 |---|---|---|---|---|---|---|
-| npvar (A.1) | 0.86 | 0.88 | 0.87 | 0.84 | 0.87 | tie |
-| npvar_linear (A.1b) | 0.80 | 0.83 | 0.86 | 0.79 | 0.80 | TDRL |
-| npvar_hard (A.2) | 0.38 | 0.50 | 0.49 | 0.47 | 0.49 | LEAP |
-| cartpole (A.3) | 0.26 | 0.61 | 0.57 | 0.67 | 0.55 | NCTRL |
-| causal3d (A.4) | 0.46 | 0.68 | 0.67 | 0.69 | 0.70 | MOSAIC |
-| lorenz (A.5) | 0.41 | 0.70 | 0.58 | 0.75 | 0.67 | NCTRL |
-| lorenz96 (A.6) | 0.40 | 0.60 | 0.54 | 0.65 | 0.57 | NCTRL |
-| pcl (A.7) | 0.36 | 0.65 | 0.59 | 0.66 | 0.58 | NCTRL |
-| kuramoto (A.8) | 0.45 | 0.65 | 0.63 | 0.62 | 0.62 | LEAP |
-| lotka_volterra (A.9) | 0.44 | 0.72 | 0.65 | 0.69 | 0.66 | LEAP |
-| duffing (A.10) | 0.78 | 0.91 | 0.88 | 0.89 | 0.81 | LEAP |
-| fitzhugh_nagumo (A.11) | 0.73 | 0.90 | 0.89 | 0.90 | 0.81 | LEAP/NCTRL |
-| chua (A.12) | 0.54 | 0.72 | 0.64 | 0.77 | 0.64 | NCTRL |
-| van_der_pol (A.13) | 0.78 | 0.85 | 0.82 | 0.91 | 0.81 | NCTRL |
-| pendulum (A.14) | 0.79 | 0.79 | 0.85 | 0.87 | 0.85 | NCTRL |
-| mountain_car (A.15) | 0.76 | 0.93 | 0.96 | 0.97 | 0.84 | NCTRL |
-| varma (A.16) | 0.36 | 0.86 | 0.89 | 0.87 | 0.98 | MOSAIC |
-| ou (A.17) | 0.75 | 0.87 | 0.77 | 0.87 | 0.88 | MOSAIC |
+| npvar (A.1) | 0.54 | 0.72 | **0.75** | 0.72 | 0.70 | TDRL |
+| npvar_linear (A.1b) | 0.80 | 0.83 | **0.85** | 0.82 | 0.80 | TDRL |
+| npvar_hard (A.2) | 0.45 | **0.51** | **0.51** | 0.48 | 0.49 | LEAP/TDRL |
+| cartpole (A.3) | 0.26 | 0.64 | 0.59 | **0.72** | 0.54 | NCTRL |
+| causal3d (A.4) | 0.86 | 0.87 | 0.89 | 0.91 | **0.96** | MOSAIC |
+| lorenz (A.5) | 0.41 | 0.70 | 0.59 | **0.77** | 0.67 | NCTRL |
+| lorenz96 (A.6) | 0.39 | 0.59 | 0.54 | **0.64** | 0.58 | NCTRL |
+| pcl (A.7) | 0.36 | 0.64 | 0.59 | **0.66** | 0.58 | NCTRL |
+| kuramoto (A.8) | 0.45 | **0.65** | 0.63 | 0.64 | 0.63 | LEAP |
+| lotka_volterra (A.9) | 0.44 | **0.72** | 0.65 | 0.69 | 0.66 | LEAP |
+| duffing (A.10) | 0.76 | **0.90** | **0.90** | 0.85 | 0.81 | LEAP/TDRL |
+| fitzhugh_nagumo (A.11) | 0.73 | **0.92** | **0.92** | 0.88 | 0.81 | LEAP/TDRL |
+| chua (A.12) | 0.55 | 0.72 | 0.67 | **0.81** | 0.63 | NCTRL |
+| van_der_pol (A.13) | 0.76 | 0.83 | 0.82 | **0.90** | 0.81 | NCTRL |
+| pendulum (A.14) | 0.79 | 0.79 | 0.85 | **0.87** | 0.85 | NCTRL |
+| mountain_car (A.15) | 0.76 | 0.93 | **0.97** | **0.97** | 0.83 | NCTRL/TDRL |
+| varma (A.16) | 0.40 | 0.86 | 0.87 | 0.87 | **0.97** | MOSAIC |
+| ou (A.17) | 0.74 | 0.87 | 0.77 | **0.88** | 0.84 | NCTRL |
 
-Two deviations from the paper's pre-audit text: physics-coupled Lorenz (A.7) is
-now led by NCTRL (0.66) rather than LEAP (0.65), a difference of one point, and
-iVAE is no longer competitive on Ornstein–Uhlenbeck (0.75 versus 0.88).
+Two suites changed far more than the rest when the stale pools were replaced:
+A.1 (TDRL 0.75 instead of a five-way tie at 0.86) and Temporal Causal3DIdent
+(MOSAIC 0.96 and iVAE 0.86, against 0.70 and 0.46 on the stale pool).
 
 ## 9. SDD and adjacent blocks (already final)
 

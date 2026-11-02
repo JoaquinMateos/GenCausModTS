@@ -4,87 +4,53 @@ Friedman + Nemenyi + Holm, computed with `statds` 1.1.7.
 
 ### CRL representation quality (MCC, higher is better)
 
-Friedman over 18 cases: chi2 = 35.73, p = 3.28e-07 (StaTDS statistic; p recomputed with the exact chi-square tail). Nemenyi critical distance = 1.44 ranks. Reject H0 with alpha = 0.05 (Different distributions) (0 rows dropped for missing values.)
+Friedman over 18 cases: chi2 = 42.09, p = 1.6e-08 (StaTDS statistic; p recomputed with the exact chi-square tail). Nemenyi critical distance = 1.44 ranks. Reject H0 with alpha = 0.05 (Different distributions) (0 rows dropped for missing values.)
 
 | Method | Mean rank | Mean | Median | SD |
 | --- | --- | --- | --- | --- |
-| NCTRL | 2.06 | 0.770 | 0.780 | 0.130 |
-| LEAP | 2.17 | 0.757 | 0.756 | 0.127 |
-| TDRL | 2.89 | 0.730 | 0.723 | 0.149 |
-| MOSAIC | 3.06 | 0.728 | 0.751 | 0.139 |
-| iVAE | 4.83 | 0.572 | 0.501 | 0.201 |
+| NCTRL | 1.78 | 0.782 | 0.816 | 0.127 |
+| LEAP | 2.28 | 0.761 | 0.756 | 0.124 |
+| TDRL | 2.67 | 0.741 | 0.761 | 0.147 |
+| MOSAIC | 3.39 | 0.730 | 0.748 | 0.141 |
+| iVAE | 4.89 | 0.581 | 0.546 | 0.191 |
 
 Holm post-hoc against the best-ranked method:
 
 | Comparison | Z | p | adjusted p | Result |
 | --- | --- | --- | --- | --- |
-| NCTRL vs iVAE | 5.27 | 1.36e-07 | 5.44e-07 | Reject H0 |
-| NCTRL vs LEAP | 0.21 | 0.833 | 0.833 | Fail to Reject H0 |
-| NCTRL vs TDRL | 1.58 | 0.114 | 0.228 | Fail to Reject H0 |
-| NCTRL vs MOSAIC | 1.90 | 0.0578 | 0.173 | Fail to Reject H0 |
+| NCTRL vs iVAE | 5.90 | 3.57e-09 | 1.43e-08 | Reject H0 |
+| NCTRL vs LEAP | 0.95 | 0.343 | 0.343 | Fail to Reject H0 |
+| NCTRL vs TDRL | 1.69 | 0.0917 | 0.183 | Fail to Reject H0 |
+| NCTRL vs MOSAIC | 3.06 | 0.00224 | 0.00671 | Reject H0 |
 
 ### CRL one-step forecasting (MSE, lower is better)
 
-Friedman over 18 cases: chi2 = 38.18, p = 1.03e-07 (StaTDS statistic; p recomputed with the exact chi-square tail). Nemenyi critical distance = 1.44 ranks. Reject H0 with alpha = 0.05 (Different distributions) (0 rows dropped for missing values.)
+Friedman over 18 cases: chi2 = 34.27, p = 6.57e-07 (StaTDS statistic; p recomputed with the exact chi-square tail). Nemenyi critical distance = 1.44 ranks. Reject H0 with alpha = 0.05 (Different distributions) (0 rows dropped for missing values.)
 
 | Method | Mean rank | Mean | Median | SD |
 | --- | --- | --- | --- | --- |
-| NCTRL | 1.89 | 0.310 | 0.009 | 0.865 |
-| LEAP | 2.00 | 0.307 | 0.008 | 0.855 |
-| TDRL | 2.83 | 0.438 | 0.008 | 1.264 |
-| MOSAIC | 3.67 | 0.538 | 0.017 | 1.543 |
-| iVAE | 4.61 | 0.536 | 0.019 | 1.529 |
+| LEAP | 2.06 | 0.189 | 0.008 | 0.577 |
+| NCTRL | 2.06 | 0.192 | 0.009 | 0.587 |
+| TDRL | 2.67 | 0.227 | 0.008 | 0.709 |
+| MOSAIC | 3.67 | 0.275 | 0.017 | 0.830 |
+| iVAE | 4.56 | 0.274 | 0.021 | 0.820 |
 
 Holm post-hoc against the best-ranked method:
 
 | Comparison | Z | p | adjusted p | Result |
 | --- | --- | --- | --- | --- |
-| NCTRL vs iVAE | 5.17 | 2.4e-07 | 9.61e-07 | Reject H0 |
-| NCTRL vs LEAP | 0.21 | 0.833 | 0.833 | Fail to Reject H0 |
-| NCTRL vs TDRL | 1.79 | 0.0731 | 0.146 | Fail to Reject H0 |
-| NCTRL vs MOSAIC | 3.37 | 0.000743 | 0.00223 | Reject H0 |
+| LEAP vs iVAE | 4.74 | 2.1e-06 | 8.41e-06 | Reject H0 |
+| LEAP vs TDRL | 1.16 | 0.246 | 0.493 | Fail to Reject H0 |
+| LEAP vs NCTRL | 0.00 | 1 | 1 | Fail to Reject H0 |
+| LEAP vs MOSAIC | 3.06 | 0.00224 | 0.00671 | Reject H0 |
 
 ### 18-problem grid, MCC (higher is better)
 
-Friedman over 18 cases: chi2 = 5.02, p = 0.285 (StaTDS statistic; p recomputed with the exact chi-square tail). Nemenyi critical distance = 1.44 ranks. Fail to Reject H0 with alpha = 0.05 (Same distributions) (0 rows dropped for missing values.)
-
-| Method | Mean rank | Mean | Median | SD |
-| --- | --- | --- | --- | --- |
-| LEAP | 2.56 | 0.752 | 0.750 | 0.085 |
-| TDRL | 2.72 | 0.751 | 0.757 | 0.084 |
-| iVAE | 2.83 | 0.739 | 0.755 | 0.093 |
-| NCTRL | 3.44 | 0.738 | 0.726 | 0.083 |
-| MOSAIC | 3.44 | 0.733 | 0.734 | 0.095 |
-
-Holm post-hoc against the best-ranked method:
-
-| Comparison | Z | p | adjusted p | Result |
-| --- | --- | --- | --- | --- |
-| LEAP vs iVAE | 0.53 | 0.598 | 1 | Fail to Reject H0 |
-| LEAP vs TDRL | 0.32 | 0.752 | 1 | Fail to Reject H0 |
-| LEAP vs NCTRL | 1.69 | 0.0917 | 0.367 | Fail to Reject H0 |
-| LEAP vs MOSAIC | 1.69 | 0.0917 | 0.367 | Fail to Reject H0 |
+Not testable: 0 complete cases, 5 methods (0 rows dropped).
 
 ### 18-problem grid, one-step forecasting (MSE, lower is better)
 
-Friedman over 18 cases: chi2 = 72.00, p = 8.58e-15 (StaTDS statistic; p recomputed with the exact chi-square tail). Nemenyi critical distance = 1.44 ranks. Reject H0 with alpha = 0.05 (Different distributions) (0 rows dropped for missing values.)
-
-| Method | Mean rank | Mean | Median | SD |
-| --- | --- | --- | --- | --- |
-| LEAP | 1.00 | 4.515 | 4.503 | 1.587 |
-| NCTRL | 2.00 | 4.622 | 4.588 | 1.582 |
-| TDRL | 3.00 | 5.586 | 5.563 | 1.531 |
-| iVAE | 4.00 | 9.110 | 9.070 | 3.258 |
-| MOSAIC | 5.00 | 9.198 | 9.153 | 3.287 |
-
-Holm post-hoc against the best-ranked method:
-
-| Comparison | Z | p | adjusted p | Result |
-| --- | --- | --- | --- | --- |
-| LEAP vs iVAE | 5.69 | 1.25e-08 | 3.76e-08 | Reject H0 |
-| LEAP vs TDRL | 3.79 | 0.000148 | 0.000296 | Reject H0 |
-| LEAP vs NCTRL | 1.90 | 0.0578 | 0.0578 | Fail to Reject H0 |
-| LEAP vs MOSAIC | 7.59 | <1e-12 | <1e-12 | Reject H0 |
+Not testable: 0 complete cases, 5 methods (0 rows dropped).
 
 ### Temporal CTEE, harmonic (sqrt-PEHE, lower is better)
 
@@ -174,72 +140,72 @@ Holm post-hoc against the best-ranked method:
 
 ### Static CATE, ACIC (sqrt-PEHE, lower is better)
 
-Friedman over 100 cases: chi2 = 264.07, p = 5.24e-55 (StaTDS statistic; p recomputed with the exact chi-square tail). Nemenyi critical distance = 0.75 ranks. Reject H0 with alpha = 0.05 (Different distributions) (0 rows dropped for missing values.)
+Friedman over 100 cases: chi2 = 319.76, p = 5.64e-67 (StaTDS statistic; p recomputed with the exact chi-square tail). Nemenyi critical distance = 0.75 ranks. Reject H0 with alpha = 0.05 (Different distributions) (0 rows dropped for missing values.)
 
 | Method | Mean rank | Mean | Median | SD |
 | --- | --- | --- | --- | --- |
-| catsg | 1.95 | 0.354 | 0.162 | 0.499 |
-| crn | 2.16 | 0.311 | 0.271 | 0.245 |
-| cepae | 3.28 | 0.554 | 0.421 | 0.463 |
-| ridge_t | 3.45 | 0.656 | 0.627 | 0.650 |
-| nearest_neighbour | 5.06 | 0.980 | 0.998 | 0.378 |
-| ganite | 5.10 | 1.066 | 0.966 | 0.493 |
+| catsg | 1.43 | 0.174 | 0.047 | 0.312 |
+| crn | 2.32 | 0.309 | 0.255 | 0.208 |
+| ridge_t | 3.25 | 0.649 | 0.596 | 0.533 |
+| cepae | 3.77 | 0.694 | 0.488 | 0.596 |
+| nearest_neighbour | 4.83 | 0.984 | 0.998 | 0.359 |
+| ganite | 5.40 | 1.310 | 1.250 | 0.677 |
 
 Holm post-hoc against the best-ranked method:
 
 | Comparison | Z | p | adjusted p | Result |
 | --- | --- | --- | --- | --- |
-| catsg vs cepae | 5.03 | 4.98e-07 | 9.97e-07 | Reject H0 |
-| catsg vs crn | 0.79 | 0.427 | 0.427 | Fail to Reject H0 |
-| catsg vs ganite | 11.91 | <1e-12 | <1e-12 | Reject H0 |
-| catsg vs ridge_t | 5.67 | 1.43e-08 | 4.3e-08 | Reject H0 |
-| catsg vs nearest_neighbour | 11.75 | <1e-12 | <1e-12 | Reject H0 |
+| catsg vs cepae | 8.84 | <1e-12 | <1e-12 | Reject H0 |
+| catsg vs crn | 3.36 | 0.000769 | 0.000769 | Reject H0 |
+| catsg vs ganite | 15.01 | <1e-12 | <1e-12 | Reject H0 |
+| catsg vs ridge_t | 6.88 | 6.03e-12 | 1.21e-11 | Reject H0 |
+| catsg vs nearest_neighbour | 12.85 | <1e-12 | <1e-12 | Reject H0 |
 
 ### Static CATE, TWINS (sqrt-PEHE, lower is better)
 
-Friedman over 100 cases: chi2 = 429.24, p = 1.47e-90 (StaTDS statistic; p recomputed with the exact chi-square tail). Nemenyi critical distance = 0.75 ranks. Reject H0 with alpha = 0.05 (Different distributions) (0 rows dropped for missing values.)
+Friedman over 100 cases: chi2 = 437.15, p = 2.9e-92 (StaTDS statistic; p recomputed with the exact chi-square tail). Nemenyi critical distance = 0.75 ranks. Reject H0 with alpha = 0.05 (Different distributions) (0 rows dropped for missing values.)
 
 | Method | Mean rank | Mean | Median | SD |
 | --- | --- | --- | --- | --- |
-| catsg | 1.81 | 0.319 | 0.320 | 0.007 |
-| crn | 2.07 | 0.319 | 0.320 | 0.007 |
-| cepae | 2.26 | 0.320 | 0.321 | 0.007 |
-| ridge_t | 3.88 | 0.321 | 0.322 | 0.007 |
-| ganite | 4.98 | 0.329 | 0.328 | 0.011 |
-| nearest_neighbour | 6.00 | 0.536 | 0.536 | 0.010 |
+| catsg | 1.70 | 0.319 | 0.320 | 0.007 |
+| crn | 1.75 | 0.319 | 0.320 | 0.007 |
+| cepae | 2.65 | 0.320 | 0.320 | 0.007 |
+| ridge_t | 3.90 | 0.321 | 0.322 | 0.007 |
+| ganite | 5.26 | 0.472 | 0.431 | 0.123 |
+| nearest_neighbour | 5.74 | 0.536 | 0.536 | 0.010 |
 
 Holm post-hoc against the best-ranked method:
 
 | Comparison | Z | p | adjusted p | Result |
 | --- | --- | --- | --- | --- |
-| catsg vs cepae | 1.70 | 0.089 | 0.178 | Fail to Reject H0 |
-| catsg vs crn | 0.98 | 0.326 | 0.326 | Fail to Reject H0 |
-| catsg vs ganite | 11.98 | <1e-12 | <1e-12 | Reject H0 |
-| catsg vs ridge_t | 7.82 | <1e-12 | <1e-12 | Reject H0 |
-| catsg vs nearest_neighbour | 15.84 | <1e-12 | <1e-12 | Reject H0 |
+| catsg vs cepae | 3.59 | 0.00033 | 0.00066 | Reject H0 |
+| catsg vs crn | 0.19 | 0.85 | 0.85 | Fail to Reject H0 |
+| catsg vs ganite | 13.46 | <1e-12 | <1e-12 | Reject H0 |
+| catsg vs ridge_t | 8.32 | <1e-12 | <1e-12 | Reject H0 |
+| catsg vs nearest_neighbour | 15.27 | <1e-12 | <1e-12 | Reject H0 |
 
 ### Static CATE, NEWS (sqrt-PEHE, lower is better)
 
-Friedman over 50 cases: chi2 = 224.53, p = 1.59e-46 (StaTDS statistic; p recomputed with the exact chi-square tail). Nemenyi critical distance = 1.07 ranks. Reject H0 with alpha = 0.05 (Different distributions) (0 rows dropped for missing values.)
+Friedman over 50 cases: chi2 = 223.74, p = 2.35e-46 (StaTDS statistic; p recomputed with the exact chi-square tail). Nemenyi critical distance = 1.07 ranks. Reject H0 with alpha = 0.05 (Different distributions) (0 rows dropped for missing values.)
 
 | Method | Mean rank | Mean | Median | SD |
 | --- | --- | --- | --- | --- |
-| cepae | 1.20 | 3.432 | 3.185 | 1.319 |
-| crn | 2.04 | 3.805 | 3.658 | 0.977 |
+| cepae | 1.20 | 3.449 | 3.257 | 1.322 |
+| crn | 2.06 | 3.802 | 3.722 | 0.974 |
 | catsg | 3.32 | 4.326 | 4.130 | 1.184 |
-| nearest_neighbour | 3.44 | 4.641 | 4.589 | 1.333 |
+| nearest_neighbour | 3.42 | 4.641 | 4.589 | 1.333 |
 | ridge_t | 5.14 | 9.570 | 8.724 | 3.141 |
-| ganite | 5.86 | 12.728 | 12.167 | 4.388 |
+| ganite | 5.86 | 12.948 | 11.022 | 5.376 |
 
 Holm post-hoc against the best-ranked method:
 
 | Comparison | Z | p | adjusted p | Result |
 | --- | --- | --- | --- | --- |
 | cepae vs catsg | 5.67 | 1.46e-08 | 2.92e-08 | Reject H0 |
-| cepae vs crn | 2.24 | 0.0248 | 0.0248 | Reject H0 |
+| cepae vs crn | 2.30 | 0.0215 | 0.0215 | Reject H0 |
 | cepae vs ganite | 12.45 | <1e-12 | <1e-12 | Reject H0 |
 | cepae vs ridge_t | 10.53 | <1e-12 | <1e-12 | Reject H0 |
-| cepae vs nearest_neighbour | 5.99 | 2.14e-09 | 6.43e-09 | Reject H0 |
+| cepae vs nearest_neighbour | 5.93 | 2.97e-09 | 8.91e-09 | Reject H0 |
 
 ### Real panels, one-step forecasting (MSE, lower is better)
 
