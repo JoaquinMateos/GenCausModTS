@@ -197,22 +197,87 @@ uv run --no-sync python scripts/run_ctee_static.py --device cuda \
 
 ### T8. Rendered-image Temporal Causal3DIdent
 
-**Why.** The current Causal3DIdent suite is factor-based; the rendered-image
-variant used in the literature is unimplemented, so the paper's claim about
-high-dimensional visual observations is not tested.
+**Why.** The current `causal3d` suite is the *factor process* (four observed
+scalars). The literature's Temporal Causal3DIdent feeds rendered RGB frames to
+the representation learner, and the paper currently says that variant is
+unimplemented, so its claim about high-dimensional visual observations is
+untested.
 
-**Plan.** (1) Implement a renderer that maps the three causal factors (shape,
-colour, position/orientation) to small RGB frames with a deterministic
-background; (2) store `x` as `(T, C, H, W)` with factor labels in `z`;
-(3) add a small CNN encoder to the CRL methods behind an
-`image_encoder` option; (4) register a `causal3d_img` suite with the same
-10-seed protocol; (5) report MCC/DCI on the factors plus forecasting.
+**What already exists.** `src/gcmts/data/causal3dident.py` contains a complete
+`Causal3DIdentImageGenerator`: six factors (object x/y, rotation, scale, hue,
+spotlight x), a lagged acyclic mechanism with recorded single-target
+interventions (`context["I"]`), and a differentiable 32x32 renderer (rotated
+coloured object under a coloured spotlight, coloured background). The renderer is
+a *surrogate* for Blender, with the same causal structure but simpler images.
+`CNNEncoder`/`CNNDecoder` exist in `core/backbones.py` and are tested; the
+generator is tested in `tests/test_data.py`. What is missing is the suite wiring
+and image-capable methods.
 
-**Acceptance.** `causal3d_img` with 10 seeds × 5 methods, finite metrics, a
-one-page table, and the paper sentence updated from "unimplemented" to reported.
+**Work items.**
 
-**Cost.** 2–4 weeks (renderer + encoder + tests). **Risk.** Image models are
-much slower; budget a reduced epoch schedule and state it.
+1. **Register the suite.** Add `causal3d_img` to `SUITES` in
+   `scripts/run_crl_shared.py` with
+   `Causal3DIdentImageGenerator(horizon=8, image_size=32, seed=seed)`,
+   `observed_dim = 3*32*32`, `latent_dim = 6`, `max_lag = 1`; add
+   `CrlBenchmark("A.4b", "Temporal Causal3DIdent (rendered images)", "temporal", True)`
+   to `CRL_BENCHMARKS`. Add `image_shape: tuple[int, int, int] | None = None`
+   to the `Suite` dataclass and set it to `(3, 32, 32)` for this suite, so
+   `build_methods` can pass it to every method; return the known graph from the
+   generator (`Batch(..., adjacency=self.adjacency)`) so SHD works, shape
+   `(6, 6, 1)`.
+2. **Make the five methods image-capable.** Add
+   `image_shape: tuple[int, int, int] | None = None` and
+   `image_feature_dim: int = 64` to `iVAE`, `LEAP`, `TDRL`, `NCTRL`, `MOSAIC`.
+   When set, insert a shared `CNNEncoder(3, image_feature_dim)` that maps each
+   flattened frame `(B*T, 3*32*32)` to features, and feed those features to the
+   existing `GaussianHead`; keep the decoder outputting flattened pixels so the
+   existing reconstruction losses and metrics are unchanged. Use the same
+   encoder width, decoder width and epoch budget for every method (fairness).
+   Put the shared code in one helper to avoid five divergent implementations.
+3. **Pool format.** Full 32x32 float pools at the current 65 536x16 schedule are
+   ~13 GB per seed. Use a reduced image pool (e.g. 8 192 train / 1 024 eval
+   trajectories, horizon 8) and store uint8 if `save_dataset`/`batch_from_state`
+   gain dtype support, otherwise float32 (~1.6 GB per seed). Document the
+   reduced schedule in the table caption.
+4. **Protocol and metrics.** `--suite causal3d_img --seeds 10`; report MCC,
+   R^2_diag/sep and DCI on the six factors, SHD against the known graph, and
+   (optionally) intervention-target AUROC from `context["I"]`. Report pixel
+   forecasting MSE but mark it as a utility diagnostic, not a soundness metric.
+   Epoch budget: start at 1 000 epochs; the measured CNN throughput is ~12.9k
+   frames/s on M4, so one 2 000-epoch x 16-frame run is ~2.6 h and 50 runs are
+   ~5.5 days on M4 (~1.5 days on the 2080). Horizon 8 + 1 000 epochs halves it.
+5. **Tests.** Generator determinism and image range; adjacency shape; one
+   forward/backward per method with `image_shape`; a one-seed smoke run at
+   `--epochs-scale 0.01`; pool round-trip with the chosen dtype.
+6. **Paper.** Add the dataset row, the results block, the Appendix H table and
+   the audit note; state explicitly that the renderer is a surrogate, not the
+   Blender teapot, so numbers are not comparable to the published Causal3DIdent
+   results.
+
+**Commands (after the code is in).**
+
+```bash
+uv run --no-sync python scripts/generate_synthetic_data.py \
+  --suites causal3d_img --seeds 10 --train-size 8192 --eval-size 1024
+uv run --no-sync python scripts/verify_outputs.py --pools-only
+uv run --no-sync python scripts/run_crl_shared.py --device cuda \
+  --suite causal3d_img --seeds 10 --epochs-scale 1.0 --data-source pool \
+  --dataset-dir data/synthetic --scheduler adaptive \
+  --early-stopping-patience 300 --ema-decay 0.99 --kl-warmup-epochs 50 \
+  --out-dir outputs_shared
+```
+
+**Acceptance.** 50 rows (10 seeds x 5 methods), finite metrics, one table with
+MCC/R^2/DCI/SHD, the paper's "unimplemented" sentence replaced, and the surrogate
+caveat stated.
+
+**Cost.** ≈2–3 weeks of implementation (suite + five methods + dtype + tests),
+then ≈1.5–5 days of compute depending on horizon/epochs and host.
+
+**Risks.** (a) The surrogate renderer is not the Blender dataset; the paper must
+not compare absolute MCC with published Causal3DIdent numbers. (b) Images are
+memory-heavy; the reduced pool must be reported. (c) A CNN adds parameters; keep
+the same backbone and budget across methods so the comparison is fair.
 
 ---
 
