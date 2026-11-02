@@ -184,7 +184,14 @@ class Causal3DIdentImageGenerator(BaseDataGenerator):
             images.shape, generator=self.rng
         )
         flattened = images.reshape(n_samples, horizon, -1)
-        return Batch(x=flattened, z=factors, context={"I": targets})
+        return Batch(
+            x=flattened,
+            z=factors,
+            # The image process has no regime variable; conditional methods still
+            # receive a well-formed one-dimensional constant context.
+            context={"u": torch.ones(n_samples, 1), "I": targets},
+            adjacency=self.adjacency,
+        )
 
     def to_image(self, x: Tensor) -> Tensor:
         """Reshape flattened observations ``(B, T, C*H*W)`` to ``(B, T, C, H, W)``."""

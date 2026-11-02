@@ -551,6 +551,19 @@ class ACICLoader:
                 "competition data by hand (see scripts/download_datasets.py) and "
                 "place x.csv, z.csv, y.csv, mu0.csv and mu1.csv there."
             )
+        # Pin the snapshot: replication i is the i-th directory in sorted-hash
+        # order, so a different download changes the index map.
+        from gcmts.data.manifest import verified, verify_manifest
+
+        if not verified(self.directory) and (self.directory / "manifest.json").exists():
+            names = [
+                f"{path.name}/{name}"
+                for path in sorted(self.directory.iterdir())
+                if path.is_dir() and (path / "x.csv").exists()
+                for name in ("x.csv", "z.csv", "y.csv", "mu0.csv", "mu1.csv")
+                if (path / name).exists()
+            ]
+            verify_manifest(self.directory, names)
 
     def replication(self, name: str = "default") -> dict[str, np.ndarray]:
         """Load one replication directory (``<name>/``) or the root if flat."""

@@ -57,6 +57,7 @@ def main() -> int:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--outputs", type=Path, default=Path("outputs"))
     parser.add_argument("--reps", type=int, default=None)
+    parser.add_argument("--out", type=Path, default=None, help="also write the table here")
     args = parser.parse_args()
 
     lines = [
@@ -94,6 +95,9 @@ def main() -> int:
             )
     text = "\n".join(lines)
     print(text)
+    if args.out is not None:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(text + "\n", encoding="utf-8")
     return 0
 
 

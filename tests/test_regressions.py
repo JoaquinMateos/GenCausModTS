@@ -367,3 +367,81 @@ def test_merge_timings_fills_only_missing_seconds(tmp_path: Path) -> None:
     assert (filled, missing) == (1, 0)
     assert rows[0]["seconds"] == 12.5
     assert rows[1]["seconds"] == 4.0  # existing value is never overwritten
+
+
+@pytest.mark.parametrize("method", ["ivae", "leap", "tdrl", "nctrl", "mosaic"])
+def test_crl_methods_accept_rendered_images(method: str) -> None:
+    """Every CRL method must consume 32x32 frames through the shared CNN path."""
+    from gcmts.causal_representation_learning.methods.ivae import IVAE
+    from gcmts.causal_representation_learning.methods.leap import LEAP
+    from gcmts.causal_representation_learning.methods.mosaic import MOSAIC
+    from gcmts.causal_representation_learning.methods.nctrl import NCTRL
+    from gcmts.causal_representation_learning.methods.tdrl import TDRL
+
+    shape = (3, 32, 32)
+    common = {"observed_dim": 3 * 32 * 32, "image_shape": shape, "image_feature_dim": 16}
+    models = {
+        "ivae": lambda: IVAE(latent_dim=6, u_dim=1, **common),
+        "leap": lambda: LEAP(latent_dim=6, u_dim=1, **common),
+        "tdrl": lambda: TDRL(
+            latent_fix_dim=2, latent_dyn_dim=2, latent_obs_dim=2, u_dim=1, **common
+        ),
+        "nctrl": lambda: NCTRL(latent_dim=6, n_regimes=1, **common),
+        "mosaic": lambda: MOSAIC(latent_dim=6, u_dim=1, **common),
+    }
+    batch = Batch(
+        x=torch.rand(2, 3, 3 * 32 * 32),
+        context={"u": torch.ones(2, 1)},
+    )
+    outputs = models[method]().forward(batch)
+    assert outputs.z is not None and outputs.z.shape == (2, 3, 6)
+    assert outputs.x_recon is not None and outputs.x_recon.shape == (2, 3, 3 * 32 * 32)
+    assert torch.isfinite(outputs.z).all()
+
+
+def test_image_suite_is_registered() -> None:
+    sys.path.insert(0, str(_SCRIPTS))
+    import run_crl_shared
+
+    suite = run_crl_shared.SUITES["causal3d_img"]
+    assert suite.image_shape == (3, 32, 32)
+    assert suite.observed_dim == 3 * 32 * 32
+    batch = suite.make_generator(0).sample(4)
+    assert batch.x.shape == (4, suite.horizon, 3 * 32 * 32)
+    assert batch.z is not None and batch.z.shape[-1] == suite.latent_dim
+    assert batch.adjacency is not None and batch.adjacency.shape == (6, 6, 1)
+    assert batch.context is not None and "u" in batch.context
+
+
+def test_dataset_manifest_detects_a_changed_snapshot(tmp_path: Path) -> None:
+    from gcmts.data.manifest import verify_manifest, write_manifest
+
+    (tmp_path / "rep0").mkdir()
+    (tmp_path / "rep0" / "x.csv").write_text("1,2\n3,4\n")
+    (tmp_path / "rep0" / "y.csv").write_text("0\n1\n")
+    names = ["rep0/x.csv", "rep0/y.csv"]
+    write_manifest(tmp_path, names)
+    verify_manifest(tmp_path, names)  # no error
+    (tmp_path / "rep0" / "y.csv").write_text("0\n1\n2\n")  # new snapshot
+    with pytest.raises(ValueError, match="manifest mismatch"):
+        verify_manifest(tmp_path, names)
+
+
+def test_acic_loader_rejects_a_manifest_mismatch(tmp_path: Path, monkeypatch) -> None:
+    from gcmts.data import manifest, semi_synthetic
+
+    (tmp_path / "rep0").mkdir()
+    for name, body in {
+        "x.csv": "1,2\n",
+        "z.csv": "0\n",
+        "y.csv": "0.5\n",
+        "mu0.csv": "0.4\n",
+        "mu1.csv": "0.6\n",
+    }.items():
+        (tmp_path / "rep0" / name).write_text(body)
+    names = [f"rep0/{n}" for n in ("x.csv", "z.csv", "y.csv", "mu0.csv", "mu1.csv")]
+    manifest.write_manifest(tmp_path, names)
+    monkeypatch.setattr(manifest, "_VERIFIED", {})
+    (tmp_path / "rep0" / "x.csv").write_text("9,9\n")
+    with pytest.raises(ValueError, match="manifest mismatch"):
+        semi_synthetic.ACICLoader(tmp_path)

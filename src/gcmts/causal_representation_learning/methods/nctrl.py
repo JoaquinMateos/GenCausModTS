@@ -60,13 +60,23 @@ class NCTRL(BaseCausalRepresentationLearner):
         decoder_hidden: tuple[int, ...] = (128, 128),
         kl_weight: float = 0.01,
         obs_noise: float = 1.0,
+        image_shape: tuple[int, int, int] | None = None,
+        image_feature_dim: int = 64,
     ) -> None:
         if obs_noise <= 0:
             raise ValueError("obs_noise must be positive.")
-        super().__init__(observed_dim=observed_dim, latent_dim=latent_dim, max_lag=1)
+        super().__init__(
+            observed_dim=observed_dim,
+            latent_dim=latent_dim,
+            max_lag=1,
+            image_shape=image_shape,
+            image_feature_dim=image_feature_dim,
+        )
         self.n_regimes = n_regimes
         self.kl_weight: float = kl_weight
-        self.encoder = GaussianHead(observed_dim, latent_dim, hidden_dims=hidden_dims)
+        self.encoder = GaussianHead(
+            self.encoder_input_dim(observed_dim), latent_dim, hidden_dims=hidden_dims
+        )
         self.decoder = MLP(latent_dim, observed_dim, hidden_dims=decoder_hidden)
         self.transition_nets = nn.ModuleList(
             MLP(latent_dim, latent_dim, hidden_dims=(transition_hidden, transition_hidden))
@@ -82,7 +92,7 @@ class NCTRL(BaseCausalRepresentationLearner):
         )
 
     def encode(self, x: Tensor, context: dict[str, Tensor] | None = None) -> Tensor:
-        x_flat, (batch, time) = flatten_sequence(x)
+        x_flat, (batch, time) = self.observation_features(x)
         mean, _ = self.encoder(x_flat)
         return unflatten_sequence(mean, batch, time)
 
@@ -120,7 +130,7 @@ class NCTRL(BaseCausalRepresentationLearner):
         return log_emission
 
     def forward(self, batch: Batch) -> CausalRepresentationOutput:
-        x_flat, (batch_size, time) = flatten_sequence(batch.x)
+        x_flat, (batch_size, time) = self.observation_features(batch.x)
         q_mean, q_logvar = self.encoder(x_flat)
         z = reparameterise(q_mean, q_logvar)
         z_seq = unflatten_sequence(z, batch_size, time)

@@ -102,16 +102,28 @@ class MOSAIC(BaseCausalRepresentationLearner):
         sparsity: float = 0.01,
         kl_weight: float = 1.0,
         obs_noise: float = 1.0,
+        image_shape: tuple[int, int, int] | None = None,
+        image_feature_dim: int = 64,
     ) -> None:
         if obs_noise <= 0:
             raise ValueError("obs_noise must be positive.")
-        super().__init__(observed_dim=observed_dim, latent_dim=latent_dim, max_lag=1)
+        super().__init__(
+            observed_dim=observed_dim,
+            latent_dim=latent_dim,
+            max_lag=1,
+            image_shape=image_shape,
+            image_feature_dim=image_feature_dim,
+        )
         self.u_dim = u_dim
         self.sparsity = sparsity
         self.kl_weight: float = kl_weight
         # Latents are identified from regime-conditioned temporal variation, so the
         # encoder conditions on the regime/domain context u.
-        self.encoder = GaussianHead(observed_dim + u_dim, latent_dim, hidden_dims=hidden_dims)
+        self.encoder = GaussianHead(
+            self.encoder_input_dim(observed_dim) + u_dim,
+            latent_dim,
+            hidden_dims=hidden_dims,
+        )
         self.decoder = _SparseAdditiveDecoder(observed_dim, latent_dim, hidden=decoder_hidden)
         self.support: Tensor | None = None
         self.register_buffer("obs_logvar", math.log(obs_noise**2) * torch.ones(1))
@@ -122,7 +134,7 @@ class MOSAIC(BaseCausalRepresentationLearner):
         return x if u is None else torch.cat([x, u], dim=-1)
 
     def encode(self, x: Tensor, context: dict[str, Tensor] | None = None) -> Tensor:
-        x_flat, (batch, time) = flatten_sequence(x)
+        x_flat, (batch, time) = self.observation_features(x)
         u = prepare_context(context, x_flat.shape[0], n_classes=self.u_dim)
         mean, _ = self.encoder(self._condition(x_flat, u))
         return unflatten_sequence(mean, batch, time)
@@ -137,7 +149,7 @@ class MOSAIC(BaseCausalRepresentationLearner):
         return z_past[:, -1]
 
     def forward(self, batch: Batch) -> CausalRepresentationOutput:
-        x_flat, (batch_size, time) = flatten_sequence(batch.x)
+        x_flat, (batch_size, time) = self.observation_features(batch.x)
         u = prepare_context(batch.context, x_flat.shape[0], n_classes=self.u_dim)
         q_mean, q_logvar = self.encoder(self._condition(x_flat, u))
         z = reparameterise(q_mean, q_logvar)

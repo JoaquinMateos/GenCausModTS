@@ -19,6 +19,31 @@ Reference state:
 
 ---
 
+## How to run everything
+
+Every runnable task below is orchestrated by one script:
+
+```bash
+bash scripts/run_pending_tasks.sh                 # device=mps
+DEVICE=cuda bash scripts/run_pending_tasks.sh     # on the 2080
+SKIP_GRID=1 bash scripts/run_pending_tasks.sh     # skip the 3-4 day grid
+SKIP_IMAGE=1 bash scripts/run_pending_tasks.sh    # skip the image suite
+RUN_TIMING=1 bash scripts/run_pending_tasks.sh    # add the sequential timing pass
+DRY_RUN=1 bash scripts/run_pending_tasks.sh       # print the command sequence only
+```
+
+It is resumable and idempotent. The copied tree must contain `data/acic`,
+`data/static`, `data/real` and `data/semi_synthetic`; the synthetic pools
+(including the 18-config grid, ~28 GB) are regenerated in about a minute if
+absent, and the image pools take about 30 s and 8.5 GB. `outputs/` and
+`outputs_shared/` are resumed, so the existing 2026-11 rows are reused.
+
+Implemented in this revision: the image suite and image path for all five CRL
+methods (T8), the ACIC manifest and loader check (T5), the timing merge (T3),
+and the CEGEN-on-CPU fallback (T6).
+
+---
+
 ## P0 — required before the paper's results are final
 
 ### T1. Rerun the 18-problem grid on fresh pools with the rewind
@@ -144,7 +169,7 @@ FAIL=0; every table caption reports the actual replication/seed count.
 
 ## P1 — reproducibility and coverage of the current benchmark
 
-### T5. Pin the ACIC snapshot
+### T5. Pin the ACIC snapshot — **implemented**
 
 **Why.** ACIC replication `i` is the `i`-th directory in sorted-hash order, so a
 different download changes the index→replication map. The archived 2080 rows and
@@ -161,7 +186,7 @@ message; the config records the hash; the paper's ACIC caveat can be replaced by
 
 **Cost.** ≈1 day (code + tests).
 
-### T6. MPS driver workarounds
+### T6. MPS driver workarounds — **implemented in the driver**
 
 **Why.** CEGEN (`sde`) reproducibly aborts the Metal driver
 (`commit command buffer with uncommitted encoder`); CITRIS needed a float64→CPU
@@ -195,7 +220,7 @@ uv run --no-sync python scripts/run_ctee_static.py --device cuda \
 
 **Risk.** Data availability/licensing is the blocker, not compute.
 
-### T8. Rendered-image Temporal Causal3DIdent
+### T8. Rendered-image Temporal Causal3DIdent — **implemented, run pending**
 
 **Why.** The current `causal3d` suite is the *factor process* (four observed
 scalars). The literature's Temporal Causal3DIdent feeds rendered RGB frames to

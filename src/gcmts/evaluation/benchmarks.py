@@ -85,6 +85,9 @@ CRL_BENCHMARKS: dict[str, CrlBenchmark] = {
         "A.3", "non-stationary interactive process (CartPole)", "temporal", False
     ),
     "causal3d": CrlBenchmark("A.4", "Temporal Causal3DIdent factor process", "temporal", True),
+    "causal3d_img": CrlBenchmark(
+        "A.4b", "Temporal Causal3DIdent (rendered images)", "temporal", True
+    ),
     "lorenz": CrlBenchmark("A.5", "Lorenz-63 physical SCM", "temporal", False),
     "lorenz96": CrlBenchmark("A.6", "Lorenz-96 ring SCM", "temporal", False),
     "pcl": CrlBenchmark("A.7", "physics-coupled Lorenz (PCL)", "temporal", False),

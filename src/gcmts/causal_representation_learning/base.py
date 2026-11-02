@@ -25,6 +25,7 @@ from abc import abstractmethod
 import torch
 from torch import Tensor
 
+from gcmts.core.backbones import CNNEncoder, flatten_sequence
 from gcmts.core.base import BaseModel
 from gcmts.typing import Batch, CausalRepresentationOutput
 
@@ -63,9 +64,42 @@ class BaseCausalRepresentationLearner(BaseModel):
         observed_dim: int,
         latent_dim: int,
         max_lag: int = 1,
+        image_shape: tuple[int, int, int] | None = None,
+        image_feature_dim: int = 64,
     ) -> None:
         super().__init__(observed_dim=observed_dim, latent_dim=latent_dim)
         self.max_lag = max_lag
+        # Rendered-image benchmarks flatten frames into ``x``; a shared CNN
+        # encoder maps each frame to features before the method's own encoder.
+        self.image_shape = tuple(image_shape) if image_shape is not None else None
+        self.image_feature_dim = int(image_feature_dim)
+        self.image_encoder: CNNEncoder | None = (
+            CNNEncoder(in_channels=self.image_shape[0], latent_dim=self.image_feature_dim)
+            if self.image_shape is not None
+            else None
+        )
+
+    def encoder_input_dim(self, observed_dim: int) -> int:
+        """Width of the vector the method's encoder consumes."""
+        return self.image_feature_dim if self.image_shape is not None else observed_dim
+
+    def observation_features(self, x: Tensor) -> tuple[Tensor, tuple[int, int]]:
+        """Map ``(B, T, D)`` observations to ``(B*T, F)`` encoder features."""
+        if self.image_shape is None:
+            return flatten_sequence(x)
+        if x.ndim != 3:
+            raise ValueError("Image features expect observations of shape (B, T, D).")
+        batch, time, dim = x.shape
+        channels, height, width = self.image_shape
+        if dim != channels * height * width:
+            raise ValueError(
+                f"Flattened observation has {dim} values but image_shape "
+                f"{self.image_shape} needs {channels * height * width}."
+            )
+        if self.image_encoder is None:  # pragma: no cover - defensive
+            raise RuntimeError("image_encoder was not initialised.")
+        frames = x.reshape(batch * time, channels, height, width)
+        return self.image_encoder(frames), (batch, time)
 
     @abstractmethod
     def encode(self, x: Tensor, context: dict[str, Tensor] | None = None) -> Tensor:

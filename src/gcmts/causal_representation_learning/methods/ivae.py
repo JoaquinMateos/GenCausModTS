@@ -57,14 +57,24 @@ class IVAE(BaseCausalRepresentationLearner):
         decoder_hidden: tuple[int, ...] = (128, 128),
         kl_weight: float = 1.0,
         obs_noise: float = 1.0,
+        image_shape: tuple[int, int, int] | None = None,
+        image_feature_dim: int = 64,
     ) -> None:
-        super().__init__(observed_dim=observed_dim, latent_dim=latent_dim, max_lag=1)
+        super().__init__(
+            observed_dim=observed_dim,
+            latent_dim=latent_dim,
+            max_lag=1,
+            image_shape=image_shape,
+            image_feature_dim=image_feature_dim,
+        )
         if obs_noise <= 0:
             raise ValueError("obs_noise must be positive.")
         self.u_dim = u_dim
         self.kl_weight: float = kl_weight
         self.encoder = GaussianHead(
-            observed_dim + u_dim, latent_dim, hidden_dims=hidden_dims
+            self.encoder_input_dim(observed_dim) + u_dim,
+            latent_dim,
+            hidden_dims=hidden_dims,
         )
         self.decoder = MLP(latent_dim, observed_dim, hidden_dims=decoder_hidden)
         self.prior = ExpFamilyPrior(u_dim, latent_dim, hidden_dims=hidden_dims)
@@ -76,7 +86,7 @@ class IVAE(BaseCausalRepresentationLearner):
         return x if u is None else torch.cat([x, u], dim=-1)
 
     def encode(self, x: Tensor, context: dict[str, Tensor] | None = None) -> Tensor:
-        x_flat, (batch, time) = flatten_sequence(x)
+        x_flat, (batch, time) = self.observation_features(x)
         u = prepare_context(context, x_flat.shape[0], n_classes=self.u_dim)
         mean, _ = self.encoder(self._condition(x_flat, u))
         return unflatten_sequence(mean, batch, time)
@@ -92,7 +102,7 @@ class IVAE(BaseCausalRepresentationLearner):
         return z_past[:, -1]
 
     def forward(self, batch: Batch) -> CausalRepresentationOutput:
-        x_flat, (batch_size, time) = flatten_sequence(batch.x)
+        x_flat, (batch_size, time) = self.observation_features(batch.x)
         u = prepare_context(batch.context, x_flat.shape[0], n_classes=self.u_dim)
         q_mean, q_logvar = self.encoder(self._condition(x_flat, u))
         z = reparameterise(q_mean, q_logvar)

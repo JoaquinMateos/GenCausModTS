@@ -52,6 +52,7 @@ from gcmts.core.graph_ops import (
     shd as plain_shd,
 )
 from gcmts.core.trainer import TrainingDivergedError
+from gcmts.data.causal3dident import Causal3DIdentImageGenerator
 from gcmts.data.control import MountainCarGenerator, PendulumGenerator
 from gcmts.data.hierarchical import HierarchicalTemporalGenerator
 from gcmts.data.linear_processes import OUProcessGenerator, VARMAProcessGenerator
@@ -101,6 +102,7 @@ class Suite:
     horizon: int
     n_regimes: int
     make_generator: Callable[[int], Any]
+    image_shape: tuple[int, int, int] | None = None
 
 
 SUITES: dict[str, Suite] = {
@@ -152,6 +154,17 @@ SUITES: dict[str, Suite] = {
             mixing="invertible",
             seed=seed,
         ),
+    ),
+    "causal3d_img": Suite(
+        name="causal3d_img",
+        observed_dim=3 * 32 * 32,
+        latent_dim=6,
+        horizon=8,
+        n_regimes=1,
+        make_generator=lambda seed: Causal3DIdentImageGenerator(
+            horizon=8, image_size=32, seed=seed
+        ),
+        image_shape=(3, 32, 32),
     ),
     "cartpole": Suite(
         name="cartpole",
@@ -358,6 +371,7 @@ def _tdrl_blocks(latent_dim: int) -> tuple[int, int, int]:
 def build_methods(suite: Suite, *, epochs_scale: float = 1.0) -> list[MethodSpec]:
     d, r, D = suite.latent_dim, suite.n_regimes, suite.observed_dim
     u = max(r, 1)  # stationary suites expose a constant, one-dimensional context
+    image = suite.image_shape
     fix, dyn, obs = _tdrl_blocks(d)
 
     # One common optimisation budget for every method in a block: a comparison
@@ -367,7 +381,9 @@ def build_methods(suite: Suite, *, epochs_scale: float = 1.0) -> list[MethodSpec
     return [
         (
             "iVAE",
-            lambda: IVAE(observed_dim=D, latent_dim=d, u_dim=u, obs_noise=0.1),
+            lambda: IVAE(
+                observed_dim=D, latent_dim=d, u_dim=u, obs_noise=0.1, image_shape=image
+            ),
             common_epochs,
         ),
         (
@@ -379,6 +395,7 @@ def build_methods(suite: Suite, *, epochs_scale: float = 1.0) -> list[MethodSpec
                 u_dim=u,
                 kl_weight=0.01,
                 obs_noise=0.1,
+                image_shape=image,
             ),
             common_epochs,
         ),
@@ -392,19 +409,32 @@ def build_methods(suite: Suite, *, epochs_scale: float = 1.0) -> list[MethodSpec
                 u_dim=u,
                 kl_weight=0.01,
                 obs_noise=0.1,
+                image_shape=image,
             ),
             common_epochs,
         ),
         (
             "NCTRL",
             lambda: NCTRL(
-                observed_dim=D, latent_dim=d, n_regimes=u, kl_weight=0.01, obs_noise=0.1
+                observed_dim=D,
+                latent_dim=d,
+                n_regimes=u,
+                kl_weight=0.01,
+                obs_noise=0.1,
+                image_shape=image,
             ),
             common_epochs,
         ),
         (
             "MOSAIC",
-            lambda: MOSAIC(observed_dim=D, latent_dim=d, u_dim=u, kl_weight=0.1, obs_noise=0.1),
+            lambda: MOSAIC(
+                observed_dim=D,
+                latent_dim=d,
+                u_dim=u,
+                kl_weight=0.1,
+                obs_noise=0.1,
+                image_shape=image,
+            ),
             common_epochs,
         ),
     ]
