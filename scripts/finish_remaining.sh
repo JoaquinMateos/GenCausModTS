@@ -99,6 +99,17 @@ for suite in "${CRL_SUITES[@]}"; do
   uv run --no-sync python scripts/run_crl_shared.py --suite "$suite" "${CRL_FLAGS[@]}"
 done
 
+# --------------------------------------------- single-method blocks (child, sde, voronoi)
+# CEGEN (sde) reproducibly aborts the Metal driver on MPS, so it runs on CPU.
+echo "== single-method blocks =="
+for suite in child voronoi; do
+  uv run --no-sync python scripts/run_crl_shared.py --suite "$suite" "${CRL_FLAGS[@]}"
+done
+uv run --no-sync python scripts/run_crl_shared.py --suite sde \
+  --device cpu --seeds 10 --epochs-scale 1.0 --data-source pool \
+  --dataset-dir data/synthetic --scheduler adaptive --early-stopping-patience 300 \
+  --ema-decay 0.99 --kl-warmup-epochs 50 --out-dir outputs_shared
+
 # ------------------------------------------------------------------- the grid
 if [ "$WANT_GRID" = "grid" ]; then
   echo "== grid: pools =="

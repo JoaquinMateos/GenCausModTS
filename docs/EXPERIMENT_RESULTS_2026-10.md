@@ -425,6 +425,8 @@ method silently ran all five. Fixed and used throughout this document.
 
 ---
 
+> **Task register.** The remaining work, with commands and acceptance criteria, is tracked in `docs/OPEN_TASKS.md`.
+
 ## 7. What remains
 
 1. **Static rerun with masking for ACIC, Twins and News.** IHDP (30

@@ -342,3 +342,28 @@ def test_instantaneous_adjacency_accepts_mps_input() -> None:
     adjacency = estimate_instantaneous_adjacency(z)
     assert adjacency.device.type == "cpu"
     assert adjacency.shape == (3, 3)
+
+
+def test_merge_timings_fills_only_missing_seconds(tmp_path: Path) -> None:
+    import json
+
+    sys.path.insert(0, str(_SCRIPTS))
+    from merge_timings import merge_file
+
+    main = [
+        {"case": "a", "method": "m", "seed": 0, "mcc": 0.5, "seconds": float("nan")},
+        {"case": "a", "method": "m", "seed": 1, "mcc": 0.6, "seconds": 4.0},
+    ]
+    timing = [
+        {"case": "a", "method": "m", "seed": 0, "seconds": 12.5},
+        {"case": "a", "method": "m", "seed": 1, "seconds": 99.0},
+    ]
+    main_path = tmp_path / "main.json"
+    timing_path = tmp_path / "timing.json"
+    main_path.write_text(json.dumps(main))
+    timing_path.write_text(json.dumps(timing))
+    filled, missing = merge_file(main_path, timing_path)
+    rows = json.loads(main_path.read_text())
+    assert (filled, missing) == (1, 0)
+    assert rows[0]["seconds"] == 12.5
+    assert rows[1]["seconds"] == 4.0  # existing value is never overwritten
