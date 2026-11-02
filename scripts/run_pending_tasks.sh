@@ -20,6 +20,7 @@
 #   DEVICE=cuda bash scripts/run_pending_tasks.sh     # on the 2080
 #   SKIP_GRID=1 bash scripts/run_pending_tasks.sh     # everything except the grid
 #   RUN_TIMING=1 bash scripts/run_pending_tasks.sh    # also time the tables
+#   SKIP_POOLS=1 bash scripts/run_pending_tasks.sh    # pools already copied
 #
 # Every step is resumable; rerunning the script continues where it stopped.
 
@@ -59,8 +60,13 @@ echo "== 1/7 preflight =="
 BASE_SUITES="npvar npvar_linear npvar_hard cartpole causal3d lorenz lorenz96 pcl \
              kuramoto lotka_volterra duffing fitzhugh_nagumo chua van_der_pol \
              pendulum mountain_car varma ou child sde voronoi"
-echo "generating any missing pools (existing finite pools are skipped)"
-run $PY scripts/generate_synthetic_data.py --seeds 10 --suites $BASE_SUITES --with-grid
+if [ "${SKIP_POOLS:-0}" = "1" ] || \
+   { [ -f data/synthetic/npvar/seed_00.pt ] && [ -f data/synthetic/grid_d3_D6_s2_r2/seed_00.pt ]; }; then
+  echo "pools already present; skipping generation (set SKIP_POOLS=0 to force a check)"
+else
+  echo "generating the missing pools (existing finite pools are skipped)"
+  run $PY scripts/generate_synthetic_data.py --seeds 10 --suites $BASE_SUITES --with-grid
+fi
 if [ ! -f data/acic/manifest.json ]; then
   echo "ACIC manifest missing; writing it for this snapshot"
   run $PY scripts/write_acic_manifest.py --data-dir data/acic
