@@ -25,12 +25,19 @@ Every runnable task below is orchestrated by one script:
 
 ```bash
 bash scripts/run_pending_tasks.sh                 # device=mps
-DEVICE=cuda bash scripts/run_pending_tasks.sh     # on the 2080
+DEVICE=cuda bash scripts/run_pending_tasks.sh     # on the 2080 (default GPU)
+GPU=1 DEVICE=cuda bash scripts/run_pending_tasks.sh  # physical GPU 1
 SKIP_GRID=1 bash scripts/run_pending_tasks.sh     # skip the 3-4 day grid
 SKIP_IMAGE=1 bash scripts/run_pending_tasks.sh    # skip the image suite
 RUN_TIMING=1 bash scripts/run_pending_tasks.sh    # add the sequential timing pass
 DRY_RUN=1 bash scripts/run_pending_tasks.sh       # print the command sequence only
 ```
+
+`GPU=<n>` sets `CUDA_VISIBLE_DEVICES` before any Python process starts, so
+physical GPU `n` becomes logical `cuda:0` for the whole run; the preflight prints
+the visible device and its name. `DEVICE=cuda:<n>` also works, but prefer `GPU`
+because a few library calls (profiling) synchronise the current device. Do not
+pass both.
 
 It is resumable and idempotent. The copied tree must contain `data/acic`,
 `data/static`, `data/real` and `data/semi_synthetic`; the synthetic pools

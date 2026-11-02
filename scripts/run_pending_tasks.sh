@@ -21,6 +21,7 @@
 #   SKIP_GRID=1 bash scripts/run_pending_tasks.sh     # everything except the grid
 #   RUN_TIMING=1 bash scripts/run_pending_tasks.sh    # also time the tables
 #   SKIP_POOLS=1 bash scripts/run_pending_tasks.sh    # pools already copied
+#   GPU=1 DEVICE=cuda bash scripts/run_pending_tasks.sh  # physical GPU 1
 #
 # Every step is resumable; rerunning the script continues where it stopped.
 
@@ -29,11 +30,25 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 DEVICE="${DEVICE:-mps}"
+GPU="${GPU:-}"
 SKIP_GRID="${SKIP_GRID:-0}"
 SKIP_IMAGE="${SKIP_IMAGE:-0}"
 RUN_TIMING="${RUN_TIMING:-0}"
 LATEX_DIR="${LATEX_DIR:-../latex}"
 PY="uv run --no-sync python"
+
+# Select a physical GPU by remapping it to logical cuda:0. This is more robust
+# than DEVICE=cuda:1 because a few library calls (e.g. profiling) sync the
+# current device. Do not combine GPU with an indexed DEVICE.
+case "$DEVICE" in
+  *:*) if [ -n "$GPU" ]; then
+         echo "Use GPU=<n> or DEVICE=cuda:<n>, not both." >&2
+         exit 2
+       fi ;;
+esac
+if [ -n "$GPU" ]; then
+  export CUDA_VISIBLE_DEVICES="$GPU"
+fi
 
 export GCMTS_PREFETCH=1
 export GCMTS_LIGHT_BATCH=1
@@ -53,7 +68,7 @@ CRL_FLAGS=(
   --kl-warmup-epochs 50
 )
 
-echo "== device=$DEVICE grid=$SKIP_GRID image=$SKIP_IMAGE timing=$RUN_TIMING =="
+echo "== device=$DEVICE gpu=${GPU:-default} grid=$SKIP_GRID image=$SKIP_IMAGE timing=$RUN_TIMING =="
 
 # ---------------------------------------------------------------- 1. preflight
 echo "== 1/7 preflight =="
@@ -74,6 +89,12 @@ else
   digest=$(python3 -c 'import json; print(json.load(open("data/acic/manifest.json"))["digest"][:12])')
   echo "ACIC manifest present (digest $digest)"
 fi
+
+case "$DEVICE" in
+  cuda*)
+    run $PY -c "import os, torch; print('CUDA visible:', os.environ.get('CUDA_VISIBLE_DEVICES', 'all'), '->', torch.cuda.get_device_name(0), 'count', torch.cuda.device_count())"
+    ;;
+esac
 
 # ------------------------------------------------------- 2. IHDP 100 replications
 echo "== 2/7 IHDP, 100 replications (resumes from the stored rows) =="
