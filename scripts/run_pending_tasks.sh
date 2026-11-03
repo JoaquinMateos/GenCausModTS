@@ -1,27 +1,28 @@
 #!/usr/bin/env bash
 # Run every pending benchmark task that can be executed from a copied tree.
 #
-# It assumes the tree already contains:
-#   - the code at this revision (git pull),
-#   - data/ (synthetic pools, ACIC, Twins, News, real cohorts),
-#   - outputs/ and outputs_shared/ from the 2026-11 run (the script resumes).
+# It assumes the tree already contains the code at this revision and data/
+# (ACIC, static, real, semi_synthetic); the synthetic pools are regenerated if
+# missing. outputs/ and outputs_shared/ are resumed.
 #
-# What it runs, in order:
-#   1. preflight: dataset manifest + pool finiteness
-#   2. T2  IHDP extended to 100 replications (resumes from 30)
-#   3. T8  rendered-image Temporal Causal3DIdent (pools + 10 seeds x 5 methods)
-#   4. T1  18-problem grid on the fresh pools, two shards
-#   5. T7  CPS, only if data/static/cps.csv is present
-#   6. T3  sequential timing pass (optional: RUN_TIMING=1)
-#   7. T4  statistics, floors, tables, audit
+# Blocks (independent; run concurrently up to JOBS):
+#   ihdp      IHDP extended to 100 replications
+#   image     rendered-image Temporal Causal3DIdent (10 seeds x 5 methods)
+#   grid_a    18-problem grid, shard 0
+#   grid_b    18-problem grid, shard 1
 #
 # Usage (from the repository root):
-#   bash scripts/run_pending_tasks.sh                 # device=mps
-#   DEVICE=cuda bash scripts/run_pending_tasks.sh     # on the 2080
-#   SKIP_GRID=1 bash scripts/run_pending_tasks.sh     # everything except the grid
-#   RUN_TIMING=1 bash scripts/run_pending_tasks.sh    # also time the tables
-#   SKIP_POOLS=1 bash scripts/run_pending_tasks.sh    # pools already copied
-#   GPU=1 DEVICE=cuda bash scripts/run_pending_tasks.sh  # physical GPU 1
+#   GPU=1 DEVICE=cuda JOBS=4 bash scripts/run_pending_tasks.sh
+#   JOBS=2 bash scripts/run_pending_tasks.sh
+#   DEVICE=cuda bash scripts/run_pending_tasks.sh          # sequential
+#   SKIP_GRID=1 bash scripts/run_pending_tasks.sh
+#   SKIP_IMAGE=1 bash scripts/run_pending_tasks.sh
+#   RUN_TIMING=1 JOBS=1 bash scripts/run_pending_tasks.sh  # timing must be sequential
+#   SKIP_POOLS=1 bash scripts/run_pending_tasks.sh         # pools already copied
+#   DRY_RUN=1 bash scripts/run_pending_tasks.sh            # print commands only
+#
+# JOBS>1 shares one GPU. Check memory first (nvidia-smi); the image suite is the
+# heaviest process. If the GPU has little free memory, run with JOBS=2.
 #
 # Every step is resumable; rerunning the script continues where it stopped.
 
@@ -31,29 +32,13 @@ cd "$(dirname "$0")/.."
 
 DEVICE="${DEVICE:-mps}"
 GPU="${GPU:-}"
+JOBS="${JOBS:-1}"
 SKIP_GRID="${SKIP_GRID:-0}"
 SKIP_IMAGE="${SKIP_IMAGE:-0}"
 RUN_TIMING="${RUN_TIMING:-0}"
 LATEX_DIR="${LATEX_DIR:-../latex}"
-# Pick an interpreter that actually has torch. ``uv run --no-sync`` can resolve
-# to an environment without the project dependencies on hosts with a conda
-# base env, so check explicitly instead of trusting it.
-if [ -x .venv/bin/python ] && .venv/bin/python -c "import torch" >/dev/null 2>&1; then
-  PY=".venv/bin/python"
-elif uv run --no-sync python -c "import torch" >/dev/null 2>&1; then
-  PY="uv run --no-sync python"
-elif python -c "import torch" >/dev/null 2>&1; then
-  PY="python"
-else
-  echo "No Python interpreter with torch found (.venv, uv run, or python)." >&2
-  echo "Run 'uv sync --extra dev --extra real --extra progress' first." >&2
-  exit 1
-fi
-echo "interpreter: $PY"
+DRY_RUN="${DRY_RUN:-0}"
 
-# Select a physical GPU by remapping it to logical cuda:0. This is more robust
-# than DEVICE=cuda:1 because a few library calls (e.g. profiling) sync the
-# current device. Do not combine GPU with an indexed DEVICE.
 case "$DEVICE" in
   *:*) if [ -n "$GPU" ]; then
          echo "Use GPU=<n> or DEVICE=cuda:<n>, not both." >&2
@@ -67,7 +52,6 @@ fi
 export GCMTS_PREFETCH=1
 export GCMTS_LIGHT_BATCH=1
 
-DRY_RUN="${DRY_RUN:-0}"
 run() {
   if [ "$DRY_RUN" = "1" ]; then
     printf '+ %s\n' "$*"
@@ -76,26 +60,50 @@ run() {
   fi
 }
 
+# ------------------------------------------------------------------ interpreter
+if [ -x .venv/bin/python ] && .venv/bin/python -c "import torch" >/dev/null 2>&1; then
+  PY=".venv/bin/python"
+elif uv run --no-sync python -c "import torch" >/dev/null 2>&1; then
+  PY="uv run --no-sync python"
+elif python -c "import torch" >/dev/null 2>&1; then
+  PY="python"
+else
+  echo "No Python interpreter with torch found (.venv, uv run, or python)." >&2
+  echo "Run 'uv sync --extra dev --extra real --extra progress' first." >&2
+  exit 1
+fi
+
 CRL_FLAGS=(
   --seeds 10 --epochs-scale 1.0 --data-source pool --dataset-dir data/synthetic
   --scheduler adaptive --early-stopping-patience 300 --ema-decay 0.99
   --kl-warmup-epochs 50
 )
+CTEE_FLAGS=(--device "$DEVICE" --out-dir outputs)
 
-echo "== device=$DEVICE gpu=${GPU:-default} grid=$SKIP_GRID image=$SKIP_IMAGE timing=$RUN_TIMING =="
-
-# ---------------------------------------------------------------- 1. preflight
-echo "== 1/7 preflight =="
 BASE_SUITES="npvar npvar_linear npvar_hard cartpole causal3d lorenz lorenz96 pcl \
              kuramoto lotka_volterra duffing fitzhugh_nagumo chua van_der_pol \
              pendulum mountain_car varma ou child sde voronoi"
+
+mkdir -p outputs/logs
+echo "== device=$DEVICE gpu=${GPU:-default} jobs=$JOBS grid=$SKIP_GRID image=$SKIP_IMAGE timing=$RUN_TIMING =="
+echo "interpreter: $PY"
+
+# ------------------------------------------------------------------- preflight
+echo "== preflight =="
 if [ "${SKIP_POOLS:-0}" = "1" ] || \
    { [ -f data/synthetic/npvar/seed_00.pt ] && [ -f data/synthetic/grid_d3_D6_s2_r2/seed_00.pt ]; }; then
   echo "pools already present; skipping generation (set SKIP_POOLS=0 to force a check)"
 else
-  echo "generating the missing pools (existing finite pools are skipped)"
+  echo "generating the missing base and grid pools"
   run $PY scripts/generate_synthetic_data.py --seeds 10 --suites $BASE_SUITES --with-grid
 fi
+
+if [ ! -f data/synthetic/causal3d_img/seed_00.pt ]; then
+  echo "generating the rendered-image pools"
+  run $PY scripts/generate_synthetic_data.py --suites causal3d_img --seeds 10 \
+    --train-size 8192 --eval-size 1024
+fi
+
 if [ ! -f data/acic/manifest.json ]; then
   echo "ACIC manifest missing; writing it for this snapshot"
   run $PY scripts/write_acic_manifest.py --data-dir data/acic
@@ -104,6 +112,8 @@ else
   echo "ACIC manifest present (digest $digest)"
 fi
 
+run $PY scripts/verify_outputs.py --pools-only
+
 case "$DEVICE" in
   cuda*)
     run $PY -c "import os, torch; print('CUDA visible:', os.environ.get('CUDA_VISIBLE_DEVICES', 'all'), '->', torch.cuda.get_device_name(0), 'count', torch.cuda.device_count())" || \
@@ -111,49 +121,97 @@ case "$DEVICE" in
     ;;
 esac
 
-# ------------------------------------------------------- 2. IHDP 100 replications
-echo "== 2/7 IHDP, 100 replications (resumes from the stored rows) =="
-run $PY scripts/run_ctee_static.py --device "$DEVICE" --dataset ihdp \
-  --replications 100 --force --out-dir outputs
+# ------------------------------------------------------------------ job bodies
+job_cmd() {
+  case "$1" in
+    ihdp)
+      run $PY scripts/run_ctee_static.py "${CTEE_FLAGS[@]}" --dataset ihdp \
+        --replications 100 --force
+      ;;
+    image)
+      run $PY scripts/run_crl_shared.py --device "$DEVICE" --suite causal3d_img \
+        --out-dir outputs_shared "${CRL_FLAGS[@]}"
+      ;;
+    grid_a)
+      run $PY scripts/run_crl_shared.py --device "$DEVICE" --grid \
+        --shard-index 0 --shard-total 2 --stem crl_shared_grid_a \
+        --out-dir outputs_shared "${CRL_FLAGS[@]}"
+      ;;
+    grid_b)
+      run $PY scripts/run_crl_shared.py --device "$DEVICE" --grid \
+        --shard-index 1 --shard-total 2 --stem crl_shared_grid_b \
+        --out-dir outputs_shared "${CRL_FLAGS[@]}"
+      ;;
+    *) echo "unknown job $1" >&2; return 2 ;;
+  esac
+}
 
-# ------------------------------------- 3. rendered-image Temporal Causal3DIdent
-if [ "$SKIP_IMAGE" = "0" ]; then
-  echo "== 3/7 rendered-image Causal3DIdent =="
-  run $PY scripts/generate_synthetic_data.py --suites causal3d_img --seeds 10 \
-    --train-size 8192 --eval-size 1024
-  run $PY scripts/verify_outputs.py --pools-only
-  run $PY scripts/run_crl_shared.py --device "$DEVICE" --suite causal3d_img \
-    --out-dir outputs_shared "${CRL_FLAGS[@]}"
-else
-  echo "== 3/7 rendered-image Causal3DIdent skipped (SKIP_IMAGE=1) =="
-fi
+JOB_PIDS=()
+JOB_NAMES=()
 
-# ----------------------------------------------------- 4. the 18-problem grid
-if [ "$SKIP_GRID" = "0" ]; then
-  echo "== 4/7 grid shards (pools generated in preflight) =="
-  run $PY scripts/verify_outputs.py --pools-only
-  for shard in 0 1; do
-    if [ "$shard" = "0" ]; then stem=crl_shared_grid_a; else stem=crl_shared_grid_b; fi
-    run $PY scripts/run_crl_shared.py --device "$DEVICE" --grid \
-      --shard-index "$shard" --shard-total 2 --stem "$stem" \
-      --out-dir outputs_shared "${CRL_FLAGS[@]}"
+start_job() {
+  local name="$1"
+  if [ "$DRY_RUN" = "1" ]; then
+    echo "--- $name"
+    job_cmd "$name"
+    return 0
+  fi
+  ( job_cmd "$name" ) > "outputs/logs/pending_${name}.log" 2>&1 &
+  JOB_PIDS+=("$!")
+  JOB_NAMES+=("$name")
+  echo "started $name -> outputs/logs/pending_${name}.log (pid $!)"
+}
+
+wait_jobs() {
+  local failed=()
+  for index in "${!JOB_PIDS[@]}"; do
+    if ! wait "${JOB_PIDS[$index]}"; then
+      failed+=("${JOB_NAMES[$index]}")
+    fi
   done
-else
-  echo "== 4/7 grid skipped (SKIP_GRID=1) =="
+  JOB_PIDS=()
+  JOB_NAMES=()
+  if [ "${#failed[@]}" -gt 0 ]; then
+    echo "FAILED jobs: ${failed[*]}" >&2
+    for name in "${failed[@]}"; do
+      echo "--- tail of outputs/logs/pending_${name}.log" >&2
+      tail -20 "outputs/logs/pending_${name}.log" >&2 || true
+    done
+    return 1
+  fi
+  return 0
+}
+
+# ------------------------------------------------------------- run the blocks
+JOB_LIST=(ihdp)
+[ "$SKIP_IMAGE" = "0" ] && JOB_LIST+=(image)
+if [ "$SKIP_GRID" = "0" ]; then
+  JOB_LIST+=(grid_a grid_b)
 fi
 
-# ------------------------------------------------------------ 5. CPS (manual)
-echo "== 5/7 CPS =="
+echo "== blocks: ${JOB_LIST[*]} (concurrency $JOBS) =="
+offset=0
+while [ "$offset" -lt "${#JOB_LIST[@]}" ]; do
+  batch=("${JOB_LIST[@]:offset:JOBS}")
+  for name in "${batch[@]}"; do
+    start_job "$name"
+  done
+  wait_jobs || exit 1
+  offset=$((offset + JOBS))
+done
+
+# --------------------------------------------------------------- CPS (manual)
+echo "== CPS =="
 if [ -f data/static/cps.csv ]; then
-  run $PY scripts/run_ctee_static.py --device "$DEVICE" --dataset cps \
-    --replications 100 --out-dir outputs
+  run $PY scripts/run_ctee_static.py "${CTEE_FLAGS[@]}" --dataset cps \
+    --replications 100
 else
-  echo "data/static/cps.csv absent: CPS remains a manual panel (see docs/OPEN_TASKS.md T7)."
+  echo "data/static/cps.csv absent: CPS remains a manual panel (docs/OPEN_TASKS.md T7)."
 fi
 
-# --------------------------------------------------------- 6. sequential timings
+# --------------------------------------------------------- sequential timing
 if [ "$RUN_TIMING" = "1" ]; then
-  echo "== 6/7 sequential timing pass (this is the long one) =="
+  echo "== sequential timing pass =="
   unset GCMTS_TIMING
   for suite in npvar npvar_linear npvar_hard cartpole causal3d lorenz lorenz96 \
                pcl kuramoto lotka_volterra duffing fitzhugh_nagumo chua \
@@ -173,11 +231,11 @@ if [ "$RUN_TIMING" = "1" ]; then
   run $PY scripts/merge_timings.py --main outputs outputs_shared \
     --timing outputs_timing outputs_shared_timing
 else
-  echo "== 6/7 timing pass skipped (set RUN_TIMING=1 to run it) =="
+  echo "timing pass skipped (set RUN_TIMING=1 to run it; keep JOBS=1)."
 fi
 
-# ------------------------------------------------------ 7. analysis and tables
-echo "== 7/7 statistics, floors, tables, audit =="
+# ------------------------------------------------------ analysis and tables
+echo "== statistics, floors, tables, audit =="
 run $PY scripts/statds_report.py --outputs outputs --shared outputs_shared \
   --out docs/statistical_analysis.md --json-out docs/statistical_analysis.json
 run $PY scripts/reference_floors.py --outputs outputs --out docs/reference_floors.md
@@ -191,7 +249,7 @@ echo "  audit:   docs/audit_pending.md (must report FAIL=0)"
 echo "  stats:   docs/statistical_analysis.md"
 echo "  tables:  $LATEX_DIR/pic/experiments/*.tex"
 echo
-echo "Not automatable here (see docs/OPEN_TASKS.md):"
+echo "Not automatable here (docs/OPEN_TASKS.md):"
 echo "  T7  CPS needs data/static/cps.csv (manual request)."
 echo "  T9  II.D representatives, T10 adjacent representatives: new implementations."
 echo "  T11 tagged release with DOI."
