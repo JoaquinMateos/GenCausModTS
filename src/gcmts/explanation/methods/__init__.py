@@ -1,5 +1,6 @@
 """Concrete explanation methods."""
 
+from gcmts.explanation.methods.becker_attribution import BeckerAttribution
 from gcmts.explanation.methods.causal_concept_ts import CausalConceptTS
 
-__all__ = ["CausalConceptTS"]
+__all__ = ["BeckerAttribution", "CausalConceptTS"]

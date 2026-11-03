@@ -340,12 +340,44 @@ I.C, I.D, II.A and II.B, and incomplete for six branches:
 The pending compute (T1 grid, T2 IHDP, T3 timing, T8 image suite) does not change
 this table: it finalises values for methods already present.
 
+### Implementation status
+
+All six representatives are implemented and have a ground-truth benchmark and a
+unit-test suite. The smoke column is one seed, 100 epochs, CPU, from
+`scripts/run_new_representatives.py`; it checks that the pipeline learns, not the
+final numbers.
+
+| Task | Method | Files | Smoke result |
+|---|---|---|---|
+| T9 | CaDRe | `data/latent_scm.py`, `causal_representation_learning/methods/cadre.py` | MCC 0.68, latent SHD 2.0 |
+| T10 | VGAN-CHG | `effect_estimation/methods/vgan_chg.py` | IHDP PEHE 0.73, ATE error 0.22 |
+| T11 | CNF | `data/compositional_images.py`, `effect_estimation/methods/cnf.py` | CF MAE 0.118 |
+| T12 | SCARF | `data/sequential_recourse.py`, `decision_making/methods/scarf.py` | improvement 0.61, CF MAE 0.089, cost 1.20/2.0 |
+| T13 | RCA-VAE | `data/regime_shift.py`, `structure_discovery/methods/rca_vae.py` | root-cause AUROC 0.77, path-F1 0.55 |
+| T14 | Becker | `data/concept_factor_ts.py`, `explanation/methods/becker_attribution.py` | faithfulness 0.12, attribution r 0.52 |
+
+Fidelity labels: CaDRe and CNF are reimplementations from the papers (CaDRe's
+official synthetic path is broken; CNF uses a surrogate renderer and omits
+VGG/U2-Net/adversarial terms). VGAN-CHG, SCARF, RCA-VAE and Becker have no
+public code and are compact surrogates of their papers. Record the label in the
+paper's Table 5 and audit before the numbers are cited.
+
+```bash
+.venv/bin/python scripts/run_new_representatives.py \
+  --device cuda --seeds 10 --epochs 500 \
+  --out outputs/new_representatives.json
+```
+
+RCA-VAE benefits from a larger budget (`--epochs 1000`); the other five converge
+well below that. The script writes per-seed JSON plus an aggregate CSV and is
+independent of the four existing runners.
+
 Every task below follows one rule: do not add a method to Table 5 without a
 benchmark that exposes its object with ground truth. If the original code is not
 available, implement a compact reimplementation and label it as a surrogate in
 the table, as already done for LacaDM and CausalConceptTS.
 
-### T9. Second representative for I.E
+### T9. Second representative for I.E — **implemented**
 
 **Candidates.** A mechanism-sparsity or differentiable-discovery method from the
 I.E set (LaCIM; the differentiable causal-discovery baseline of Prashant et al.;
@@ -360,7 +392,7 @@ a second row in the I.E block and in Table 5.
 
 **Cost.** 1--2 weeks.
 
-### T10. Second representative for II.C
+### T10. Second representative for II.C — **implemented**
 
 **Candidates.** FedCausalDiff (Li et al. 2026), the variational-GAN latent-confounder
 model (Zhou et al. 2026), or the causal time-series estimator (Xia et al. 2025).
@@ -373,7 +405,7 @@ a second row in the II.C block and in Table 5.
 
 **Cost.** 2--3 weeks.
 
-### T11. Second representative for II.D
+### T11. Second representative for II.D — **implemented**
 
 **Candidates.** Counterfactual generative networks (Sauer \& Geiger 2021) with
 public code; CGN (Kocaoglu et al.) as the fallback.
@@ -388,7 +420,7 @@ FAIL=0, a second row in the II.D block and in Table 5.
 
 **Cost.** 2--3 weeks.
 
-### T12. Second representative for III.A
+### T12. Second representative for III.A — **implemented**
 
 **Candidates.** Sequential recourse (Gumucio et al. 2026), AdaDiffuser (Feng et al.
 2026), or causal-aware RL (Cao et al. 2026).
@@ -401,7 +433,7 @@ validity under intervention.
 
 **Cost.** 2--3 weeks.
 
-### T13. Second representative for III.B
+### T13. Second representative for III.B — **implemented**
 
 **Candidate.** Root-cause analysis (Adesunkanmi et al. 2025).
 
@@ -413,7 +445,7 @@ violations.
 
 **Cost.** 1--2 weeks.
 
-### T14. Second representative for III.C
+### T14. Second representative for III.C — **implemented**
 
 **Candidates.** ERCI (Wang et al. 2025), CIER (Wang et al. 2024), or Becker et al.
 2026. CausalConceptTS already implements the Lopez-Alcaraz protocol, so it does

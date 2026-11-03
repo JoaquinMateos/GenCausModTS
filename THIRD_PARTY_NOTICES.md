@@ -52,3 +52,14 @@ obligation and can incorporate and be combined with MIT, BSD-3-Clause,
 BSD-3-Clause-Clear, and Apache-2.0 code, provided their attribution and notice
 conditions are met. Apache-2.0 additionally grants an explicit patent license,
 which is preserved for the corresponding dependencies.
+
+| CausalGAN | `kocaogluCausalGANLearningCausal2017` | — (no public code) | — |
+| LacaDM | `xuemingyanLacaDMLatentCausal2025` | — (no public code) | — |
+| GBTPL | `zhuGBTPLGraphConstrainedGenerative2026a` | — (no public code) | — |
+| CausalConceptTS | `j.m.lopezalcarazExplainingTimeSeries2025` | — (no public code) | — |
+| CaDRe | `minghaofuLearningGeneralCausal2025` | https://github.com/MinghaoFu/CaDRe | MIT |
+| VGAN-CHG | `x.zhouVariationalGANEnhancedCausal2026` | — (no public code) | — |
+| CNF | `sauerCounterfactualGenerativeNetworks2021` | https://github.com/autonomousvision/counterfactual_generative_networks | MIT |
+| SCARF | `gumucioAlgorithmicRecourseSequential2026` | — (no public code) | — |
+| RCA-VAE | `rahmatk.adesunkanmiRootCauseAnalysis2025` | — (no public code) | — |
+| Becker | `beckerExplainableNeuralNetwork2026` | — (no public code) | — |

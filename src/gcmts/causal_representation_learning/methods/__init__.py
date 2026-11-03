@@ -4,6 +4,7 @@ Each method implements the identifiability result of its source paper and
 subclasses :class:`~gcmts.causal_representation_learning.base.BaseCausalRepresentationLearner`.
 """
 
+from gcmts.causal_representation_learning.methods.cadre import CaDRe
 from gcmts.causal_representation_learning.methods.cegen import CEGEN
 from gcmts.causal_representation_learning.methods.child import CHiLD
 from gcmts.causal_representation_learning.methods.citris import CITRIS
@@ -16,6 +17,7 @@ from gcmts.causal_representation_learning.methods.slow_flows import SlowFlows
 from gcmts.causal_representation_learning.methods.tdrl import TDRL
 
 __all__ = [
+    "CaDRe",
     "CEGEN",
     "CHiLD",
     "CITRIS",

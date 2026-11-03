@@ -4,9 +4,12 @@ from gcmts.data.base import BaseDataGenerator
 from gcmts.data.binary_scm import BinarySCMGenerator
 from gcmts.data.canonical_static import CPSLoader, NewsLoader, TwinsLoader, load_jobs
 from gcmts.data.causal3dident import Causal3DIdentImageGenerator
+from gcmts.data.compositional_images import CompositionalImageGenerator
+from gcmts.data.concept_factor_ts import ConceptFactorTimeSeriesGenerator
 from gcmts.data.concept_ts import ConceptTimeSeriesGenerator
 from gcmts.data.control import MountainCarGenerator, PendulumGenerator
 from gcmts.data.hierarchical import HierarchicalTemporalGenerator
+from gcmts.data.latent_scm import LatentStructuralGenerator
 from gcmts.data.linear_processes import OUProcessGenerator, VARMAProcessGenerator
 from gcmts.data.lorenz import LorenzGenerator
 from gcmts.data.multi_objective import MultiObjectiveMDPGenerator
@@ -30,8 +33,10 @@ from gcmts.data.real_panels import (
     load_real_dataset,
 )
 from gcmts.data.real_registry import REAL_DATASETS, RealDataset, real_by_role, real_label
+from gcmts.data.regime_shift import RegimeShiftPropagationGenerator
 from gcmts.data.sem_effect import TimeVaryingSEMGenerator
 from gcmts.data.semi_synthetic import ACICLoader, IHDPGenerator, IHDPLoader, TumourGrowthSimulator
+from gcmts.data.sequential_recourse import SequentialRecourseGenerator
 from gcmts.data.static_effect import STATIC_CATE_BENCHMARKS, StaticCateLoader
 from gcmts.data.synthetic import (
     CartPoleGenerator,
@@ -63,14 +68,19 @@ __all__ = [
     "BaseDataGenerator",
     "BinarySCMGenerator",
     "Causal3DIdentImageGenerator",
+    "CompositionalImageGenerator",
+    "ConceptFactorTimeSeriesGenerator",
     "CPSLoader",
     "NewsLoader",
     "TwinsLoader",
     "load_jobs",
     "ConceptTimeSeriesGenerator",
     "HierarchicalTemporalGenerator",
+    "LatentStructuralGenerator",
     "MultiObjectiveMDPGenerator",
     "PropagationGenerator",
+    "RegimeShiftPropagationGenerator",
+    "SequentialRecourseGenerator",
     "IHDPLoader",
     "IHDPGenerator",
     "RealTimeSeries",
