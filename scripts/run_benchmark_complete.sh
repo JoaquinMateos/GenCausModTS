@@ -84,8 +84,18 @@ if rows:
     print(f"merged {len(rows)} new-representative rows")
 PY
 
-echo "== sequential timing pass =="
-bash scripts/run_pending_timing.sh "" cuda
+if [ "${RUN_TIMING:-0}" = "1" ]; then
+  echo "== sequential timing pass (explicitly requested) =="
+  bash scripts/run_pending_timing.sh "" cuda
+else
+  echo "== analysis and tables (wall-clock times deferred) =="
+  "$PY" scripts/statds_report.py --outputs outputs --shared outputs_shared \
+    --out docs/statistical_analysis.md --json-out docs/statistical_analysis.json
+  "$PY" scripts/reference_floors.py --outputs outputs --out docs/reference_floors.md
+  "$PY" scripts/verify_outputs.py --pools --report docs/audit_pending.md || true
+  "$PY" scripts/make_paper_tables.py --shared-dir outputs_shared \
+    --outputs-dir outputs --latex-dir ../latex
+fi
 
 echo "== complete =="
 date -Is
