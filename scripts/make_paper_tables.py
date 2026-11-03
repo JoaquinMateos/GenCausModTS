@@ -31,7 +31,12 @@ from gcmts.evaluation.benchmarks import (
     crl_label,
 )
 from gcmts.evaluation.report import aggregate_rows
-from gcmts.evaluation.stats import friedman_test, metric_matrix, nemenyi, plot_cd_diagram
+from gcmts.evaluation.stats import (
+    friedman_test,
+    metric_matrix,
+    nemenyi,
+    save_cd_figure,
+)
 
 __all__ = ["main"]
 
@@ -749,7 +754,7 @@ def write_stats_section(shared_dir: Path, latex_dir: Path) -> None:
         if complete.shape[0] < 2 or complete.shape[1] < 3:
             continue
         friedman = friedman_test(matrix)
-        result = nemenyi(matrix, higher_is_better=higher)
+        result = nemenyi(matrix, higher_is_better=higher, names=cases)
         ranks = ", ".join(
             f"{case}: {rank:.2f}"
             for case, rank in zip(cases, result["average_ranks"].tolist(), strict=True)
@@ -768,15 +773,9 @@ def write_stats_section(shared_dir: Path, latex_dir: Path) -> None:
             f"{result['critical_difference']:.2f} & {ranks} \\\\"
         )
         if metric in {"mcc", "r2_diag", "forecast1"}:
-            name = f"cd_{metric}.png"
-            plot_cd_diagram(
-                {
-                    case: float(rank)
-                    for case, rank in zip(cases, result["average_ranks"].tolist(), strict=True)
-                },
-                float(result["critical_difference"]),
-                path=latex_dir / "pic" / "experiments" / name,
-                title=f"{metric} ({'higher' if higher else 'lower'} is better)",
+            name = f"cd_{metric}.pdf"
+            save_cd_figure(
+                result["figure"], latex_dir / "pic" / "experiments" / name
             )
             figure_names.append(name)
 
@@ -804,14 +803,16 @@ def write_stats_section(shared_dir: Path, latex_dir: Path) -> None:
 """
     )
     if figure_names:
-        includes = "\n".join(
-            f"  \\includegraphics[width=.32\\textwidth]{{pic/experiments/{name}}}"
+        includes = "\\\\\n".join(
+            f"  \\includegraphics[width=\\textwidth]{{pic/experiments/{name}}}"
             for name in figure_names
         )
         section += (
             "\n\\begin{figure*}[t]\n  \\centering\n"
             + includes
-            + "\n  \\caption{Critical-difference diagrams for the eighteen-problem CRL configuration grid: methods whose average ranks are joined by a bar are not significantly different at $\\alpha=0.05$ (Nemenyi). Lower ranks are better.}\n"
+            + "\n  \\caption{Critical-difference diagrams for the "
+            + f"{n_problems}"
+            + "-problem CRL configuration grid: methods whose average ranks are joined by a bar are not significantly different at $\\alpha=0.05$ (Nemenyi). Lower ranks are better. The tests and the diagrams are computed with StaTDS \\cite{lunaStaTDSLibraryStatistical2024}.}\n"
             "  \\label{fig:cd_diagrams}\n\\end{figure*}\n"
         )
     out = latex_dir / "pic" / "experiments" / "stats.tex"

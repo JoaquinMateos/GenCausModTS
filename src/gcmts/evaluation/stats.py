@@ -9,9 +9,12 @@ This module implements the protocol fixed in the repository plan
   instances.
 * :func:`friedman_test` -- omnibus Friedman test over a rank matrix of shape
   ``(n_problems, n_methods)``.
-* :func:`nemenyi` -- Nemenyi post-hoc test with the critical difference
-  ``CD = q_alpha * sqrt(k (k + 1) / (6 N))`` (Demsar, 2006).
-* :func:`plot_cd_diagram` -- critical-difference diagram for average ranks.
+* :func:`nemenyi` -- Nemenyi post-hoc test and critical-difference diagram.
+* :func:`save_cd_figure` -- write a StaTDS figure as vector PDF and SVG.
+
+Friedman, Nemenyi and the diagrams are delegated to StaTDS (Luna et al.,
+Neurocomputing 595:127877, 2024), so the reported test and its figure come from
+one implementation.
 
 The statistics are computed on per-seed rows (the raw JSON records written by
 :func:`gcmts.evaluation.report.save_rows`), so they are consistent with the
@@ -20,11 +23,10 @@ reported mean/std.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 
@@ -38,28 +40,9 @@ __all__ = [
     "metric_matrix",
     "friedman_test",
     "nemenyi",
+    "save_cd_figure",
     "plot_cd_diagram",
 ]
-
-# Studentized-range critical values q_alpha for the two-tailed Nemenyi test at
-# alpha = 0.05 (Demsar, 2006, Table 5). Index by the number of methods k.
-_NEMENYI_Q05: dict[int, float] = {
-    2: 1.960,
-    3: 2.343,
-    4: 2.569,
-    5: 2.728,
-    6: 2.850,
-    7: 2.949,
-    8: 3.031,
-    9: 3.102,
-    10: 3.164,
-    11: 3.219,
-    12: 3.268,
-    13: 3.313,
-    14: 3.354,
-    15: 3.391,
-}
-
 
 @dataclass(frozen=True)
 class Comparison:
@@ -279,16 +262,34 @@ def _complete_matrix(rank_matrix: np.ndarray) -> np.ndarray:
     return matrix[~np.isnan(matrix).any(axis=1)]
 
 
-def friedman_test(rank_matrix: np.ndarray) -> dict[str, float]:
-    """Omnibus Friedman test on a ``(n_problems, n_methods)`` metric matrix."""
-    from scipy.stats import friedmanchisquare
+def friedman_test(
+    rank_matrix: np.ndarray, *, higher_is_better: bool = True
+) -> dict[str, float]:
+    """Omnibus Friedman test on a ``(n_problems, n_methods)`` metric matrix.
+
+    The statistic and p-value come from ``statds.no_parametrics.friedman``.
+    ``higher_is_better`` only fixes the orientation of the internal ranks; the
+    statistic itself is invariant to reversing them.
+    """
+    import pandas as pd
+    from statds.no_parametrics import friedman as statds_friedman
 
     matrix = _complete_matrix(rank_matrix)
     if matrix.shape[0] < 2:
         raise ValueError("Friedman test requires at least two complete problems.")
     if matrix.shape[1] < 3:
         raise ValueError("Friedman test requires at least three methods.")
-    statistic, p_value = friedmanchisquare(*matrix.T)
+    frame = pd.DataFrame(
+        matrix, columns=[f"method_{index}" for index in range(matrix.shape[1])]
+    )
+    frame.insert(0, "problem", np.arange(matrix.shape[0]))
+    _, statistic, p_value, _, _ = statds_friedman(
+        frame, alpha=0.05, minimize=not higher_is_better
+    )
+    if p_value is None:  # StaTDS uses a table for very small designs
+        from scipy.stats import chi2
+
+        p_value = chi2.sf(statistic, matrix.shape[1] - 1)
     return {
         "statistic": float(statistic),
         "p_value": float(p_value),
@@ -298,58 +299,73 @@ def friedman_test(rank_matrix: np.ndarray) -> dict[str, float]:
 
 
 def nemenyi(
-    rank_matrix: np.ndarray, *, alpha: float = 0.05, higher_is_better: bool = True
+    rank_matrix: np.ndarray,
+    *,
+    alpha: float = 0.05,
+    higher_is_better: bool = True,
+    names: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    """Nemenyi post-hoc test and critical difference on a metric matrix.
+    """Nemenyi post-hoc test, critical difference and StaTDS diagram.
 
-    Ranks are oriented so that the best method receives rank one: pass
-    ``higher_is_better=False`` for error metrics (lower is better). Returns a
-    dictionary with the average ranks per column, the pairwise Nemenyi p-value
-    matrix, the critical difference and the raw rank matrix.
+    Ranks are oriented so that the best method receives rank one. The critical
+    difference and the figure are produced by ``statds.no_parametrics.nemenyi``;
+    the returned ``figure`` can be saved with :func:`save_cd_figure`.
     """
-    from scikit_posthocs import posthoc_nemenyi_friedman
     from scipy.stats import rankdata
+    from statds.no_parametrics import nemenyi as statds_nemenyi
 
     matrix = _complete_matrix(rank_matrix)
     if matrix.shape[0] < 2 or matrix.shape[1] < 3:
         raise ValueError("Nemenyi requires >= 2 complete problems and >= 3 methods.")
     n_problems, n_methods = matrix.shape
-    if n_methods not in _NEMENYI_Q05:
-        raise ValueError(
-            f"No Nemenyi q_alpha entry for k={n_methods} methods (max 15)."
-        )
     orientation = -matrix if higher_is_better else matrix
     ranks = np.apply_along_axis(rankdata, 1, orientation)
     average_ranks = ranks.mean(axis=0)
-    p_matrix = posthoc_nemenyi_friedman(matrix).to_numpy(dtype=float)
-    critical_difference = _NEMENYI_Q05[n_methods] * math.sqrt(
-        n_methods * (n_methods + 1) / (6.0 * n_problems)
+    if names is None:
+        labels = [f"method_{index}" for index in range(n_methods)]
+    else:
+        labels = list(names)
+        if len(labels) != n_methods:
+            raise ValueError("names must have one entry per method.")
+    rank_map = {
+        str(label): float(rank)
+        for label, rank in zip(labels, average_ranks, strict=True)
+    }
+    _, critical_difference, figure = statds_nemenyi(
+        rank_map, n_problems, alpha=alpha
     )
     return {
         "average_ranks": average_ranks,
-        "p_matrix": p_matrix,
-        "critical_difference": critical_difference,
-        "q_alpha": _NEMENYI_Q05[n_methods],
+        "critical_difference": float(critical_difference),
         "alpha": alpha,
         "n_problems": n_problems,
         "n_methods": n_methods,
         "ranks": ranks,
+        "figure": figure,
     }
 
 
-def _cliques(sorted_ranks: np.ndarray, cd: float) -> list[tuple[int, int]]:
-    """Maximal intervals of methods whose ranks differ by at most ``cd``."""
-    n = len(sorted_ranks)
-    cliques: list[tuple[int, int]] = []
-    for i in range(n):
-        j = i
-        while j + 1 < n and sorted_ranks[j + 1] - sorted_ranks[i] <= cd:
-            j += 1
-        if j > i:
-            if cliques and cliques[-1][0] <= i and cliques[-1][1] >= j:
-                continue
-            cliques.append((i, j))
-    return cliques
+def save_cd_figure(
+    figure: Any, path: str | Path, *, size: tuple[float, float] = (10.0, 2.2)
+) -> Path:
+    """Write a StaTDS critical-difference figure as vector PDF and SVG.
+
+    The StaTDS canvas is very wide (15 in); resizing it to ``size`` keeps the
+    labels legible when the figure is included at text width.
+    """
+    import matplotlib.pyplot as plt
+
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    vector = out.suffix.lower() in {".pdf", ".svg"}
+    if vector:
+        figure.set_size_inches(*size)
+    figure.savefig(out, bbox_inches="tight")
+    if vector:
+        sibling = out.with_suffix(".svg" if out.suffix.lower() != ".svg" else ".pdf")
+        figure.savefig(sibling, bbox_inches="tight")
+    plt.close(figure)
+    return out
 
 
 def plot_cd_diagram(
@@ -360,71 +376,47 @@ def plot_cd_diagram(
     path: str | Path | None = None,
     title: str = "",
     alpha: float = 0.05,
+    num_cases: int | None = None,
 ) -> Any:
-    """Draw a Demsar-style critical-difference diagram.
+    """Draw a critical-difference diagram through StaTDS.
 
-    ``average_ranks`` may be a mapping ``name -> rank`` or a sequence of ranks
-    (then ``names`` must be given). When ``critical_difference`` is omitted
-    (allowed with a mapping or sequence), only the rank axis is drawn. The
-    figure is saved to ``path`` when provided. Returns the matplotlib axes.
+    Kept for callers that already hold average ranks and a critical difference.
+    StaTDS needs the number of problems, so when ``num_cases`` is omitted it is
+    inferred from ``critical_difference``; prefer :func:`nemenyi`, which returns
+    the figure together with the exact test result.
     """
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    from statds.no_parametrics import nemenyi as statds_nemenyi
+    from statds.stats import get_q_alpha_nemenyi
 
     if isinstance(average_ranks, Mapping):
-        ordered = sorted(average_ranks.items(), key=lambda item: item[1])
-        names_sorted = [name for name, _ in ordered]
-        ranks_sorted = np.array([rank for _, rank in ordered], dtype=float)
+        rank_map = {str(name): float(rank) for name, rank in average_ranks.items()}
     else:
         if names is None:
             raise ValueError("names are required when ranks are given as a sequence.")
-        pairs = sorted(zip(names, average_ranks, strict=True), key=lambda item: item[1])
-        names_sorted = [name for name, _ in pairs]
-        ranks_sorted = np.array([rank for _, rank in pairs], dtype=float)
-
-    n = len(ranks_sorted)
-    labels = [f"{name} ({rank:.2f})" for name, rank in zip(names_sorted, ranks_sorted, strict=True)]
-
-    height = max(2.0, 0.62 * n + 1.2)
-    _, ax = plt.subplots(figsize=(8.0, height))
-    ax.set_xlim(0.5, n + 0.5)
-    ax.set_ylim(-0.5, n - 0.1 + 0.8)
-
-    axis_y = n - 1
-    ax.hlines(axis_y, 0.5, n + 0.5, color="black", linewidth=1.2)
-    for tick in range(1, n + 1):
-        ax.vlines(tick, axis_y - 0.06, axis_y + 0.06, color="black", linewidth=1.0)
-        ax.text(float(tick), axis_y + 0.16, str(tick), ha="center", va="bottom", fontsize=10)
-
-    for index, (label, rank) in enumerate(zip(labels, ranks_sorted, strict=True)):
-        y = n - 1.6 - index * 0.55
-        ax.plot([rank], [y], marker="o", markersize=5, color="black")
-        ax.hlines(y, rank, n + 0.45, color="gray", linewidth=0.7, linestyle="-")
-        ax.text(n + 0.5, y, label, va="center", ha="left", fontsize=9)
-
-    if critical_difference is not None and critical_difference > 0:
-        for start, end in _cliques(ranks_sorted, critical_difference):
-            y = axis_y - 0.28 - 0.001
-            ax.hlines(
-                y,
-                ranks_sorted[start],
-                ranks_sorted[end],
-                color="black",
-                linewidth=3.0,
-                alpha=0.85,
+        rank_map = {
+            str(name): float(rank)
+            for name, rank in zip(names, average_ranks, strict=True)
+        }
+    if num_cases is None:
+        n_methods = len(rank_map)
+        if critical_difference and critical_difference > 0:
+            q_alpha = get_q_alpha_nemenyi(n_methods, alpha)
+            num_cases = max(
+                2,
+                int(
+                    round(
+                        q_alpha**2
+                        * n_methods
+                        * (n_methods + 1)
+                        / (6.0 * critical_difference**2)
+                    )
+                ),
             )
-
-    ax.set_title(title or "Critical difference diagram", fontsize=11)
-    ax.axis("off")
-    from matplotlib.figure import Figure
-
-    figure = cast(Figure, ax.get_figure())
-    figure.tight_layout()
+        else:
+            num_cases = 2 * n_methods
+    _, _, figure = statds_nemenyi(rank_map, num_cases, alpha=alpha)
+    if title:
+        figure.suptitle(title)
     if path is not None:
-        out = Path(path)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        figure.savefig(out, bbox_inches="tight", dpi=160)
-        plt.close(figure)
-    return ax
+        save_cd_figure(figure, path)
+    return figure

@@ -23,6 +23,7 @@ from gcmts.evaluation.stats import (
     nemenyi,
     paired_wilcoxon_holm,
     plot_cd_diagram,
+    save_cd_figure,
 )
 
 __all__ = [
@@ -46,5 +47,6 @@ __all__ = [
     "paired_wilcoxon",
     "paired_wilcoxon_holm",
     "plot_cd_diagram",
+    "save_cd_figure",
     "save_rows",
 ]

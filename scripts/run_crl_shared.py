@@ -84,7 +84,7 @@ from gcmts.evaluation.stats import (
     metric_matrix,
     nemenyi,
     paired_wilcoxon_holm,
-    plot_cd_diagram,
+    save_cd_figure,
 )
 from gcmts.evaluation.tracking import StepTracker
 from gcmts.typing import Batch
@@ -830,7 +830,9 @@ def _report_statistics(
         complete = matrix[~np.isnan(matrix).any(axis=1)]
         if complete.shape[0] >= 2 and complete.shape[1] >= 3:
             friedman = friedman_test(matrix)
-            posthoc = nemenyi(matrix, higher_is_better=higher_is_better)
+            posthoc = nemenyi(
+                matrix, higher_is_better=higher_is_better, names=cases
+            )
             entry["friedman"] = friedman
             entry["nemenyi"] = {
                 "average_ranks": {
@@ -841,14 +843,8 @@ def _report_statistics(
                 "n_problems": int(posthoc["n_problems"]),
                 "alpha": float(posthoc["alpha"]),
             }
-            plot_cd_diagram(
-                {
-                    case: float(rank)
-                    for case, rank in zip(cases, posthoc["average_ranks"].tolist(), strict=True)
-                },
-                float(posthoc["critical_difference"]),
-                path=out_dir / f"cd_{stem}_{metric}.png",
-                title=f"{metric} ({'higher' if higher_is_better else 'lower'} is better)",
+            save_cd_figure(
+                posthoc["figure"], out_dir / f"cd_{stem}_{metric}.pdf"
             )
             logger.info(
                 "Friedman %s: chi2=%.3f p=%.4g | Nemenyi CD=%.3f over N=%d",
