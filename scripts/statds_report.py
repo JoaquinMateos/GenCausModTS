@@ -208,8 +208,15 @@ def main() -> int:
     blocks.append(_block("Real panels, one-step forecasting (MSE, lower is better)",
                          real, minimize=True))
 
-    text = _markdown(blocks, "# Statistical analysis (StaTDS)\n\n"
-                     "Friedman + Nemenyi + Holm, computed with `statds` 1.1.7.")
+    from importlib.metadata import version as package_version
+
+    text = _markdown(
+        blocks,
+        "# Statistical analysis (StaTDS)\n\n"
+        "Friedman + Nemenyi + Holm, computed with `statds` "
+        + package_version("statds")
+        + ".",
+    )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(text, encoding="utf-8")
     args.json_out.write_text(json.dumps(blocks, indent=2), encoding="utf-8")
