@@ -35,7 +35,21 @@ SKIP_GRID="${SKIP_GRID:-0}"
 SKIP_IMAGE="${SKIP_IMAGE:-0}"
 RUN_TIMING="${RUN_TIMING:-0}"
 LATEX_DIR="${LATEX_DIR:-../latex}"
-PY="uv run --no-sync python"
+# Pick an interpreter that actually has torch. ``uv run --no-sync`` can resolve
+# to an environment without the project dependencies on hosts with a conda
+# base env, so check explicitly instead of trusting it.
+if [ -x .venv/bin/python ] && .venv/bin/python -c "import torch" >/dev/null 2>&1; then
+  PY=".venv/bin/python"
+elif uv run --no-sync python -c "import torch" >/dev/null 2>&1; then
+  PY="uv run --no-sync python"
+elif python -c "import torch" >/dev/null 2>&1; then
+  PY="python"
+else
+  echo "No Python interpreter with torch found (.venv, uv run, or python)." >&2
+  echo "Run 'uv sync --extra dev --extra real --extra progress' first." >&2
+  exit 1
+fi
+echo "interpreter: $PY"
 
 # Select a physical GPU by remapping it to logical cuda:0. This is more robust
 # than DEVICE=cuda:1 because a few library calls (e.g. profiling) sync the
@@ -92,7 +106,8 @@ fi
 
 case "$DEVICE" in
   cuda*)
-    run $PY -c "import os, torch; print('CUDA visible:', os.environ.get('CUDA_VISIBLE_DEVICES', 'all'), '->', torch.cuda.get_device_name(0), 'count', torch.cuda.device_count())"
+    run $PY -c "import os, torch; print('CUDA visible:', os.environ.get('CUDA_VISIBLE_DEVICES', 'all'), '->', torch.cuda.get_device_name(0), 'count', torch.cuda.device_count())" || \
+      echo "warning: could not query the CUDA device (the runs will still try)"
     ;;
 esac
 

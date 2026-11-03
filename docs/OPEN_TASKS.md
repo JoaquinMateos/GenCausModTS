@@ -33,6 +33,10 @@ RUN_TIMING=1 bash scripts/run_pending_tasks.sh    # add the sequential timing pa
 DRY_RUN=1 bash scripts/run_pending_tasks.sh       # print the command sequence only
 ```
 
+The driver prints the interpreter it selected (`.venv/bin/python` when it has
+torch, otherwise `uv run --no-sync python`, otherwise the active `python`) and
+fails early with a clear message when none has torch.
+
 `GPU=<n>` sets `CUDA_VISIBLE_DEVICES` before any Python process starts, so
 physical GPU `n` becomes logical `cuda:0` for the whole run; the preflight prints
 the visible device and its name. `DEVICE=cuda:<n>` also works, but prefer `GPU`
