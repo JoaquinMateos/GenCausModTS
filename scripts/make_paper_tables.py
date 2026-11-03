@@ -411,7 +411,7 @@ def write_crl_summary(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         ("shd", r"SHD $\downarrow$", False, 2),
         ("forecast1", r"1-step MSE $\downarrow$", False, 3),
     ]
-    means: dict[str, dict[str, float | None]] = {m: {} for m in methods}
+    summary: dict[str, dict[str, dict[str, float]]] = {m: {} for m in methods}
     for method in methods:
         for metric, _, _, _ in metrics:
             values = [
@@ -421,38 +421,42 @@ def write_crl_summary(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
                 and metric in aggregated[key].get(method, {})
                 and aggregated[key][method][metric].get("mean") is not None
             ]
-            means[method][metric] = sum(values) / len(values) if values else None
-
-    best: dict[str, str] = {}
-    for metric, _, higher, _ in metrics:
-        values = {m: means[m][metric] for m in methods if means[m][metric] is not None}
-        if values:
-            best[metric] = (
-                max(values, key=values.get) if higher else min(values, key=values.get)
+            spreads = [
+                float(aggregated[key][method][metric]["std"])
+                for key, _ in temporal
+                if complete[key]
+                and metric in aggregated[key].get(method, {})
+                and aggregated[key][method][metric].get("std") is not None
+                and not np.isnan(float(aggregated[key][method][metric]["std"]))
+            ]
+            if values:
+                summary[method][metric] = {
+                    "mean": float(np.mean(values)),
+                    "std": float(np.mean(spreads)) if spreads else 0.0,
+                }
+        rank_values = [float(rank) for rank in ranks[method]]
+        if rank_values:
+            spread = (
+                float(np.std(rank_values, ddof=1)) if len(rank_values) > 1 else 0.0
             )
+            summary[method]["rank"] = {
+                "mean": float(np.mean(rank_values)),
+                "std": spread,
+            }
 
-    rank_mean = {m: (float(np.mean(ranks[m])) if ranks[m] else None) for m in methods}
-    best_rank = min((v for v in rank_mean.values() if v is not None), default=None)
-
-    def metric_cell(method: str, metric: str, digits: int) -> str:
-        value = means[method][metric]
-        if value is None:
-            return "--"
-        text = f"{value:.{digits}f}"
-        return f"\\textbf{{{text}}}" if best.get(metric) == method else text
+    best = {
+        metric: _best_cases(summary, methods, metric, higher=higher)
+        for metric, _, higher, _ in metrics
+    }
+    best["rank"] = _best_cases(summary, methods, "rank", higher=False)
 
     body = []
     for method in methods:
         cells = [method] + [
-            metric_cell(method, metric, digits) for metric, _, _, digits in metrics
+            _fmt(summary, method, metric, bold=method in best[metric], digits=digits)
+            for metric, _, _, digits in metrics
         ]
-        rank = rank_mean[method]
-        if rank is None:
-            cells.append("--")
-        elif best_rank is not None and abs(rank - best_rank) < 1e-12:
-            cells.append(f"\\textbf{{{rank:.2f}}}")
-        else:
-            cells.append(f"{rank:.2f}")
+        cells.append(_fmt(summary, method, "rank", bold=method in best["rank"], digits=2))
         body.append("    " + " & ".join(cells) + " \\\\")
 
     n_complete = len(temporal) - len(pending)
@@ -462,15 +466,17 @@ def write_crl_summary(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
     caption = (
         "Summary of representation recovery and downstream utility for the five "
         "temporal CRL methods across the " + count_word + " shared benchmarks. "
-        "Each cell is the mean of the per-benchmark seed means: MCC, "
-        "$R^2_{\\mathrm{diag}}$, $R^2_{\\mathrm{sep}}$ and DCI over all benchmarks, "
-        "one-step MSE over the temporal benchmarks where forecasting is defined, "
-        "and SHD over the graph benchmarks where a graph is available. Higher is "
-        "better for MCC and $R^2_{\\mathrm{diag}}$; lower is better for "
-        "$R^2_{\\mathrm{sep}}$, SHD and one-step MSE. Bold marks the best value "
-        "in each column. ``Mean rank'' is the average MCC rank over the complete "
-        "blocks (one is best). The per-benchmark values, seed dispersion and the "
-        "Friedman/Nemenyi test are in \\autoref{app:full_results}."
+        "Each cell is the mean across benchmarks of the per-benchmark seed "
+        "means, with the mean of the per-benchmark seed standard deviations: "
+        "MCC, $R^2_{\\mathrm{diag}}$, $R^2_{\\mathrm{sep}}$ and DCI over all "
+        "benchmarks, one-step MSE over the temporal benchmarks where forecasting "
+        "is defined, and SHD over the graph benchmarks where a graph is available. "
+        "Higher is better for MCC and $R^2_{\\mathrm{diag}}$; lower is better for "
+        "$R^2_{\\mathrm{sep}}$, SHD and one-step MSE. Bold marks the best value and "
+        "every value within one standard deviation of it. ``Mean rank'' is the "
+        "average MCC rank over the complete blocks (one is best). The "
+        "per-benchmark values, seed dispersion and the Friedman/Nemenyi test are "
+        "in \\autoref{app:full_results}."
     )
     if pending:
         caption += (
@@ -481,8 +487,8 @@ def write_crl_summary(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
     table = (
         r"""\begin{table}[t]
   \centering
-  \footnotesize
-  \setlength{\tabcolsep}{6pt}
+  \scriptsize
+  \setlength{\tabcolsep}{4pt}
   \renewcommand{\arraystretch}{1.15}
   \caption{"""
         + caption
