@@ -802,12 +802,13 @@ def write_stats_section(shared_dir: Path, latex_dir: Path) -> None:
 \end{table}
 """
     )
+    figure_section = ""
     if figure_names:
         includes = "\\\\\n".join(
             f"  \\includegraphics[width=\\textwidth]{{pic/experiments/{name}}}"
             for name in figure_names
         )
-        section += (
+        figure_section += (
             "\n\\begin{figure*}[t]\n  \\centering\n"
             + includes
             + "\n  \\caption{Critical-difference diagrams for the "
@@ -815,9 +816,12 @@ def write_stats_section(shared_dir: Path, latex_dir: Path) -> None:
             + "-problem CRL configuration grid: methods whose average ranks are joined by a bar are not significantly different at $\\alpha=0.05$ (Nemenyi). Lower ranks are better. The tests and the diagrams are computed with StaTDS \\cite{lunaStaTDSLibraryStatistical2024}.}\n"
             "  \\label{fig:cd_diagrams}\n\\end{figure*}\n"
         )
-    out = latex_dir / "pic" / "experiments" / "stats.tex"
-    out.write_text(section, encoding="utf-8")
-    print(f"wrote {out}")
+    table_out = latex_dir / "pic" / "experiments" / "stats_table.tex"
+    table_out.write_text(section, encoding="utf-8")
+    print(f"wrote {table_out}")
+    figure_out = latex_dir / "pic" / "experiments" / "stats.tex"
+    figure_out.write_text(figure_section, encoding="utf-8")
+    print(f"wrote {figure_out}")
 
 
 def _panel_replications(outputs_dir: Path, dataset: str, default: int) -> int:
