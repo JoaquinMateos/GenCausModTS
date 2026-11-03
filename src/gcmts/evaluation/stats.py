@@ -267,9 +267,12 @@ def friedman_test(
 ) -> dict[str, float]:
     """Omnibus Friedman test on a ``(n_problems, n_methods)`` metric matrix.
 
-    The statistic and p-value come from ``statds.no_parametrics.friedman``.
+    The statistic comes from ``statds.no_parametrics.friedman``.
     ``higher_is_better`` only fixes the orientation of the internal ranks; the
-    statistic itself is invariant to reversing them.
+    statistic itself is invariant to reversing them. The p-value is the exact
+    chi-square tail of that statistic: StaTDS evaluates the same tail with a
+    truncated series, which loses precision for large statistics (see
+    ``scripts/statds_report.py``).
     """
     import pandas as pd
     from statds.no_parametrics import friedman as statds_friedman
@@ -283,13 +286,12 @@ def friedman_test(
         matrix, columns=[f"method_{index}" for index in range(matrix.shape[1])]
     )
     frame.insert(0, "problem", np.arange(matrix.shape[0]))
-    _, statistic, p_value, _, _ = statds_friedman(
+    _, statistic, _, _, _ = statds_friedman(
         frame, alpha=0.05, minimize=not higher_is_better
     )
-    if p_value is None:  # StaTDS uses a table for very small designs
-        from scipy.stats import chi2
+    from scipy.stats import chi2
 
-        p_value = chi2.sf(statistic, matrix.shape[1] - 1)
+    p_value = float(chi2.sf(float(statistic), matrix.shape[1] - 1))
     return {
         "statistic": float(statistic),
         "p_value": float(p_value),
