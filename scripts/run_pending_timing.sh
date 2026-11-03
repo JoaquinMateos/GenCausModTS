@@ -38,9 +38,9 @@ CRL_FLAGS=(
 )
 
 echo "== CRL timing (sequential) =="
-for suite in npvar npvar_linear npvar_hard cartpole causal3d lorenz lorenz96 \
-             pcl kuramoto lotka_volterra duffing fitzhugh_nagumo chua \
-             van_der_pol pendulum mountain_car varma ou; do
+for suite in npvar npvar_linear npvar_hard cartpole causal3d causal3d_img \
+             lorenz lorenz96 pcl kuramoto lotka_volterra duffing fitzhugh_nagumo \
+             chua van_der_pol pendulum mountain_car varma ou; do
   echo "-- $suite"
   $PY scripts/run_crl_shared.py "${CRL_FLAGS[@]}" --suite "$suite" \
     --out-dir outputs_shared_timing

@@ -220,6 +220,31 @@ def _baselines(suite_name: str) -> list[str]:
     ]
 
 
+def _label_span(labels: list[str]) -> str:
+    """Format a benchmark range, keeping sub-labels such as A.4b explicit."""
+    if not labels:
+        return "none"
+    a_labels = [label for label in labels if label.startswith("A.")]
+    rest = [label for label in labels if not label.startswith("A.")]
+    pieces: list[str] = []
+    if a_labels:
+        if len(a_labels) == 1:
+            pieces.append(a_labels[0])
+        else:
+            span = f"{a_labels[0]}--{a_labels[-1]}"
+            sub = [
+                label
+                for label in a_labels[1:-1]
+                if not label.split(".")[1].isdigit()
+            ]
+            if sub:
+                span += " (including " + ", ".join(sub) + ")"
+            pieces.append(span)
+    if rest:
+        pieces.append(f"{rest[0]}--{rest[-1]}" if len(rest) > 1 else rest[0])
+    return " and ".join(pieces)
+
+
 def write_crl_table(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
     rows: list[dict[str, Any]] = []
     for key in CRL_BENCHMARKS:
@@ -266,14 +291,28 @@ def write_crl_table(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
     # the main-text summary is unaffected.
     temporal = [item for item in blocks if item[0] == "temporal"]
     other = [item for item in blocks if item[0] != "temporal"]
-    parts = [temporal[:6], temporal[6:12], temporal[12:], other]
+    # A.1b is a linear-mixing reference, not a nineteenth headline benchmark.
+    # Keep it in the last part so A.1--A.17 (plus A.4b) stay contiguous and each
+    # page of the appendix table holds at most six blocks.
+    linear_baseline = [item for item in temporal if item[1] == "npvar_linear"]
+    temporal_main = [item for item in temporal if item[1] != "npvar_linear"]
+    temporal_parts = [
+        temporal_main[index : index + 6]
+        for index in range(0, len(temporal_main), 6)
+    ]
+    if len(temporal_parts) > 3:
+        temporal_parts = temporal_parts[:2] + [
+            [item for part in temporal_parts[2:] for item in part]
+        ]
+    while len(temporal_parts) < 3:
+        temporal_parts.append([])
+    parts = temporal_parts + [linear_baseline + other]
     labels = ["tab:exp_crl", "tab:exp_crl_b", "tab:exp_crl_c", "tab:exp_crl_d"]
     names = ["crl.tex", "crl_b.tex", "crl_c.tex", "crl_d.tex"]
     part_names = [
-        "Part 1: Benchmarks A.1--A.6",
-        "Part 2: Benchmarks A.7--A.12",
-        "Part 3: Benchmarks A.13--A.17 and A.1b",
-        "Part 4: Benchmarks B--D",
+        "Part " + str(index + 1) + ": Benchmarks "
+        + _label_span([CRL_BENCHMARKS[key].label for _, key, _ in part])
+        for index, part in enumerate(parts)
     ]
     for part_index, (part_blocks, out_name, label, part_name) in enumerate(
         zip(parts, names, labels, part_names, strict=True)
@@ -299,8 +338,8 @@ def write_crl_table(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
             "are a downstream-utility diagnostic, not a soundness metric; "
             "persistence and AR(1) reference rows anchor them. Bold marks the "
             "best value and every value within one standard deviation of it. "
-            "\\textcolor{red}{Residual caveat: the shared CRL block predates the per-method "
-            "sampler rewind described in \\autoref{app:audit}.}"
+            "``Time (s)'' is the mean wall-clock training time per seed from a "
+            "sequential pass on the Apple M4 host (MPS backend)."
         )
         table = (
             "\\begin{table}[t]\n  \\centering\n  \\scriptsize\n"
@@ -372,15 +411,19 @@ def write_crl_summary(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         cells.append(f"{np.mean(ranks[method]):.2f}" if ranks[method] else "--")
         body.append("    " + " & ".join(cells) + " \\\\")
 
+    count_word = {
+        17: "seventeen",
+        18: "eighteen",
+        19: "nineteen",
+    }.get(len(temporal), str(len(temporal)))
     caption = (
         "Summary of representation recovery (MCC, higher is better) for the five temporal CRL "
-        "methods across the seventeen shared benchmarks A.1--A.17. ``Mean rank'' is the average "
+        "methods across the " + count_word + " shared benchmarks "
+        + _label_span([benchmark.label for _, benchmark in temporal]) + ". ``Mean rank'' is the average "
         "rank over the benchmarks with a complete block (one is best); bold marks the best MCC in "
         "each column. The full per-benchmark table, with all metrics and "
         "wall-clock times, is Table~\\ref{tab:exp_crl} in Appendix~\\ref{app:full_results}, and the "
-        "Friedman/Nemenyi test of the ranking is Table~\\ref{tab:exp_stats}. "
-        "\\textcolor{red}{Residual caveat: the shared CRL block predates the per-method "
-        "sampler rewind described in \\autoref{app:audit}.}"
+        "Friedman/Nemenyi test of the ranking is Table~\\ref{tab:exp_stats}."
     )
     if pending:
         caption += " \\textcolor{red}{Pending blocks (no finite MCC or incomplete seeds): " + ", ".join(pending) + ".}"
@@ -526,7 +569,7 @@ def write_ctee_table(outputs_dir: Path, latex_dir: Path, *, seeds: int) -> None:
     caption = (
         "Counterfactual and treatment-effect estimators (Branches II.A observed-data adjustment, II.B representation-based identification, II.C latent-confounder \\& environment models) on three benchmarks with exact counterfactuals: the damped harmonic oscillator, the tumour-growth simulator (time-varying chemo/radio treatment) and a time-varying-treatment linear SEM. Methods are grouped by branch, not by performance. The corrected run adds two reference rows per benchmark that make the absolute error interpretable: ``No effect (0)'' predicts a zero individual effect and ``Oracle mean effect'' predicts the true average effect for every unit. Mean $\\pm$ standard deviation over "
         + str(seeds)
-        + " seeds; lower is better except ``Eff.'' (higher is better) and ``MBE'' (closer to zero is better); bold marks the best value and every value within one standard deviation of it. ``Time (s)'' is the mean$\\pm$std wall-clock training time per run on a single NVIDIA RTX~2080~Ti (hardware-dependent). ``Rec.'' is the reconstruction axiom $\\text{MAE}(\\hat X(\\mathrm{do}(a_{\\mathrm{f}})),X^{\\mathrm{f}})$, ``Eff.'' the fraction of seeds whose average estimated effect has the correct sign (an effect-sign check, not the effectiveness axiom), and ``Rev.'' the reversibility MAE after applying the reverse treatment. See Section~\\ref{sec:exp_ctee}."
+        + " seeds; lower is better except ``Eff.'' (higher is better) and ``MBE'' (closer to zero is better); bold marks the best value and every value within one standard deviation of it. ``Time (s)'' is the mean$\\pm$std wall-clock training time per run on the Apple M4 host (MPS backend; hardware-dependent). ``Rec.'' is the reconstruction axiom $\\text{MAE}(\\hat X(\\mathrm{do}(a_{\\mathrm{f}})),X^{\\mathrm{f}})$, ``Eff.'' the fraction of seeds whose average estimated effect has the correct sign (an effect-sign check, not the effectiveness axiom), and ``Rev.'' the reversibility MAE after applying the reverse treatment. See Section~\\ref{sec:exp_ctee}."
     )
     footer = ""
     if rows and not any("pehe_zero" in row for row in rows):
@@ -643,7 +686,7 @@ def write_sdd_table(outputs_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         "accuracy, MIG and CDS; bold marks the best value and every value within one standard "
         "deviation of it. The last row is a ridge regression on the \\emph{true} causal factors and "
         "is the achievable floor. ``Time (s)'' is the mean$\\pm$std wall-clock training time per run "
-        "on a single NVIDIA RTX~2080~Ti; ``--'' in the time column marks the CPU "
+        "on the Apple M4 host (MPS backend); ``--'' in the time column marks the CPU "
         "validation run that regenerated the post-audit table."
     )
     table = (
@@ -847,8 +890,8 @@ def write_ctee_static_table(
         "replication with the factual mean and standard deviation; its ``mu0/mu1'' are the "
         "realised potential outcomes released by the challenge mirror, not noiseless surfaces. The Jobs cohort is reported separately "
         "in the real-cohort table because it releases only a marginal reference effect. "
-        "``Time (s)'' is the mean$\\pm$std wall-clock training time per replication on a single "
-        "NVIDIA RTX~2080~Ti."
+        "``Time (s)'' is the mean$\\pm$std wall-clock training time per replication on the "
+        "Apple M4 host (MPS backend)."
     )
     table = (
         r"""\begin{table}[t]
@@ -911,7 +954,7 @@ def write_adjacent_table(outputs_dir: Path, latex_dir: Path, *, seeds: int = 10)
         "headline soundness metric (Section~\\ref{sec:experiments}). The three adjacent objects---a "
         "propagation path, a policy and an attribution---are heterogeneous, so the comparison is "
         "per-object rather than head-to-head. ``Time (s)'' is the mean$\\pm$std wall-clock training "
-        "time per run on a single NVIDIA RTX~2080~Ti; the LacaDM hypervolume uses the corrected "
+        "time per run on the Apple M4 host (MPS backend); the LacaDM hypervolume uses the corrected "
         "maximisation reference."
     )
     table = (
@@ -1075,7 +1118,7 @@ def write_external_validity_table(outputs_dir: Path, latex_dir: Path, *, seeds: 
             "MSE means the learned representation generalises better; bold marks "
             "the best value and every value within one standard deviation of it; "
             "no soundness claim is made. ``Time (s)'' is the mean$\\pm$std "
-            "wall-clock training time per run on a single NVIDIA RTX~2080~Ti."
+            "wall-clock training time per run on the Apple M4 host (MPS backend)."
         )
         table = (
             r"""\begin{table}[t]
@@ -1145,7 +1188,7 @@ def write_ctee_real_table(outputs_dir: Path, latex_dir: Path, *, replications: i
         "policy risk) are undefined and only $\\epsilon_{\\text{ATE}}$ is reported; for NHEFS and "
         "Oregon this is a reference comparison, not a soundness claim. Each cohort is a single "
         "deterministic run, so every entry has zero seed dispersion. ``Time (s)'' is the "
-        "wall-clock training time per run on a single NVIDIA RTX~2080~Ti."
+        "wall-clock training time per run on the Apple M4 host (MPS backend)."
     )
     table = (
         r"""\begin{table}[t]

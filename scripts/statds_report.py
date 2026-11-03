@@ -29,9 +29,10 @@ from scipy.stats import chi2  # noqa: E402
 from statds.no_parametrics import friedman, holm, nemenyi  # noqa: E402
 
 CRL_SUITES = [
-    "npvar", "npvar_linear", "npvar_hard", "cartpole", "causal3d", "lorenz",
-    "lorenz96", "pcl", "kuramoto", "lotka_volterra", "duffing", "fitzhugh_nagumo",
-    "chua", "van_der_pol", "pendulum", "mountain_car", "varma", "ou",
+    "npvar", "npvar_linear", "npvar_hard", "cartpole", "causal3d", "causal3d_img",
+    "lorenz", "lorenz96", "pcl", "kuramoto", "lotka_volterra", "duffing",
+    "fitzhugh_nagumo", "chua", "van_der_pol", "pendulum", "mountain_car", "varma",
+    "ou",
 ]
 CRL_METHODS = ["iVAE", "LEAP", "TDRL", "NCTRL", "MOSAIC"]
 STATIC_PANELS = ["ihdp", "acic", "twins", "news"]
