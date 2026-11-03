@@ -11,7 +11,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 MAIN_PID="${1:-}"
-DEVICE="${2:-mps}"
+DEVICE="${2:-${DEVICE:-mps}}"
 
 if [ -n "$MAIN_PID" ]; then
   echo "waiting for main driver pid $MAIN_PID"
