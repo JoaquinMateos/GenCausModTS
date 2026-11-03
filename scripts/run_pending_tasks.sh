@@ -251,5 +251,5 @@ echo "  tables:  $LATEX_DIR/pic/experiments/*.tex"
 echo
 echo "Not automatable here (docs/OPEN_TASKS.md):"
 echo "  T7  CPS needs data/static/cps.csv (manual request)."
-echo "  T9  II.D representatives, T10 adjacent representatives: new implementations."
-echo "  T11 tagged release with DOI."
+echo "  T9--T14 second representatives per branch: new implementations (docs/OPEN_TASKS.md)."
+echo "  T17 tagged release with DOI."

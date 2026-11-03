@@ -317,46 +317,139 @@ the same backbone and budget across methods so the comparison is fair.
 
 ---
 
-## P2 — coverage of the literature (adjacent branches)
+## P2 — coverage of the literature (complete benchmark)
 
-### T9. II.D representatives beyond CausalGAN
+### Coverage target
 
-Missing: counterfactual generative networks (Sauer et al. 2021), causal market
-simulators (Thumm et al. 2025), drift-aware simulation (Badre et al. 2025), and
-LCD (Lorch et al. 2026) if the reviewed variant is not the implemented one.
+The benchmark is *complete* when every first-level branch of the taxonomy
+(I.A--I.E, II.A--II.D, III.A--III.C) has at least **two independent
+representatives**, each with a ground-truth protocol and ten seeds, and every
+sub-branch has at least one. Baselines and reference predictors do not count
+toward the two. Under this target the current matrix is complete for I.A, I.B,
+I.C, I.D, II.A and II.B, and incomplete for six branches:
 
-**Plan.** One method per iteration: implement the mechanism, define a benchmark
-that exposes its object (interventional law or counterfactual trajectory) with
-ground truth, add it to `run_adjacent_benchmarks.py` or a new
-`run_mechanism_benchmarks.py`, and report its headline metric. Do not add a
-method to the table without a ground-truth protocol.
+| Branch | Representative today | Missing | Task |
+|---|---|---|---|
+| I.E structural & functional constraints | MOSAIC | one mechanism-sparsity method | T9 |
+| II.C latent-confounder & environment | CaTSG | one latent-confounder method | T10 |
+| II.D given mechanisms & simulators | CausalGAN | one counterfactual generative method | T11 |
+| III.A decision-making | LacaDM (surrogate) | one decision/recourse method | T12 |
+| III.B structure discovery | GBTPL | one root-cause method | T13 |
+| III.C explanation & attribution | CausalConceptTS (surrogate) | one attribution method | T14 |
 
-**Acceptance.** A per-method row with a benchmark, a metric and 10 seeds;
-`verify_outputs` FAIL=0.
+The pending compute (T1 grid, T2 IHDP, T3 timing, T8 image suite) does not change
+this table: it finalises values for methods already present.
 
-**Cost.** 1–3 weeks per method depending on code availability.
+Every task below follows one rule: do not add a method to Table 5 without a
+benchmark that exposes its object with ground truth. If the original code is not
+available, implement a compact reimplementation and label it as a surrogate in
+the table, as already done for LacaDM and CausalConceptTS.
 
-### T10. III.A/B/C representatives beyond the current one per branch
+### T9. Second representative for I.E
 
-- III.A (decision): AdaDiffuser, sequential recourse (Gumucio et al.), causal-aware
-  RL (Cao et al.).
-- III.B (structure): root-cause analysis (Adesunkanmi et al.).
-- III.C (explanation): Lopez-Alcaraz et al. 2025, Becker et al. 2026, ERCI, CIER.
+**Candidates.** A mechanism-sparsity or differentiable-discovery method from the
+I.E set (LaCIM; the differentiable causal-discovery baseline of Prashant et al.;
+the general causal-representation method of Fu et al.).
 
-**Plan.** Prioritise methods with public code and a ground-truth benchmark; one
-new representative per branch per release; keep the per-object (not
-head-to-head) framing.
+**Plan.** Implement the mechanism, reuse the MOSAIC regime-conditioned series and
+missing-data series so the comparison is within-benchmark, and score SHD and
+module recovery against the known structure.
 
-**Acceptance.** Two representatives per branch with their own protocols, or an
-explicit note that no shared benchmark exists.
+**Acceptance.** Ten seeds, finite SHD/module recovery, `verify_outputs` FAIL=0,
+a second row in the I.E block and in Table 5.
 
-**Cost.** 1–3 weeks per method.
+**Cost.** 1--2 weeks.
+
+### T10. Second representative for II.C
+
+**Candidates.** FedCausalDiff (Li et al. 2026), the variational-GAN latent-confounder
+model (Zhou et al. 2026), or the causal time-series estimator (Xia et al. 2025).
+
+**Plan.** Implement the estimator on the harmonic and tumour benchmarks, where the
+counterfactual is known, and report PEHE, MMD² and policy value.
+
+**Acceptance.** Ten seeds, ground-truth counterfactuals, `verify_outputs` FAIL=0,
+a second row in the II.C block and in Table 5.
+
+**Cost.** 2--3 weeks.
+
+### T11. Second representative for II.D
+
+**Candidates.** Counterfactual generative networks (Sauer \& Geiger 2021) with
+public code; CGN (Kocaoglu et al.) as the fallback.
+
+**Plan.** Implement the method on the binary SCM already used for CausalGAN and on
+one counterfactual image or sequence benchmark; reuse the rendered-image path of
+A.4b for the latter. Report interventional-law fidelity and CF MAE with ground
+truth.
+
+**Acceptance.** Ten seeds, finite interventional/CF metrics, `verify_outputs`
+FAIL=0, a second row in the II.D block and in Table 5.
+
+**Cost.** 2--3 weeks.
+
+### T12. Second representative for III.A
+
+**Candidates.** Sequential recourse (Gumucio et al. 2026), AdaDiffuser (Feng et al.
+2026), or causal-aware RL (Cao et al. 2026).
+
+**Plan.** Use a multi-objective MDP or a recourse environment with a ground-truth
+counterfactual policy; report hypervolume/regret, constraint violation and policy
+validity under intervention.
+
+**Acceptance.** Ten seeds, a second row in the III.A block and in Table 5.
+
+**Cost.** 2--3 weeks.
+
+### T13. Second representative for III.B
+
+**Candidate.** Root-cause analysis (Adesunkanmi et al. 2025).
+
+**Plan.** Use a synthetic graph with known propagation (the GBTPL protocol) or a
+SWaT/WADI subset with known paths; report path-F1, source accuracy and structural
+violations.
+
+**Acceptance.** Ten seeds, a second row in the III.B block and in Table 5.
+
+**Cost.** 1--2 weeks.
+
+### T14. Second representative for III.C
+
+**Candidates.** ERCI (Wang et al. 2025), CIER (Wang et al. 2024), or Becker et al.
+2026. CausalConceptTS already implements the Lopez-Alcaraz protocol, so it does
+not count as a second method.
+
+**Plan.** Use a concept-annotated synthetic classifier with known attributions;
+report faithfulness, intervention efficacy and explanation stability.
+
+**Acceptance.** Ten seeds, a second row in the III.C block and in Table 5.
+
+**Cost.** 1--3 weeks.
+
+### T15. Audit-named II.A/II.D methods (fidelity, optional)
+
+PFD-BDCM and CaPaint (II.A), CGN and LCD/CLIPR (II.D) are named as unimplemented
+in the audit appendix. They are not needed for the two-per-branch target: II.A
+already has GANITE and Wu-IPTW, and II.D gains a second method in T11. Implement
+them only if the review's coverage claim is extended to those specific methods;
+otherwise record the exclusion explicitly in the audit and in Table 5.
+
+**Cost.** 1--3 weeks per method.
+
+### T16. Replace the adjacent surrogates (fidelity, optional)
+
+LacaDM and CausalConceptTS are compact surrogates. If the authors' code is
+available, replace them and rerun the adjacent block; if not, keep the surrogate
+label in Table 5 and in the caption. GBTPL is a full reimplementation and is not
+affected.
+
+**Cost.** 1--2 weeks for both.
 
 ---
 
 ## P3 — release engineering
 
-### T11. Tagged release with DOI
+### T17. Tagged release with DOI
 
 **Plan.** Freeze `outputs/`, `outputs_shared/`, the manifests (`data/synthetic`,
 `data/acic`), the audit reports and the paper tables; tag `v1.0`; archive on
@@ -379,10 +472,13 @@ the stored rows; `docs/audit_*.md` is included.
 | 4 | T3 timings | idle host | — |
 | 5 | T5 ACIC pin, T6 MPS | — | T1/T2 |
 | 6 | T7 CPS, T8 rendered images | data / implementation | — |
-| 7 | T9/T10 adjacent methods | implementation | — |
-| 8 | T11 release | all | — |
+| 7 | T9--T14 second representatives | implementation | T1--T3 |
+| 8 | T15/T16 fidelity (optional) | T9--T14 | — |
+| 9 | T17 release | all | — |
 
 **Definition of done for the paper.** T1, T2, T4 and T3 (if the Time columns are
-kept) are complete; `verify_outputs` reports FAIL=0; every table caption matches
-the stored configuration; the grid and static caveats are removed or replaced by
-a pinned-snapshot statement.
+kept) are complete, and T9--T14 are complete, so every first-level branch has at
+least two representatives; `verify_outputs` reports FAIL=0; every table caption
+matches the stored configuration; the grid and static caveats are removed or
+replaced by a pinned-snapshot statement. T15 and T16 are fidelity work and do not
+block the coverage claim.

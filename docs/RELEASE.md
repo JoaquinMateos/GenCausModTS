@@ -1,4 +1,4 @@
-# Release checklist (T11)
+# Release checklist (T17)
 
 Status: **blocked on the pending runs** (grid, IHDP 100, rendered-image suite,
 sequential timing). Everything below is ready except the tag, the archive and
@@ -49,4 +49,4 @@ the DOI.
 
 - CPS (T7) is absent because the data are not redistributable; the paper keeps
   it as an optional manual panel.
-- The II.D and adjacent-branch additions (T9/T10) are separate releases.
+- The second representatives that complete branch coverage (T9--T14) are a separate release; the target and tasks are in `docs/OPEN_TASKS.md`.
