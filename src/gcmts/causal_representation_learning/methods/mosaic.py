@@ -124,7 +124,19 @@ class MOSAIC(BaseCausalRepresentationLearner):
             latent_dim,
             hidden_dims=hidden_dims,
         )
-        self.decoder = _SparseAdditiveDecoder(observed_dim, latent_dim, hidden=decoder_hidden)
+        # The additive decoder instantiates one MLP per (observed, latent) pair.
+        # That is the identifiable module-support model for scalar observations,
+        # but on 32x32 images it would create 3072 x 6 MLPs and an intractable
+        # autograd graph. For images, decode the latents densely and leave the
+        # additive support undefined (SHD is reported as n/a for this method).
+        if self.image_shape is None:
+            self.decoder: _SparseAdditiveDecoder | None = _SparseAdditiveDecoder(
+                observed_dim, latent_dim, hidden=decoder_hidden
+            )
+            self.image_decoder: MLP | None = None
+        else:
+            self.decoder = None
+            self.image_decoder = MLP(latent_dim, observed_dim, hidden_dims=decoder_hidden)
         self.support: Tensor | None = None
         self.register_buffer("obs_logvar", math.log(obs_noise**2) * torch.ones(1))
         self.obs_logvar: Tensor
@@ -141,7 +153,10 @@ class MOSAIC(BaseCausalRepresentationLearner):
 
     def decode(self, z: Tensor) -> Tensor:
         z_flat, (batch, time) = flatten_sequence(z)
-        return unflatten_sequence(self.decoder(z_flat), batch, time)
+        decoder = self.image_decoder if self.image_shape is not None else self.decoder
+        if decoder is None:  # pragma: no cover - defensive
+            raise RuntimeError("MOSAIC decoder was not initialised.")
+        return unflatten_sequence(decoder(z_flat), batch, time)
 
     def transition(
         self, z_past: Tensor, context: dict[str, Tensor] | None = None
@@ -153,13 +168,22 @@ class MOSAIC(BaseCausalRepresentationLearner):
         u = prepare_context(batch.context, x_flat.shape[0], n_classes=self.u_dim)
         q_mean, q_logvar = self.encoder(self._condition(x_flat, u))
         z = reparameterise(q_mean, q_logvar)
-        importance = self.decoder.importance(z)
-        self.support = importance.detach()
+        if self.image_shape is not None:
+            assert self.image_decoder is not None
+            recon_flat = self.image_decoder(z)
+            importance = torch.zeros(
+                self.latent_dim, self.latent_dim, device=z.device, dtype=z.dtype
+            )
+        else:
+            assert self.decoder is not None
+            recon_flat = self.decoder(z)
+            importance = self.decoder.importance(z)
+            self.support = importance.detach()
         log_q = gaussian_logpdf(z, q_mean, q_logvar)
         log_p = gaussian_logpdf(z, torch.zeros_like(z), torch.zeros_like(z))
         return CausalRepresentationOutput(
             z=unflatten_sequence(z, batch_size, time),
-            x_recon=unflatten_sequence(self.decoder(z), batch_size, time),
+            x_recon=unflatten_sequence(recon_flat, batch_size, time),
             extras={
                 "log_q": log_q,
                 "log_p": log_p,
