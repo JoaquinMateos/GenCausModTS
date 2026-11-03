@@ -33,6 +33,7 @@ cd "$(dirname "$0")/.."
 DEVICE="${DEVICE:-mps}"
 GPU="${GPU:-}"
 JOBS="${JOBS:-1}"
+IMAGE_BATCH="${IMAGE_BATCH:-64}"
 SKIP_GRID="${SKIP_GRID:-0}"
 SKIP_IMAGE="${SKIP_IMAGE:-0}"
 RUN_TIMING="${RUN_TIMING:-0}"
@@ -51,6 +52,7 @@ fi
 
 export GCMTS_PREFETCH=1
 export GCMTS_LIGHT_BATCH=1
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
 run() {
   if [ "$DRY_RUN" = "1" ]; then
@@ -85,7 +87,7 @@ BASE_SUITES="npvar npvar_linear npvar_hard cartpole causal3d lorenz lorenz96 pcl
              pendulum mountain_car varma ou child sde voronoi"
 
 mkdir -p outputs/logs
-echo "== device=$DEVICE gpu=${GPU:-default} jobs=$JOBS grid=$SKIP_GRID image=$SKIP_IMAGE timing=$RUN_TIMING =="
+echo "== device=$DEVICE gpu=${GPU:-default} jobs=$JOBS image_batch=$IMAGE_BATCH grid=$SKIP_GRID image=$SKIP_IMAGE timing=$RUN_TIMING =="
 echo "interpreter: $PY"
 
 # ------------------------------------------------------------------- preflight
@@ -130,7 +132,7 @@ job_cmd() {
       ;;
     image)
       run $PY scripts/run_crl_shared.py --device "$DEVICE" --suite causal3d_img \
-        --out-dir outputs_shared "${CRL_FLAGS[@]}"
+        --out-dir outputs_shared --batch-size "$IMAGE_BATCH" "${CRL_FLAGS[@]}"
       ;;
     grid_a)
       run $PY scripts/run_crl_shared.py --device "$DEVICE" --grid \
