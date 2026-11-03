@@ -348,12 +348,17 @@ def nemenyi(
 
 
 def save_cd_figure(
-    figure: Any, path: str | Path, *, size: tuple[float, float] = (10.0, 2.2)
+    figure: Any,
+    path: str | Path,
+    *,
+    size: tuple[float, float] = (9.0, 2.6),
+    title: str | None = None,
 ) -> Path:
     """Write a StaTDS critical-difference figure as vector PDF and SVG.
 
     The StaTDS canvas is very wide (15 in); resizing it to ``size`` keeps the
-    labels legible when the figure is included at text width.
+    labels legible when the figure is included two per row. ``title`` labels the
+    metric so the reader can identify the panel without the caption.
     """
     import matplotlib.pyplot as plt
 
@@ -362,6 +367,8 @@ def save_cd_figure(
     vector = out.suffix.lower() in {".pdf", ".svg"}
     if vector:
         figure.set_size_inches(*size)
+    if title:
+        figure.suptitle(title, fontsize=12)
     figure.savefig(out, bbox_inches="tight")
     if vector:
         sibling = out.with_suffix(".svg" if out.suffix.lower() != ".svg" else ".pdf")

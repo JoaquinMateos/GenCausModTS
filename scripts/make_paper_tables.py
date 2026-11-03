@@ -108,7 +108,7 @@ def _sig_note(shared_dir: Path, suite: str) -> str:
         )
     else:
         text = "No pairwise difference survives Holm correction in any column"
-    return "    \\multicolumn{10}{@{}p{\\textwidth}@{}}{\\footnotesize " + text + ".}\\\\\n"
+    return "    \\multicolumn{11}{@{}p{\\textwidth}@{}}{\\footnotesize " + text + ".}\\\\\n"
 
 
 def _best_cases(aggregated: dict[str, Any], cases: list[str], metric: str, *, higher: bool) -> set[str]:
@@ -167,12 +167,13 @@ def _suite_block(
             f1 = _fmt(aggregated, method, "forecast1", bold=method in best_f1)
             f4 = _fmt(aggregated, method, "forecast4", bold=method in best_f4)
             lines.append(
-                f"    {method} & {suite_tex} & {w2} & n/a & n/a & n/a & n/a & {f1} & {f4} & {_time(subset, method)} \\\\"
+                f"    {method} & {suite_tex} & {w2} & n/a & n/a & n/a & n/a & n/a & {f1} & {f4} & {_time(subset, method)} \\\\"
             )
         return lines
     best_mcc = _best_cases(aggregated, methods, "mcc", higher=True)
     best_r2d = _best_cases(aggregated, methods, "r2_diag", higher=True)
     best_r2s = _best_cases(aggregated, methods, "r2_sep", higher=False)
+    best_dci = _best_cases(aggregated, methods, "dci", higher=True)
     best_shd = _best_cases(aggregated, methods, "shd", higher=False) if shd_available else set()
     best_triplet = _best_cases(aggregated, methods, "triplet", higher=False)
     best_f1 = _best_cases(aggregated, methods, "forecast1", higher=False)
@@ -184,12 +185,13 @@ def _suite_block(
         mcc = _fmt(aggregated, method, "mcc", bold=method in best_mcc)
         r2d = _fmt(aggregated, method, "r2_diag", bold=method in best_r2d)
         r2s = _fmt(aggregated, method, "r2_sep", bold=method in best_r2s)
+        dci = _fmt(aggregated, method, "dci", bold=method in best_dci)
         shd = _fmt(aggregated, method, "shd", bold=method in best_shd) if shd_available else "n/a"
         triplet = _fmt(aggregated, method, "triplet", bold=method in best_triplet)
         f1 = _fmt(aggregated, method, "forecast1", bold=method in best_f1)
         f4 = _fmt(aggregated, method, "forecast4", bold=method in best_f4)
         lines.append(
-            f"    {method} & {suite_tex} & {mcc} & {r2d} & {r2s} & {shd} & {triplet} & {f1} & {f4} & {_time(subset, method)} \\\\"
+            f"    {method} & {suite_tex} & {mcc} & {r2d} & {r2s} & {dci} & {shd} & {triplet} & {f1} & {f4} & {_time(subset, method)} \\\\"
         )
     return lines
 
@@ -220,8 +222,8 @@ def _baselines(suite_name: str) -> list[str]:
     p4 = _persistence_mse(eval_batch, 4)
     label = suite_name.replace("_", r"\_")
     return [
-        f"    Persistence & {label} & n/a & n/a & n/a & n/a & n/a & {p1:.2f} & {p4:.2f} & n/a \\\\",
-        f"    AR(1) & {label} & n/a & n/a & n/a & n/a & n/a & {ar_mse:.2f} & -- & n/a \\\\",
+        f"    Persistence & {label} & n/a & n/a & n/a & n/a & n/a & n/a & {p1:.2f} & {p4:.2f} & n/a \\\\",
+        f"    AR(1) & {label} & n/a & n/a & n/a & n/a & n/a & n/a & {ar_mse:.2f} & -- & n/a \\\\",
     ]
 
 
@@ -269,7 +271,7 @@ def write_crl_table(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         )
         if lines_block:
             block = (
-                "    \\multicolumn{10}{@{}l}{\\emph{"
+                "    \\multicolumn{11}{@{}l}{\\emph{"
                 + crl_label(key)
                 + "}}\\\\\n"
                 + "\n".join(lines_block)
@@ -277,14 +279,14 @@ def write_crl_table(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
             )
             if benchmark.kind == "temporal":
                 block += "\n".join(_baselines(key)) + "\n"
-            block += "    \\cmidrule(l){1-10}\n" + _sig_note(shared_dir, key)
+            block += "    \\cmidrule(l){1-11}\n" + _sig_note(shared_dir, key)
             blocks.append((benchmark.kind, key, block))
         else:
             blocks.append(
                 (
                     benchmark.kind,
                     key,
-                    "    \\multicolumn{10}{@{}l}{\\textcolor{red}{\\emph{"
+                    "    \\multicolumn{11}{@{}l}{\\textcolor{red}{\\emph{"
                     + crl_label(key)
                     + " --- run pending}}}\\\\\n",
                 )
@@ -325,7 +327,7 @@ def write_crl_table(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         body = "".join(block for _, _, block in part_blocks)
         if part_index == len(parts) - 1 and missing:
             body += (
-                "    \\multicolumn{10}{@{}l}{\\textcolor{red}{Pending: "
+                "    \\multicolumn{11}{@{}l}{\\textcolor{red}{Pending: "
                 + ", ".join(missing)
                 + ".}}\\\\\n"
             )
@@ -354,11 +356,12 @@ def write_crl_table(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
             "  \\label{" + label + "}\n"
             "  \\begin{tabular*}{\\textwidth}{@{\\extracolsep{\\fill}} "
             ">{\\raggedright\\arraybackslash}p{0.09\\textwidth} "
-            ">{\\raggedright\\arraybackslash}p{0.11\\textwidth} r r r r r r r r @{}}\n"
+            ">{\\raggedright\\arraybackslash}p{0.10\\textwidth} r r r r r r r r r @{}}\n"
             "    \\toprule\n"
             "    \\textbf{Method} & \\textbf{Benchmark} & \\textbf{MCC $\\uparrow$} & "
             "\\textbf{$R^2_{\\text{diag}}$ $\\uparrow$} & "
             "\\textbf{$R^2_{\\text{sep}}$ $\\downarrow$} & "
+            "\\textbf{DCI $\\uparrow$} & "
             "\\textbf{SHD $\\downarrow$} & \\textbf{Isolation $\\downarrow$} & "
             "\\textbf{1-step MSE $\\downarrow$} & \\textbf{4-step MSE $\\downarrow$} & "
             "\\textbf{Time (s)} \\\\\n"
@@ -373,11 +376,11 @@ def write_crl_table(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
 
 
 def write_crl_summary(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
-    """Compact methods-by-benchmarks MCC matrix for the main text."""
+    """Compact methods-by-metrics summary for the main text."""
     temporal = [
         (key, bench)
         for key, bench in CRL_BENCHMARKS.items()
-        if bench.kind == "temporal" and bench.summary
+        if bench.kind == "temporal"
     ]
     methods = METHODS_FOR_KIND["temporal"]
     aggregated: dict[str, dict[str, dict[str, dict[str, float]]]] = {}
@@ -385,8 +388,6 @@ def write_crl_summary(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
     for key, _ in temporal:
         rows = _load(shared_dir / f"crl_shared_{key}.json")
         aggregated[key] = aggregate_rows(rows) if rows else {}
-        # A block is reportable only when every method has its full seed schedule
-        # *and* a finite MCC; an all-NaN block (e.g. a diverged suite) is pending.
         complete[key] = bool(rows) and all(
             _case_complete(rows, m, seeds) and "mcc" in aggregated[key].get(m, {})
             for m in methods
@@ -402,60 +403,100 @@ def write_crl_summary(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         for position, method in enumerate(order, start=1):
             ranks[method].append(position)
 
-    def cell(key: str, method: str) -> str:
-        if not complete[key]:
-            return "--"
-        best = max(methods, key=lambda m: aggregated[key][m]["mcc"]["mean"])
-        return _fmt(aggregated[key], method, "mcc", digits=2, bold=method == best)
+    metrics = [
+        ("mcc", r"MCC $\uparrow$", True, 3),
+        ("r2_diag", r"$R^2_{\mathrm{diag}}$ $\uparrow$", True, 3),
+        ("r2_sep", r"$R^2_{\mathrm{sep}}$ $\downarrow$", False, 3),
+        ("dci", r"DCI $\uparrow$", True, 3),
+        ("shd", r"SHD $\downarrow$", False, 2),
+        ("forecast1", r"1-step MSE $\downarrow$", False, 3),
+    ]
+    means: dict[str, dict[str, float | None]] = {m: {} for m in methods}
+    for method in methods:
+        for metric, _, _, _ in metrics:
+            values = [
+                float(aggregated[key][method][metric]["mean"])
+                for key, _ in temporal
+                if complete[key]
+                and metric in aggregated[key].get(method, {})
+                and aggregated[key][method][metric].get("mean") is not None
+            ]
+            means[method][metric] = sum(values) / len(values) if values else None
 
-    header_cells = ["\\textbf{Method}"] + [f"\\textbf{{{b.label}}}" for _, b in temporal]
-    header_cells.append("\\textbf{Mean rank $\\downarrow$}")
+    best: dict[str, str] = {}
+    for metric, _, higher, _ in metrics:
+        values = {m: means[m][metric] for m in methods if means[m][metric] is not None}
+        if values:
+            best[metric] = (
+                max(values, key=values.get) if higher else min(values, key=values.get)
+            )
+
+    rank_mean = {m: (float(np.mean(ranks[m])) if ranks[m] else None) for m in methods}
+    best_rank = min((v for v in rank_mean.values() if v is not None), default=None)
+
+    def metric_cell(method: str, metric: str, digits: int) -> str:
+        value = means[method][metric]
+        if value is None:
+            return "--"
+        text = f"{value:.{digits}f}"
+        return f"\\textbf{{{text}}}" if best.get(metric) == method else text
+
     body = []
     for method in methods:
-        cells = [method] + [cell(key, method) for key, _ in temporal]
-        cells.append(f"{np.mean(ranks[method]):.2f}" if ranks[method] else "--")
+        cells = [method] + [
+            metric_cell(method, metric, digits) for metric, _, _, digits in metrics
+        ]
+        rank = rank_mean[method]
+        if rank is None:
+            cells.append("--")
+        elif best_rank is not None and abs(rank - best_rank) < 1e-12:
+            cells.append(f"\\textbf{{{rank:.2f}}}")
+        else:
+            cells.append(f"{rank:.2f}")
         body.append("    " + " & ".join(cells) + " \\\\")
 
-    count_word = {
-        17: "seventeen",
-        18: "eighteen",
-        19: "nineteen",
-    }.get(len(temporal), str(len(temporal)))
+    n_complete = len(temporal) - len(pending)
+    count_word = {17: "seventeen", 18: "eighteen", 19: "nineteen"}.get(
+        n_complete, str(n_complete)
+    )
     caption = (
-        "Summary of representation recovery (MCC, higher is better) for the five temporal CRL "
-        "methods across the " + count_word + " shared benchmarks "
-        + _label_span([benchmark.label for _, benchmark in temporal]) + ". ``Mean rank'' is the average "
-        "rank over the benchmarks with a complete block (one is best); bold marks the best MCC in "
-        "each column. The full per-benchmark table, with all metrics and "
-        "wall-clock times, is Table~\\ref{tab:exp_crl} in Appendix~\\ref{app:full_results}, and the "
-        "Friedman/Nemenyi test of the ranking is Table~\\ref{tab:exp_stats}."
+        "Summary of representation recovery and downstream utility for the five "
+        "temporal CRL methods across the " + count_word + " shared benchmarks. "
+        "Each cell is the mean of the per-benchmark seed means: MCC, "
+        "$R^2_{\\mathrm{diag}}$, $R^2_{\\mathrm{sep}}$ and DCI over all benchmarks, "
+        "one-step MSE over the temporal benchmarks where forecasting is defined, "
+        "and SHD over the graph benchmarks where a graph is available. Higher is "
+        "better for MCC and $R^2_{\\mathrm{diag}}$; lower is better for "
+        "$R^2_{\\mathrm{sep}}$, SHD and one-step MSE. Bold marks the best value "
+        "in each column. ``Mean rank'' is the average MCC rank over the complete "
+        "blocks (one is best). The per-benchmark values, seed dispersion and the "
+        "Friedman/Nemenyi test are in \\autoref{app:full_results}."
     )
     if pending:
-        caption += " \\textcolor{red}{Pending blocks (no finite MCC or incomplete seeds): " + ", ".join(pending) + ".}"
+        caption += (
+            " \\textcolor{red}{Pending blocks (no finite MCC or incomplete seeds): "
+            + ", ".join(pending)
+            + ".}"
+        )
     table = (
         r"""\begin{table}[t]
   \centering
-  \scriptsize
-  \setlength{\tabcolsep}{4pt}
-  \renewcommand{\arraystretch}{1.12}
+  \footnotesize
+  \setlength{\tabcolsep}{6pt}
+  \renewcommand{\arraystretch}{1.15}
   \caption{"""
         + caption
         + r"""}
   \label{tab:exp_crl_summary}
-  \resizebox{\textwidth}{!}{%
-  \begin{tabular}{@{} l """
-        + "r " * (len(temporal) + 1)
-        + r"""@{}}
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}} l r r r r r r r @{}}
     \toprule
-    """
-        + " & ".join(header_cells)
-        + r""" \\
+    \textbf{Method} & \textbf{MCC $\uparrow$} & \textbf{$R^2_{\mathrm{diag}}$ $\uparrow$} & \textbf{$R^2_{\mathrm{sep}}$ $\downarrow$} & \textbf{DCI $\uparrow$} & \textbf{SHD $\downarrow$} & \textbf{1-step MSE $\downarrow$} & \textbf{Mean rank $\downarrow$} \\
     \midrule
 """
         + "\n".join(body)
         + r"""
     \bottomrule
-  \end{tabular}}
+  \end{tabular*}
 \end{table}
 """
     )
@@ -776,7 +817,9 @@ def write_stats_section(shared_dir: Path, latex_dir: Path) -> None:
         if metric in {"mcc", "r2_diag", "forecast1"}:
             name = f"cd_{metric}.pdf"
             save_cd_figure(
-                result["figure"], latex_dir / "pic" / "experiments" / name
+                result["figure"],
+                latex_dir / "pic" / "experiments" / name,
+                title=f"{pretty} ({'higher' if higher else 'lower'} is better)",
             )
             figure_names.append(name)
 
@@ -805,16 +848,20 @@ def write_stats_section(shared_dir: Path, latex_dir: Path) -> None:
     )
     figure_section = ""
     if figure_names:
-        includes = "\\\\\n".join(
-            f"  \\includegraphics[width=\\textwidth]{{pic/experiments/{name}}}"
+        panels = [
+            "\\begin{minipage}{.49\\textwidth}\\centering"
+            f"\\includegraphics[width=\\linewidth]{{pic/experiments/{name}}}"
+            "\\end{minipage}"
             for name in figure_names
-        )
+        ]
+        rows = ["\\hfill".join(panels[index : index + 2]) for index in range(0, len(panels), 2)]
+        includes = "\\\\[2pt]\n".join(rows)
         figure_section += (
             "\n\\begin{figure*}[t]\n  \\centering\n"
             + includes
             + "\n  \\caption{Critical-difference diagrams for the "
             + f"{n_problems}"
-            + "-problem CRL configuration grid: methods whose average ranks are joined by a bar are not significantly different at $\\alpha=0.05$ (Nemenyi). Lower ranks are better. The tests and the diagrams are computed with StaTDS \\cite{lunaStaTDSLibraryStatistical2024}.}\n"
+            + "-problem CRL configuration grid. Each panel is labelled by metric; a bar joins methods whose average ranks are not significantly different at $\\alpha=0.05$ (Nemenyi), and lower ranks are better. The tests and the diagrams are computed with StaTDS \\cite{lunaStaTDSLibraryStatistical2024}.}\n"
             "  \\label{fig:cd_diagrams}\n\\end{figure*}\n"
         )
     table_out = latex_dir / "pic" / "experiments" / "stats_table.tex"
