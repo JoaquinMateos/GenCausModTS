@@ -1065,7 +1065,7 @@ def write_real_inventory_table(latex_dir: Path) -> None:
     caption = (
         "Real and real-derived datasets named in this review, with the highest rung of Pearl's "
         "hierarchy they expose, the ground truth they provide, their modality, their role under "
-        "principle~R1 (soundness when the causal object is observed; external validity otherwise) and "
+        "the ground-truth principle (soundness when the causal object is observed; external validity otherwise) and "
         "their access mode. Only ``soundness'' datasets---recorded interventions and randomised "
         "trials---may populate a soundness metric; the rest support downstream-utility and "
         "out-of-distribution comparisons only."
@@ -1172,7 +1172,7 @@ def write_external_validity_table(outputs_dir: Path, latex_dir: Path, *, seeds: 
             + str(seeds)
             + " seeds and single-run persistence and AR(1) baselines. Real series "
             "expose no latent ground truth, so only downstream-utility proxies are "
-            "reported (principle~R1): one- and four-step forecasting MSE on a "
+            "reported (ground-truth principle): one- and four-step forecasting MSE on a "
             "chronologically later held-out split and reconstruction MSE. A lower "
             "MSE means the learned representation generalises better; bold marks "
             "the best value and every value within one standard deviation of it; "
