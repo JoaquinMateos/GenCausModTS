@@ -351,24 +351,27 @@ def save_cd_figure(
     figure: Any,
     path: str | Path,
     *,
-    size: tuple[float, float] = (9.0, 2.6),
+    size: tuple[float, float] = (10.0, 3.4),
     title: str | None = None,
 ) -> Path:
     """Write a StaTDS critical-difference figure as vector PDF and SVG.
 
-    The StaTDS canvas is very wide (15 in); resizing it to ``size`` keeps the
-    labels legible when the figure is included two per row. ``title`` labels the
-    metric so the reader can identify the panel without the caption.
+    The StaTDS canvas is very wide (15 in); it is resized to ``size`` and every
+    label is enlarged to 17 pt so the ranking and the method names remain legible
+    when the figure is included two per row. ``title`` labels the metric.
     """
     import matplotlib.pyplot as plt
+    import matplotlib.text as mtext
 
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     vector = out.suffix.lower() in {".pdf", ".svg"}
     if vector:
         figure.set_size_inches(*size)
+    for text in figure.findobj(mtext.Text):
+        text.set_fontsize(17)
     if title:
-        figure.suptitle(title, fontsize=12)
+        figure.suptitle(title, fontsize=18, y=1.03)
     figure.savefig(out, bbox_inches="tight")
     if vector:
         sibling = out.with_suffix(".svg" if out.suffix.lower() != ".svg" else ".pdf")
