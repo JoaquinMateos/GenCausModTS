@@ -181,7 +181,7 @@ def main() -> int:
     )
     grid_cases = sorted({str(r.get("dataset")) for r in grid_rows})
     grid_mcc = _matrix(grid_rows, grid_cases, CRL_METHODS, "mcc", case_key="dataset")
-    blocks.append(_block("18-problem grid, MCC (higher is better)", grid_mcc, minimize=False))
+    blocks.append(_block("18-problem grid, MCC", grid_mcc, minimize=False))
     grid_f1 = _matrix(grid_rows, grid_cases, CRL_METHODS, "forecast1", case_key="dataset")
     blocks.append(_block("18-problem grid, one-step forecasting (MSE, lower is better)",
                          grid_f1, minimize=True))
