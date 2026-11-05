@@ -162,9 +162,9 @@ class SRNNSyntheticNS(pl.LightningModule):
             mid = torch.cat(zs[-self.lag:], dim=1)
             inputs = torch.cat([mid, output[:,t,:]], dim=1)    
             distributions = self.net(inputs)
-            mu = distributions[:, :self.z_dim]
-            logvar = distributions[:, self.z_dim:]
-            zt = self.reparameterize(mu, logvar, random_sampling)
+            mu = distributions[:, :self.z_dim].clamp(-10.0, 10.0)
+            logvar = distributions[:, self.z_dim:].clamp(-10.0, 10.0)
+            zt = self.reparameterize(mu, logvar, random_sampling).clamp(-10.0, 10.0)
             zs.append(zt)
             mus.append(mu)
             logvars.append(logvar)

@@ -98,6 +98,7 @@ class TimeVaryingProcess_v2(pl.LightningModule):
         self.sparsity_mode = sparsity_mode
         self.infer_mode = infer_mode
         self.slot_gate_active_threshold = 0.2
+        self.manual_epoch = 0
 
         # Domain embeddings (identical to v1)
         self.embed_func = nn.Embedding(nclass, embedding_dim)
@@ -136,7 +137,6 @@ class TimeVaryingProcess_v2(pl.LightningModule):
         self.register_buffer('base_dist_var', torch.eye(self.z_dim))
 
         # Save hyperparameters for checkpoint
-        self.save_hyperparameters()
 
     @property
     def base_dist(self):
@@ -173,7 +173,7 @@ class TimeVaryingProcess_v2(pl.LightningModule):
     # Lambda schedule: warmup → ramp → full
     # ------------------------------------------------------------------
     def get_current_lambda(self):
-        epoch = self.current_epoch
+        epoch = self.manual_epoch
         if epoch < self.warmup_epochs:
             return 0.0
         elif epoch < self.warmup_epochs + self.rampup_epochs:
@@ -186,7 +186,7 @@ class TimeVaryingProcess_v2(pl.LightningModule):
     # Freeze schedule: decoder-only → joint
     # ------------------------------------------------------------------
     def on_train_epoch_start(self):
-        epoch = self.current_epoch
+        epoch = self.manual_epoch
         if epoch < self.freeze_epochs:
             # Freeze everything except decoder
             for name, param in self.named_parameters():
@@ -334,7 +334,7 @@ class TimeVaryingProcess_v2(pl.LightningModule):
         # Column exclusivity: each x_i dominated by one z
         # Uses its own warmup schedule independent of lambda_sparse
         if self.lambda_col > 0 and hasattr(self.net.decoder, 'col_exclusivity_loss'):
-            epoch = self.current_epoch
+            epoch = self.manual_epoch
             if epoch < self.warmup_epochs:
                 lam_col = 0.0
             elif epoch < self.warmup_epochs + self.rampup_epochs:
@@ -349,7 +349,7 @@ class TimeVaryingProcess_v2(pl.LightningModule):
 
         # Row L1: weak penalty on total influence per z
         if self.lambda_row > 0 and hasattr(self.net.decoder, 'row_l1_loss'):
-            epoch = self.current_epoch
+            epoch = self.manual_epoch
             if epoch < self.warmup_epochs:
                 lam_row = 0.0
             elif epoch < self.warmup_epochs + self.rampup_epochs:

@@ -517,6 +517,9 @@ class SimpleTrainer(BaseTrainer):
 
         try:
             for epoch in range(self.max_epochs):
+                on_epoch_start = getattr(model, "on_epoch_start", None)
+                if callable(on_epoch_start):
+                    on_epoch_start(epoch)
                 if kl_target is not None:
                     # beta warm-up: ramp the KL weight linearly to its target.
                     fraction = min(1.0, (epoch + 1) / self.kl_warmup_epochs)

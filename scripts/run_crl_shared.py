@@ -37,7 +37,7 @@ from gcmts.causal_representation_learning.methods import (
     LEAP,
     MOSAIC,
     NCTRL,
-    TDRL,
+    TDRLOfficial, IVAEOfficial, LEAPOfficial, NCTRLOfficial, MOSAICOfficial,
     CHiLD,
     iCITRIS,
 )
@@ -381,58 +381,51 @@ def build_methods(suite: Suite, *, epochs_scale: float = 1.0) -> list[MethodSpec
     return [
         (
             "iVAE",
-            lambda: IVAE(
+            lambda: IVAEOfficial(
                 observed_dim=D, latent_dim=d, u_dim=u, obs_noise=0.1, image_shape=image
             ),
             common_epochs,
         ),
         (
             "LEAP",
-            lambda: LEAP(
+            lambda: LEAPOfficial(
                 observed_dim=D,
                 latent_dim=d,
                 max_lag=1,
                 u_dim=u,
-                kl_weight=0.01,
-                obs_noise=0.1,
+                length=suite.horizon,
                 image_shape=image,
             ),
             common_epochs,
         ),
         (
             "TDRL",
-            lambda: TDRL(
+            lambda: TDRLOfficial(
                 observed_dim=D,
                 latent_fix_dim=fix,
                 latent_dyn_dim=dyn,
                 latent_obs_dim=obs,
                 u_dim=u,
-                kl_weight=0.01,
-                obs_noise=0.1,
                 image_shape=image,
             ),
             common_epochs,
         ),
         (
             "NCTRL",
-            lambda: NCTRL(
+            lambda: NCTRLOfficial(
                 observed_dim=D,
                 latent_dim=d,
                 n_regimes=u,
-                kl_weight=0.01,
-                obs_noise=0.1,
                 image_shape=image,
             ),
             common_epochs,
         ),
         (
             "MOSAIC",
-            lambda: MOSAIC(
+            lambda: MOSAICOfficial(
                 observed_dim=D,
                 latent_dim=d,
                 u_dim=u,
-                kl_weight=0.1,
-                obs_noise=0.1,
                 image_shape=image,
             ),
             common_epochs,

@@ -16,6 +16,10 @@ from gcmts.causal_representation_learning.methods.nctrl import NCTRL
 from gcmts.causal_representation_learning.methods.slow_flows import SlowFlows
 from gcmts.causal_representation_learning.methods.tdrl import TDRL
 from gcmts.causal_representation_learning.methods.tdrl_official import TDRLOfficial
+from gcmts.causal_representation_learning.methods.ivae_official import IVAEOfficial
+from gcmts.causal_representation_learning.methods.nctrl_official import NCTRLOfficial
+from gcmts.causal_representation_learning.methods.mosaic_official import MOSAICOfficial
+from gcmts.causal_representation_learning.methods.leap_official import LEAPOfficial
 
 __all__ = [
     "CaDRe",
@@ -30,4 +34,8 @@ __all__ = [
     "SlowFlows",
     "TDRL",
     "TDRLOfficial",
+    "IVAEOfficial",
+    "NCTRLOfficial",
+    "MOSAICOfficial",
+    "LEAPOfficial",
 ]

@@ -149,25 +149,28 @@ class LEAPOfficial(BaseCausalRepresentationLearner):
     def loss(self, outputs: CausalRepresentationOutput, batch: Batch) -> dict[str, Tensor]:
         packed = self._dict(batch)
         obs = packed["s1"]["xt"]
-        # Discriminator update on a detached residual stream, then the
-        # generator update with the discriminator frozen.  This mirrors the
-        # official two-optimizer schedule inside the single gcmts trainer.
-        params = list(self.core.parameters())
-        for p in params:
-            p.requires_grad_(False)
-        for p in self.core.discriminator.parameters():
-            p.requires_grad_(True)
-        self.disc_optimizer.zero_grad()
-        d_loss = self.core.training_step(packed, 0, 1)
-        d_loss.backward()
-        self.disc_optimizer.step()
-        for p in params:
-            p.requires_grad_(True)
-        for p in self.core.discriminator.parameters():
-            p.requires_grad_(False)
-        g_loss = self.core.training_step(packed, 0, 0)
-        for p in self.core.discriminator.parameters():
-            p.requires_grad_(True)
+        if torch.is_grad_enabled():
+            # Discriminator update on a detached residual stream, then the
+            # generator update with the discriminator frozen.  This mirrors the
+            # official two-optimizer schedule inside the single gcmts trainer.
+            params = list(self.core.parameters())
+            for p in params:
+                p.requires_grad_(False)
+            for p in self.core.discriminator.parameters():
+                p.requires_grad_(True)
+            self.disc_optimizer.zero_grad()
+            d_loss = self.core.training_step(packed, 0, 1)
+            d_loss.backward()
+            self.disc_optimizer.step()
+            for p in params:
+                p.requires_grad_(True)
+            for p in self.core.discriminator.parameters():
+                p.requires_grad_(False)
+            g_loss = self.core.training_step(packed, 0, 0)
+            for p in self.core.discriminator.parameters():
+                p.requires_grad_(True)
+        else:
+            g_loss = self.core.training_step(packed, 0, 0)
         return {"loss": g_loss, "recon": torch.zeros((), device=g_loss.device)}
 
     def transition(self, z_past: Tensor, context: dict[str, Tensor] | None = None) -> Tensor:

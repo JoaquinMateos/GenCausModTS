@@ -23,7 +23,6 @@ class TDRL(pl.LightningModule):
             correlation='Pearson'):
         '''Nonlinear ICA for nonparametric stationary processes'''
         super().__init__()
-        self.save_hyperparameters()
         self.x_dim = x_dim
         self.z_dim = z_dim
         self.lags = lags
@@ -200,7 +199,6 @@ class CTDRL(pl.LightningModule):
         Upper bound of the NCTRL.
         """
         super().__init__()
-        self.save_hyperparameters()
         self.A = None
         self.x_dim = x_dim
         self.z_dim = z_dim
