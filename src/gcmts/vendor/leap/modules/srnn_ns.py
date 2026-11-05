@@ -132,7 +132,7 @@ class SRNNSyntheticNS(pl.LightningModule):
         # self.dictionary = {0:self.spline_list[0], 1:self.spline_list[1], 2:self.spline_list[2]}
 
         # FactorVAE
-        self.discriminator = Discriminator(z_dim = z_dim*self.length)
+        self.discriminator = Discriminator(z_dim = z_dim*max(1, self.length-self.lag))
 
         # Register skeleton logits
         self.logits = nn.Parameter(torch.randn(self.z_dim, self.z_dim*self.lag)+4)
@@ -264,7 +264,7 @@ class SRNNSyntheticNS(pl.LightningModule):
             logabsdet.append(logabsdet_c)
         es = torch.stack(es, axis=1)
         logabsdet = torch.stack(logabsdet, axis=1)
-        mask = one_hot.unsqueeze(1).repeat(1,self.length,1).reshape(-1, self.nclass)
+        mask = one_hot.unsqueeze(1).repeat(1,length-self.lag,1).reshape(-1, self.nclass)
         es = (es * mask.unsqueeze(-1)).sum(1)
         logabsdet = (logabsdet * mask).sum(1)
         es = es.reshape(batch_size, length-self.lag, self.z_dim)
@@ -361,7 +361,7 @@ class SRNNSyntheticNS(pl.LightningModule):
             logabsdet.append(logabsdet_c)
         es = torch.stack(es, axis=1)
         logabsdet = torch.stack(logabsdet, axis=1)
-        mask = one_hot.unsqueeze(1).repeat(1,self.length,1).reshape(-1, self.nclass)
+        mask = one_hot.unsqueeze(1).repeat(1,length-self.lag,1).reshape(-1, self.nclass)
         es = (es * mask.unsqueeze(-1)).sum(1)
         logabsdet = (logabsdet * mask).sum(1)
         es = es.reshape(batch_size, length-self.lag, self.z_dim)

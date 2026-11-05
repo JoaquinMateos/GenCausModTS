@@ -11,6 +11,7 @@ from gcmts.causal_representation_learning.methods.citris import CITRIS
 from gcmts.causal_representation_learning.methods.icitris import iCITRIS
 from gcmts.causal_representation_learning.methods.ivae import IVAE
 from gcmts.causal_representation_learning.methods.leap import LEAP
+from gcmts.causal_representation_learning.methods.leap_official import LEAPOfficial
 from gcmts.causal_representation_learning.methods.mosaic import MOSAIC
 from gcmts.causal_representation_learning.methods.nctrl import NCTRL
 from gcmts.causal_representation_learning.methods.slow_flows import SlowFlows
@@ -25,6 +26,7 @@ __all__ = [
     "iCITRIS",
     "IVAE",
     "LEAP",
+    "LEAPOfficial",
     "MOSAIC",
     "NCTRL",
     "SlowFlows",

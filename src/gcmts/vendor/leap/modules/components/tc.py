@@ -45,6 +45,8 @@ class Discriminator(nn.Module):
 
         for block in self._modules:
             for m in self._modules[block]:
+                if isinstance(m, nn.LazyLinear):
+                    continue
                 initializer(m)
 
     def forward(self, z):
