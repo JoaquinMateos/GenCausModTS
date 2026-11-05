@@ -109,6 +109,12 @@ blocks and one-seed pilots are run locally first.
 4. IHDP/static, 100 replications, after static loss scope and GANITE/CEPAE/CRN/CaTSG fixes.
 5. Rebuild tables and regenerated statistics; update Table 23 and the affected result paragraphs.
 
+## GPU runs launched (2026-11-05)
+
+- `gpu_212`, GPU 1: IHDP 100 replications into `outputs_static_fixed`.
+- `gpu_212`, GPU 1: Voronoi/Causal Pinball 10 seeds into `outputs_shared_voronoi_fixed`.
+- Local: CTEE harmonic/tumour 10 seeds with shared evaluation draws into `outputs_ctee_fixed` (resumed after the local wall-clock timeout).
+
 ## Result checks in progress
 
 ### Linear SEM (one seed, full budget)
