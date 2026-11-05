@@ -744,7 +744,7 @@ def _run(
         # Align the latents before fitting the instantaneous graph: the
         # same-time estimator assumes the causal order j < i, so estimating in
         # the predicted order and permuting afterwards is not equivalent.
-        z_aligned = z_pred[..., perm]
+        z_aligned = z_pred[..., perm.to(z_pred.device)]
         adj_est = estimate_latent_adjacency(z_aligned, max_lag=max_lag)
         adjacency = batch.adjacency[..., -max_lag:].to(adj_est.device)
         # The latents are already aligned by the correlation-based Hungarian

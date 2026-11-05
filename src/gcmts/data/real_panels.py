@@ -54,8 +54,17 @@ def load_lalonde(path: str | Path) -> EffectCohort:
     outcome is ``re78`` (1978 earnings).
     """
     frame = pd.read_stata(path)
-    covariates = ["age", "education", "black", "hispanic", "married", "nodegree", "re74", "re75"]
-    covariates = [column for column in covariates if column in frame.columns]
+    aliases = {
+        "education": ("education", "educ"),
+        "hispanic": ("hispanic", "hisp"),
+        "married": ("married", "marr"),
+    }
+    covariates = []
+    for canonical in ("age", "education", "black", "hispanic", "married", "nodegree", "re74", "re75"):
+        candidates = aliases.get(canonical, (canonical,))
+        match = next((name for name in candidates if name in frame.columns), None)
+        if match is not None:
+            covariates.append(match)
     x = frame[covariates].to_numpy(dtype=np.float64)
     t = frame["treat"].to_numpy(dtype=np.int64)
     y = frame["re78"].to_numpy(dtype=np.float64)

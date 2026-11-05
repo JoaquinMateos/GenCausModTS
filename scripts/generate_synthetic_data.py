@@ -38,7 +38,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import run_crl_shared as shared  # noqa: E402
 
-from gcmts.data.synthetic_store import (  # noqa: E402
+from gcmts.data.synthetic_store import (
+    GENERATOR_REVISION,  # noqa: E402
     dataset_exists,
     dataset_path,
     load_dataset,
@@ -83,7 +84,9 @@ def _existing_is_usable(out_dir: Path, suite: str, seed: int) -> bool:
     A pool written before the finiteness gate can be non-finite; skipping it
     would make every later run train on NaNs, so it is regenerated instead.
     """
-    train, eval_batch, _ = load_dataset(dataset_path(out_dir, suite, seed))
+    train, eval_batch, meta = load_dataset(dataset_path(out_dir, suite, seed))
+    if meta.get("generator_revision") != GENERATOR_REVISION:
+        return False
     return not non_finite_fields(train) and not non_finite_fields(eval_batch)
 
 

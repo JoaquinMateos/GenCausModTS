@@ -48,6 +48,7 @@ __all__ = [
 ]
 
 MANIFEST_NAME = "manifest.json"
+GENERATOR_REVISION = "2026-11-05"
 
 
 def batch_to_state(batch: Batch) -> dict[str, Any]:
@@ -62,6 +63,7 @@ def batch_to_state(batch: Batch) -> dict[str, Any]:
         "counterfactual": batch.counterfactual,
         "outcome": batch.outcome,
         "domain": batch.domain,
+        "target": batch.target,
     }
 
 
@@ -78,6 +80,7 @@ def batch_from_state(state: dict[str, Any]) -> Batch:
         counterfactual=state.get("counterfactual"),
         outcome=state.get("outcome"),
         domain=state.get("domain"),
+        target=state.get("target"),
     )
 
 
@@ -97,6 +100,7 @@ class DatasetRecord:
     created_at: str
     sha256: str
     path: str
+    generator_revision: str = ""
 
 
 def dataset_path(root: str | Path, suite: str, seed: int) -> Path:
@@ -134,6 +138,7 @@ def save_dataset(
             "latent_dim": None if latent_dim is None else int(latent_dim),
             "max_lag": int(max_lag),
             "generator": generator,
+            "generator_revision": GENERATOR_REVISION,
             "created_at": datetime.now(UTC).isoformat(),
             "torch_version": torch.__version__,
         },
@@ -156,6 +161,7 @@ def save_dataset(
         created_at=payload["meta"]["created_at"],
         sha256=digest,
         path=str(path),
+        generator_revision=GENERATOR_REVISION,
     )
     _update_manifest(path.parents[1], record)
     return record
