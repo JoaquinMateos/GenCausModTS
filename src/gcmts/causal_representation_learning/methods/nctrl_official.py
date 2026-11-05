@@ -95,6 +95,9 @@ class NCTRLOfficial(BaseCausalRepresentationLearner):
     def forward(self, batch: Batch) -> CausalRepresentationOutput:
         obs = self._obs(batch.x)
         x_recon, mean, logvar, z = self.core.net(obs)
+        logvar = torch.clamp(logvar, -10.0, 10.0)
+        mean = torch.clamp(mean, -10.0, 10.0)
+        z = torch.clamp(z, -10.0, 10.0)
         return CausalRepresentationOutput(
             z=z,
             x_recon=x_recon,
@@ -104,6 +107,9 @@ class NCTRLOfficial(BaseCausalRepresentationLearner):
     def loss(self, outputs: CausalRepresentationOutput, batch: Batch) -> dict[str, Tensor]:
         obs = self._obs(batch.x)
         x_recon, mus, logvars, z_est = self.core.net(obs)
+        logvars = torch.clamp(logvars, -10.0, 10.0)
+        mus = torch.clamp(mus, -10.0, 10.0)
+        z_est = torch.clamp(z_est, -10.0, 10.0)
         E_logp_x, c_est = self.core.hmm(z_est.detach())
         hmm_loss = -E_logp_x.mean()
         if torch.is_grad_enabled():

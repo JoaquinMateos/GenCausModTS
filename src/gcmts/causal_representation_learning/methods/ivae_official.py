@@ -59,6 +59,7 @@ class IVAEOfficial(BaseCausalRepresentationLearner):
             image_feature_dim=image_feature_dim,
         )
         self.n_aux = max(int(u_dim), 1)
+        self.x_scale = 1.0
         self.core = IVAECore(
             latent_dim=latent_dim,
             data_dim=self.encoder_input_dim(observed_dim),
@@ -69,6 +70,20 @@ class IVAEOfficial(BaseCausalRepresentationLearner):
             device="cpu",
         )
 
+    def to(self, *args, **kwargs):
+        """Move the official iVAE plain-tensor distribution state with the module."""
+        result = super().to(*args, **kwargs)
+        device = next(self.parameters()).device
+        self.core.prior_mean = self.core.prior_mean.to(device)
+        self.core.decoder_var = self.core.decoder_var.to(device)
+        for dist in (self.core.prior_dist, self.core.decoder_dist, self.core.encoder_dist):
+            dist.device = device
+            dist.c = dist.c.to(device)
+            dist._dist = type(dist._dist)(
+                torch.zeros(1, device=device), torch.ones(1, device=device)
+            )
+        return result
+
     def _obs(self, x: Tensor) -> Tensor:
         if self.image_shape is None:
             return x
@@ -78,7 +93,7 @@ class IVAEOfficial(BaseCausalRepresentationLearner):
     def _flat(self, x: Tensor, context: dict[str, Tensor] | None) -> tuple[Tensor, Tensor, int, int]:
         obs = self._obs(x)
         batch, time, dim = obs.shape
-        flat = obs.reshape(batch * time, dim)
+        flat = obs.reshape(batch * time, dim) * self.x_scale
         return flat, _aux(context, batch, time, self.n_aux, obs.device), batch, time
 
     def encode(self, x: Tensor, context: dict[str, Tensor] | None = None) -> Tensor:
@@ -94,7 +109,7 @@ class IVAEOfficial(BaseCausalRepresentationLearner):
     def forward(self, batch: Batch) -> CausalRepresentationOutput:
         flat, u, b, t = self._flat(batch.x, batch.context)
         decoder_params, (mean, logvar), z, prior = self.core.forward(flat, u)
-        rec = self.core.f(z).reshape(b, t, self.observed_dim)
+        rec = (self.core.f(z) / self.x_scale).reshape(b, t, self.observed_dim)
         return CausalRepresentationOutput(
             z=z.reshape(b, t, self.latent_dim),
             x_recon=rec,
@@ -103,7 +118,15 @@ class IVAEOfficial(BaseCausalRepresentationLearner):
 
     def loss(self, outputs: CausalRepresentationOutput, batch: Batch) -> dict[str, Tensor]:
         flat, u, _, _ = self._flat(batch.x, batch.context)
-        elbo, _ = self.core.elbo(flat, u)
+        prior_params = self.core.prior_params(u)
+        g, v = self.core.encoder_params(flat, u)
+        z = self.core.encoder_dist.sample(g, v).clamp(-8.0, 8.0)
+        decoder_params = self.core.decoder_params(z)
+        decoder_mean = decoder_params[0]
+        log_px_z = self.core.decoder_dist.log_pdf(flat, decoder_mean, decoder_params[1])
+        log_qz_xu = self.core.encoder_dist.log_pdf(z, g, v)
+        log_pz_u = self.core.prior_dist.log_pdf(z, *prior_params)
+        elbo = (log_px_z + log_pz_u - log_qz_xu).mean()
         return {"loss": elbo, "recon": torch.zeros((), device=elbo.device)}
 
     def transition(self, z_past: Tensor, context: dict[str, Tensor] | None = None) -> Tensor:
