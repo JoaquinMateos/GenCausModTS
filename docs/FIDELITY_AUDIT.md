@@ -111,8 +111,8 @@ blocks and one-seed pilots are run locally first.
 
 ## GPU runs launched (2026-11-05)
 
-- `gpu_212`, GPU 1: IHDP 100 replications into `outputs_static_fixed`.
-- `gpu_212`, GPU 1: Voronoi/Causal Pinball 10 seeds into `outputs_shared_voronoi_fixed`.
+- `gpu_212`, GPU 1: IHDP 100 replications into `outputs_static_fixed`, pinned to CPUs 0--1.
+- `gpu_212`, GPU 1: Voronoi/Causal Pinball 10 seeds into `outputs_shared_voronoi_fixed`, pinned to CPUs 2--3. Both use single-threaded BLAS/OpenMP, so the total CPU budget is four.
 - Local: CTEE harmonic/tumour 10 seeds with shared evaluation draws into `outputs_ctee_fixed` (resumed after the local wall-clock timeout).
 
 ## Result checks in progress
