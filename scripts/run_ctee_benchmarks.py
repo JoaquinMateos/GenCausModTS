@@ -286,7 +286,7 @@ def run_case(
     # A fixed evaluation draw, independent of the training RNG and shared by
     # every method for this dataset/seed.  Sampling after training made the
     # paired Wilcoxon comparisons compare different units.
-    eval_generator = cfg.dataset.make_generator(seed + 100_000)
+    eval_generator = cfg.dataset.make_generator(seed)
     eval_batch = eval_generator.sample(1024)
     model = cfg.model_factory()
     n_params = sum(p.numel() for p in model.parameters())

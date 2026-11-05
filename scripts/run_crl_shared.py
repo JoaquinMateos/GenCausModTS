@@ -685,7 +685,7 @@ def _run(
     # Use one fixed evaluation draw per (suite, seed), independent of the
     # training generator and shared by every method in the block.
     if eval_batch is None:
-        eval_batch = suite.make_generator(seed + 100_000).sample(2048)
+        eval_batch = suite.make_generator(seed).sample(2048)
     start = time.perf_counter()
     history = trainer.fit(model, source)
     seconds = wall_seconds(start)
