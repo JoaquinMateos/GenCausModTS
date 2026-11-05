@@ -18,7 +18,7 @@ Status: 2026-11-05. Scope: implementations, architectures, hyperparameters, metr
 | Adjacent/SDD labels | Surrogate/partial status is explicit in Table 5, the adjacent caption and the SDD caption | paper build |
 | Pool provenance | Pools now carry a generator-revision hash; a finite stale pool is rejected | `tests/test_synthetic_store.py`, `tests/test_regressions.py` |
 | Batch preservation | `instantaneous_adjacency` and `target` survive pooling, subsetting and device moves | `tests/test_regressions.py` |
-| New-representative SHD | Latents are aligned before `SHDMetric(aligned=False)`; the earlier optimistic default is removed | new-representatives rerun in progress |
+| New-representative SHD | Latents are aligned before `SHDMetric(aligned=False)`; the earlier optimistic default is removed | completed; canonical JSON updated |
 | LaLonde covariates | `educ/hisp/marr` are mapped to the canonical names | `tests/test_real.py` |
 
 ## Audit items already fixed or verified
@@ -123,6 +123,10 @@ states; CRN is not the best estimator after the fix, and no method improves on
 the oracle-mean reference. The paper's linear-SEM result is marked provisional
 until the ten-seed block (`outputs_sem_fixed`) replaces it.
 
+### Official-source integration
+
+All method files now begin with paper/source provenance. Official TDRL, LEAP and MOSAIC sources are vendored under `src/gcmts/vendor/` (with licenses); `TDRLOfficial` is wired into the shared runner. TDRL's nonparametric change prior was adapted for the benchmark batch layout. LEAP (TC discriminator/two optimizers), MOSAIC (two-stage training) and NCTRL (ARHMM) still need interface/trainer integration.
+
 ### Pending result reruns
 
 - Linear SEM: ten seeds running in `outputs_sem_fixed`.
@@ -131,4 +135,5 @@ until the ten-seed block (`outputs_sem_fixed`) replaces it.
   model adaptations are resolved.
 - Benchmark B / Voronoi: must be rerun after the instantaneous-graph alignment
   fix.
-- New representatives: rerun after the `SHDMetric(aligned=False)` correction.
+- New representatives: completed; Table 8 updated.
+- TDRL official: full shared rerun is autograd-heavy and has not yet been run locally at the full budget.
