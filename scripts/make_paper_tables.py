@@ -1129,7 +1129,7 @@ def write_adjacent_table(outputs_dir: Path, latex_dir: Path, *, seeds: int = 10)
         + " seeds, each on the benchmark that exposes its object's ground truth and scored on its "
         "headline soundness metric (Section~\\ref{sec:experiments}). The three adjacent objects---a "
         "propagation path, a policy and an attribution---are heterogeneous, so the comparison is "
-        "per-object rather than head-to-head. ``Time (s)'' is deferred until the approximate timing pass; ``--'' marks a deferred value. The LacaDM hypervolume uses the corrected maximisation reference."
+        "per-object rather than head-to-head. These rows are coverage evidence from compact or partial implementations, not replications of the original papers. ``Time (s)'' is deferred until the approximate timing pass; ``--'' marks a deferred value. The LacaDM hypervolume uses the maximisation reference."
     )
     table = (
         r"""\begin{table}[t]
@@ -1360,7 +1360,7 @@ def write_ctee_real_table(outputs_dir: Path, latex_dir: Path, *, replications: i
         "as a published adjusted estimate for NHEFS and Oregon---so individual metrics (PEHE, "
         "policy risk) are undefined and only $\\epsilon_{\\text{ATE}}$ is reported; for NHEFS and "
         "Oregon this is a reference comparison, not a soundness claim. Each cohort is a single "
-        "deterministic run, so every entry has zero seed dispersion. ``Time (s)'' is deferred until the approximate timing pass; ``--'' marks a deferred value."
+        "deterministic run, so every entry has zero seed dispersion; the real cohorts are reference comparisons trained and evaluated on the same cohort, not held-out unit splits. ``Time (s)'' is deferred until the approximate timing pass; ``--'' marks a deferred value."
     )
     table = (
         r"""\begin{table}[t]
