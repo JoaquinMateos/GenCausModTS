@@ -1,6 +1,10 @@
 # Seed and statistical-test policy
 
-Status: 2026-11-05. Applies to every local and `gpu_212` run.
+Status: 2026-11-06. Applies to every local and `gpu_212` run.
+
+Current GPU run: five seeds at the Optuna-selected 200-epoch budget and early
+stopping. Ten seeds remain the target for the frozen final table; the current
+run is a five-seed trial/intermediate comparison and must be labelled as such.
 
 ## Seed tiers
 
