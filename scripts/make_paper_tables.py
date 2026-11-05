@@ -700,11 +700,13 @@ def write_ctee_table(outputs_dir: Path, latex_dir: Path, *, seeds: int) -> None:
     def _mean_cell(case: str, metric: str, *, bold: bool = False, digits: int = 2) -> str:
         if case not in aggregated or metric not in aggregated[case]:
             return "--"
-        mean = float(aggregated[case][metric]["mean"])
+        entry = aggregated[case][metric]
+        mean = float(entry["mean"])
         if not np.isfinite(mean):
             return "--"
-        text = f"{mean:.{digits}f}"
-        return f"\\textbf{{{text}}}" if bold else text
+        std = float(entry.get("std", 0.0) or 0.0)
+        body = f"{mean:.{digits}f}\\tiny{{$\\pm${std:.{digits}f}}}"
+        return f"\\textbf{{{body}}}" if bold else body
 
     mean_ranks: dict[str, list[int]] = {prefix: [] for _, _, prefix in methods}
     friedman_tests: list[tuple[str, float]] = []
@@ -802,17 +804,17 @@ def write_ctee_table(outputs_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         )
     summary_caption = (
         "Compact summary of the three temporal exact-counterfactual benchmarks; the full table with "
-        "seed dispersion, $\\epsilon_{\\text{ATE}}$, the axiom metrics and the reference rows is "
-        "\\autoref{tab:exp_ctee} in \\autoref{app:full_results}. Entries are means over ten seeds; "
-        "lower is better, and bold marks the best mean per column. The mean rank is the average PEHE "
-        "rank over ten seeds and the three benchmarks; because the benchmarks are different mechanisms, "
-        "it is descriptive rather than a pooled test. " + test_sentence
+        "$\\epsilon_{\\text{ATE}}$, the axiom metrics and the reference rows is "
+        "\\autoref{tab:exp_ctee} in \\autoref{app:full_results}. Entries are mean$\\pm$seed standard "
+        "deviation over ten seeds; lower is better, and bold marks the best mean per column. The mean rank "
+        "is the average PEHE rank over ten seeds and the three benchmarks; because the benchmarks are "
+        "different mechanisms, it is descriptive rather than a pooled test. " + test_sentence
     )
     summary = (
         r"""\begin{table}[t]
   \centering
-  \footnotesize
-  \setlength{\tabcolsep}{3.5pt}
+  \scriptsize
+  \setlength{\tabcolsep}{2.5pt}
   \renewcommand{\arraystretch}{1.12}
   \caption{"""
         + summary_caption
