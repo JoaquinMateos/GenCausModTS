@@ -584,10 +584,17 @@ def write_ctee_table(outputs_dir: Path, latex_dir: Path, *, seeds: int) -> None:
 
     available = [item for item in order if _case_complete(rows, item[0], seeds)]
     pending_datasets = sorted({item[3] for item in order if item not in available})
-    lines = [row(*item) for item in available]
+    lines = []
+    last_dataset = None
+    for item in available:
+        if last_dataset is not None and item[3] != last_dataset:
+            lines.append(r"    \midrule")
+        lines.append(row(*item))
+        last_dataset = item[3]
     # Reference predictors: no effect and the oracle mean effect.  These make
     # the absolute PEHE interpretable (a learned PEHE above the no-effect row
     # means the model is worse than predicting zero).
+    reference_lines = []
     for dataset, case in (
         ("Harmonic", "ganite_harmonic"),
         ("Tumour", "ganite_tumour"),
@@ -598,12 +605,15 @@ def write_ctee_table(outputs_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         zero = _fmt(aggregated, case, "pehe_zero", digits=2)
         mean = _fmt(aggregated, case, "pehe_mean", digits=2)
         ate_zero = _fmt(aggregated, case, "ate_zero", digits=2)
-        lines.append(
+        reference_lines.append(
             f"    No effect (0) & reference & {dataset} & {zero} & {ate_zero} & -- & -- & -- & -- & -- & -- & -- \\\\"
         )
-        lines.append(
+        reference_lines.append(
             f"    Oracle mean effect & reference & {dataset} & {mean} & 0.00 & -- & -- & -- & -- & -- & -- & -- \\\\"
         )
+    if reference_lines:
+        lines.append(r"    \midrule")
+        lines.extend(reference_lines)
     caption = (
         "Counterfactual and treatment-effect estimators (Branches II.A observed-data adjustment, II.B representation-based identification, II.C latent-confounder \\& environment models) on three benchmarks with exact counterfactuals: the damped harmonic oscillator, the tumour-growth simulator (time-varying chemo/radio treatment) and a time-varying-treatment linear SEM. Methods are grouped by branch, not by performance. The corrected run adds two reference rows per benchmark that make the absolute error interpretable: ``No effect (0)'' predicts a zero individual effect and ``Oracle mean effect'' predicts the true average effect for every unit. Mean $\\pm$ standard deviation over "
         + str(seeds)
@@ -664,6 +674,160 @@ def write_ctee_table(outputs_dir: Path, latex_dir: Path, *, seeds: int) -> None:
     out = latex_dir / "pic" / "experiments" / "ctee.tex"
     out.write_text(table, encoding="utf-8")
     print(f"wrote {out}")
+
+    # Compact main-text summary: one row per method, PEHE and CF MAE by
+    # benchmark, and the mean PEHE rank.  The full table stays in Appendix H.
+    methods = [
+        ("GANITE", "II.A adjust", "ganite"),
+        ("Wu-IPTW", "II.A adjust", "wu_iptw"),
+        ("CRN", "II.B repr.", "crn"),
+        ("CEPAE", "II.B repr.", "cepae"),
+        ("CaTSG", "II.C latent", "catsg"),
+    ]
+    benchmarks = [
+        ("Harmonic", "harmonic"),
+        ("Tumour", "tumour"),
+        ("Linear SEM", "linear_sem"),
+    ]
+
+    def _mean_cell(case: str, metric: str, *, bold: bool = False, digits: int = 2) -> str:
+        if case not in aggregated or metric not in aggregated[case]:
+            return "--"
+        mean = float(aggregated[case][metric]["mean"])
+        if not np.isfinite(mean):
+            return "--"
+        text = f"{mean:.{digits}f}"
+        return f"\\textbf{{{text}}}" if bold else text
+
+    mean_ranks: dict[str, list[int]] = {prefix: [] for _, _, prefix in methods}
+    friedman_tests: list[tuple[str, float]] = []
+    for dataset_name, suffix in benchmarks:
+        subset = [row for row in rows if row.get("dataset") == suffix]
+        matrix, cases, _ = metric_matrix(subset, "pehe", problem_key="seed")
+        if matrix.shape[1] >= 3 and matrix.shape[0] >= 2:
+            result = friedman_test(matrix, higher_is_better=False)
+            friedman_tests.append((dataset_name, float(result["p_value"])))
+        case_to_prefix = {f"{prefix}_{suffix}": prefix for _, _, prefix in methods}
+        for problem_index in range(matrix.shape[0]):
+            values = {}
+            for case_index, case in enumerate(cases):
+                prefix = case_to_prefix.get(case)
+                if prefix is None:
+                    continue
+                value = float(matrix[problem_index, case_index])
+                if np.isfinite(value):
+                    values[prefix] = value
+            for rank, (prefix, _) in enumerate(sorted(values.items(), key=lambda item: item[1]), start=1):
+                mean_ranks[prefix].append(rank)
+    mean_rank = {
+        prefix: (float(np.mean(ranks)) if ranks else float("nan"))
+        for prefix, ranks in mean_ranks.items()
+    }
+    best_rank = min(mean_rank.values())
+    best_cell: dict[tuple[str, str], str] = {}
+    for dataset_name, suffix in benchmarks:
+        for metric in ("pehe", "cf_mae"):
+            values = {}
+            for _, _, prefix in methods:
+                case = f"{prefix}_{suffix}"
+                if case in aggregated and metric in aggregated[case]:
+                    value = float(aggregated[case][metric]["mean"])
+                    if np.isfinite(value):
+                        values[prefix] = value
+            if values:
+                best_cell[(dataset_name, metric)] = min(values, key=values.get)
+
+    def _cell(prefix: str, suffix: str, dataset_name: str, metric: str) -> str:
+        case = f"{prefix}_{suffix}"
+        return _mean_cell(case, metric, bold=best_cell.get((dataset_name, metric)) == prefix)
+
+    summary_rows = []
+    for method, branch, prefix in sorted(
+        methods, key=lambda item: (np.isnan(mean_rank[item[2]]), mean_rank[item[2]])
+    ):
+        cells = [_cell(prefix, suffix, dataset_name, "pehe") for dataset_name, suffix in benchmarks]
+        cells += [_cell(prefix, suffix, dataset_name, "cf_mae") for dataset_name, suffix in benchmarks]
+        rank = mean_rank[prefix]
+        rank_text = "--" if np.isnan(rank) else f"{rank:.2f}"
+        if not np.isnan(rank) and abs(rank - best_rank) < 1e-9:
+            rank_text = f"\\textbf{{{rank_text}}}"
+        cells.append(rank_text)
+        summary_rows.append(f"    {method} & {branch} & " + " & ".join(cells) + " \\\\")
+
+    summary_rows.append(r"    \midrule")
+    for label, metric in (("No effect (0)", "pehe_zero"), ("Oracle mean effect", "pehe_mean")):
+        cells = [_mean_cell(f"ganite_{suffix}", metric) for _, suffix in benchmarks]
+        cells += ["--", "--", "--", "--"]
+        summary_rows.append(f"    {label} & reference & " + " & ".join(cells) + " \\\\")
+
+    p_values = [
+        float(comparison["p_holm"])
+        for metric in ("pehe", "ate_error", "cf_mae")
+        for comparison in ctee_stats.get(metric, [])
+        if comparison.get("p_holm") is not None
+    ]
+    p_values = [value for value in p_values if np.isfinite(value)]
+    min_p = min(p_values) if p_values else float("nan")
+    def _p_text(value: float) -> str:
+        if not np.isfinite(value):
+            return "--"
+        if value < 0.01:
+            mantissa, exponent = f"{value:.1e}".split("e")
+            return f"{mantissa}\\times10^{{{int(exponent)}}}"
+        return f"{value:.3f}"
+
+    if friedman_tests:
+        test_sentence = "Omnibus Friedman tests give " + ", ".join(
+            f"{dataset_name} $p={_p_text(value)}$"
+            for dataset_name, value in friedman_tests
+        ) + "."
+    else:
+        test_sentence = ""
+    if np.isfinite(min_p) and min_p < 0.05:
+        test_sentence += (
+            " After Holm correction across the 30 pairwise Wilcoxon comparisons, "
+            f"at least one pair differs (smallest adjusted $p={min_p:.3f}$)."
+        )
+    elif np.isfinite(min_p):
+        test_sentence += (
+            " After Holm correction across the 30 pairwise Wilcoxon comparisons, "
+            f"no pair survives at ten seeds (smallest adjusted $p={min_p:.3f}$)."
+        )
+    summary_caption = (
+        "Compact summary of the three temporal exact-counterfactual benchmarks; the full table with "
+        "seed dispersion, $\\epsilon_{\\text{ATE}}$, the axiom metrics and the reference rows is "
+        "\\autoref{tab:exp_ctee} in \\autoref{app:full_results}. Entries are means over ten seeds; "
+        "lower is better, and bold marks the best mean per column. The mean rank is the average PEHE "
+        "rank over ten seeds and the three benchmarks; because the benchmarks are different mechanisms, "
+        "it is descriptive rather than a pooled test. " + test_sentence
+    )
+    summary = (
+        r"""\begin{table}[t]
+  \centering
+  \footnotesize
+  \setlength{\tabcolsep}{3.5pt}
+  \renewcommand{\arraystretch}{1.12}
+  \caption{"""
+        + summary_caption
+        + r"""}
+  \label{tab:exp_ctee_summary}
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}} l l r r r r r r r @{}}
+    \toprule
+    & & \multicolumn{3}{c}{\textbf{PEHE} $\downarrow$} & \multicolumn{3}{c}{\textbf{CF MAE} $\downarrow$} & \\
+    \cmidrule(lr){3-5}\cmidrule(lr){6-8}
+    \textbf{Method} & \textbf{Branch} & \textbf{Harm.} & \textbf{Tumour} & \textbf{Linear} & \textbf{Harm.} & \textbf{Tumour} & \textbf{Linear} & \textbf{Rank} \\
+    \midrule
+"""
+        + "\n".join(summary_rows)
+        + r"""
+    \bottomrule
+  \end{tabular*}
+\end{table}
+"""
+    )
+    summary_out = latex_dir / "pic" / "experiments" / "ctee_summary.tex"
+    summary_out.write_text(summary, encoding="utf-8")
+    print(f"wrote {summary_out}")
 
 
 def write_sdd_table(outputs_dir: Path, latex_dir: Path, *, seeds: int) -> None:
