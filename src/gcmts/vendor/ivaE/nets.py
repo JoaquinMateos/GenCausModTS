@@ -150,7 +150,7 @@ class cleanIVAE(nn.Module):
 
     def encoder(self, x, u):
         xu = torch.cat((x, u), 1)
-        g = self.g(xu)
+        g = self.g(xu).clamp(-10.0, 10.0)
         logv = self.logv(xu)
         return g, logv.exp()
 
@@ -435,10 +435,10 @@ class iVAE(nn.Module):
 
     def encoder_params(self, x, u):
         xu = torch.cat((x, u), 1)
-        g = self.g(xu)
+        g = self.g(xu).clamp(-10.0, 10.0)
         # Numerical guard for long runs: the official iVAE can overflow the
         # exponential variance when the encoder log-variance drifts.
-        logv = self.logv(xu).clamp(-10.0, 10.0)
+        logv = self.logv(xu).clamp(-6.0, 6.0)
         return g, logv.exp()
 
     def decoder_params(self, s):
@@ -446,7 +446,7 @@ class iVAE(nn.Module):
         return f, self.decoder_var
 
     def prior_params(self, u):
-        logl = self.logl(u).clamp(-10.0, 10.0)
+        logl = self.logl(u).clamp(-6.0, 6.0)
         return self.prior_mean, logl.exp()
 
     def forward(self, x, u):
@@ -513,7 +513,7 @@ class DiscreteIVAE(nn.Module):
 
     def encoder_params(self, x, u):
         xu = torch.cat((x, u), 1)
-        g = self.g(xu)
+        g = self.g(xu).clamp(-10.0, 10.0)
         logv = self.logv(xu)
         return g, logv
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor
 
 from gcmts.causal_representation_learning.base import BaseCausalRepresentationLearner
@@ -29,9 +30,19 @@ def _aux(context: dict[str, Tensor] | None, batch: int, time: int, dim: int, dev
     if context is None or "u" not in context or dim <= 0:
         return torch.zeros(batch * time, dim, device=device)
     u = context["u"]
-    if u.ndim == 2:
+    if u.ndim == 1:
+        u = u.unsqueeze(1).expand(-1, time)
+    elif u.ndim == 2 and u.shape[1] == time:
+        # One integer regime per timestep (physics/control suites).
+        u = F.one_hot(u.long(), num_classes=dim).to(torch.float32)
+    elif u.ndim == 2 and u.shape[1] == 1:
+        u = u.expand(-1, time)
+        u = F.one_hot(u.long().squeeze(1), num_classes=dim).to(torch.float32)
+    elif u.ndim == 2:
         u = u.unsqueeze(1).expand(-1, time, -1)
-    return u.reshape(batch * time, -1).to(device)
+    elif u.ndim == 3 and u.shape[-1] == 1:
+        u = F.one_hot(u.long().squeeze(-1), num_classes=dim).to(torch.float32)
+    return u.reshape(batch * time, -1).to(device=device, dtype=torch.float32)
 
 
 class IVAEOfficial(BaseCausalRepresentationLearner):
@@ -117,7 +128,7 @@ class IVAEOfficial(BaseCausalRepresentationLearner):
     def forward(self, batch: Batch) -> CausalRepresentationOutput:
         flat, u, b, t = self._flat(batch.x, batch.context)
         decoder_params, (mean, logvar), z, prior = self.core.forward(flat, u)
-        rec = self.core.f(z)
+        rec = self.core.f(z).clamp(-20.0, 20.0)
         if self.image_shape is None:
             rec = rec / self.x_scale
             rec = rec.reshape(b, t, self.observed_dim)
@@ -135,7 +146,7 @@ class IVAEOfficial(BaseCausalRepresentationLearner):
         g, v = self.core.encoder_params(flat, u)
         z = self.core.encoder_dist.sample(g, v).clamp(-8.0, 8.0)
         decoder_params = self.core.decoder_params(z)
-        decoder_mean = decoder_params[0]
+        decoder_mean = decoder_params[0].clamp(-10.0, 10.0)
         log_px_z = self.core.decoder_dist.log_pdf(flat, decoder_mean, decoder_params[1])
         log_qz_xu = self.core.encoder_dist.log_pdf(z, g, v)
         log_pz_u = self.core.prior_dist.log_pdf(z, *prior_params)

@@ -30,6 +30,10 @@ def _ct(context: dict[str, Tensor] | None, batch_size: int, n_classes: int, devi
     u = context["u"]
     if u.ndim == 3:
         u = u[:, -1]
+    if u.ndim == 2 and u.shape[1] not in (1, n_classes):
+        # Physics/control suites store one regime index per timestep; the
+        # official models need the regime that labels the sequence window.
+        u = u[:, -1]
     if u.ndim == 1:
         return u.long().to(device)
     if u.shape[-1] == 1:

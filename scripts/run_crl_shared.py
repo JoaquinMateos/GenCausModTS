@@ -400,21 +400,17 @@ def build_methods(suite: Suite, *, epochs_scale: float = 1.0) -> list[MethodSpec
     # in which iVAE gets 1500 epochs, LEAP/TDRL/NCTRL 2000* and MOSAIC 1200 is
     # not a comparison of inductive biases.
     common_epochs = max(int(2000 * epochs_scale), 200)
-    # The official iVAE is an i.i.d. model; its temporal flattening is stable
-    # only for a shorter budget and is capped after the Optuna pilot selected
-    # this regime. The other methods use the common 2000-epoch maximum.
-    ivaE_epochs = min(common_epochs, max(int(500 * epochs_scale), 200))
     methods = [
         (
             "iVAE",
-            lambda: IVAEOfficial(
+            lambda: IVAE(
                 observed_dim=D,
                 latent_dim=d,
                 u_dim=u,
+                obs_noise=0.1,
                 image_shape=image,
-                **_hp("iVAE"),
             ),
-            ivaE_epochs,
+            common_epochs,
         ),
         (
             "LEAP",
