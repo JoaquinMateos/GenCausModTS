@@ -6,6 +6,7 @@ import torch
 
 from gcmts.core.backbones import CNNDecoder, CNNEncoder
 from gcmts.data.causal3dident import Causal3DIdentImageGenerator
+from gcmts.data.sem_effect import TimeVaryingSEMGenerator
 from gcmts.data.synthetic import (
     CartPoleGenerator,
     Causal3DIdentGenerator,
@@ -142,6 +143,25 @@ def test_linear_sde_generator_stationary_scale():
     assert torch.isfinite(batch.x).all()
     # Stable drift: the process should not blow up.
     assert batch.x.abs().mean() < 50
+
+
+def test_time_varying_sem_is_stable_and_paired() -> None:
+    for seed in range(10):
+        generator = TimeVaryingSEMGenerator(n_covariates=4, horizon=20, history=2, seed=seed)
+        batch = generator.sample(8)
+        # The factual and no-treatment counterfactual share the initial
+        # covariate state, so their t=0 covariates must agree exactly.
+        assert torch.allclose(batch.x[:, 0, 1:5], batch.counterfactual[:, 0, 1:5])
+        assert torch.isfinite(batch.x).all()
+        assert torch.isfinite(batch.counterfactual).all()
+        # Companion radius must respect the configured cap.
+        h = generator.n_covariates
+        companion = torch.zeros(generator.history * h, generator.history * h)
+        for lag in range(generator.history):
+            companion[:h, lag * h : (lag + 1) * h] = generator.gamma_x[lag]
+        for lag in range(1, generator.history):
+            companion[lag * h : (lag + 1) * h, (lag - 1) * h : lag * h] = torch.eye(h)
+        assert float(torch.linalg.eigvals(companion).abs().max()) <= 0.8001
 
 
 def test_voronoi_generator_interventions_and_graph():

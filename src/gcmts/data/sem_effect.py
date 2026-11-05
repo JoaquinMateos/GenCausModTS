@@ -68,22 +68,35 @@ class TimeVaryingSEMGenerator(BaseDataGenerator):
             companion[:h, lag * h : (lag + 1) * h] = gamma_x[lag]
         for lag in range(1, history):
             companion[lag * h : (lag + 1) * h, (lag - 1) * h : lag * h] = torch.eye(h)
-        radius = float(torch.linalg.eigvals(companion).abs().max())
-        if radius > max_radius:
-            gamma_x = gamma_x * (max_radius / radius)
+        # Scaling every lag block by a common factor does not scale the
+        # companion eigenvalues by that factor because the sub-diagonal
+        # identity blocks are not scaled.  Iterate until the actual companion
+        # radius is within the cap.
+        for _ in range(20):
+            companion = torch.zeros(history * h, history * h)
+            for lag in range(history):
+                companion[:h, lag * h : (lag + 1) * h] = gamma_x[lag]
+            for lag in range(1, history):
+                companion[lag * h : (lag + 1) * h, (lag - 1) * h : lag * h] = torch.eye(h)
+            radius = float(torch.linalg.eigvals(companion).abs().max())
+            if radius <= max_radius:
+                break
+            gamma_x = gamma_x * (max_radius / radius) * 0.99
         self.gamma_x = gamma_x
         self.beta_a = 0.8 * torch.randn(history, generator=self.rng)
         self.beta_x = 0.6 * torch.randn(history, h, generator=self.rng)
         self.alpha_a = 0.7 * torch.randn(history, generator=self.rng)
         self.alpha_x = 0.5 * torch.randn(history, h, generator=self.rng)
 
-    def _roll(self, actions: Tensor, noise_x: Tensor, noise_y: Tensor) -> tuple[Tensor, Tensor]:
-        """Roll the SEM for a given action sequence ``(B, T)``; shared noise."""
+    def _roll(
+        self, actions: Tensor, noise_x: Tensor, noise_y: Tensor, cov0: Tensor
+    ) -> tuple[Tensor, Tensor]:
+        """Roll the SEM for a given action sequence ``(B, T)`` with shared noise and initial state."""
         batch, horizon = actions.shape
         h = self.n_covariates
         cov = torch.zeros(batch, horizon, h)
         out = torch.zeros(batch, horizon)
-        cov[:, 0] = torch.rand(batch, h, generator=self.rng)
+        cov[:, 0] = cov0
         for t in range(horizon):
             for tau in range(1, self.history + 1):
                 if t - tau < 0:
@@ -114,14 +127,15 @@ class TimeVaryingSEMGenerator(BaseDataGenerator):
             n_samples, horizon, self.n_covariates, generator=self.rng
         )
         noise_y = self.noise_std * torch.randn(n_samples, horizon, generator=self.rng)
-        # Factual actions: sample from the propensity of a first pass.
-        cov0, _ = self._roll(torch.zeros(n_samples, horizon), noise_x, noise_y)
-        propensity = self._propensity(torch.zeros(n_samples, horizon), cov0)
+        # One initial covariate state is shared by the propensity pass, the
+        # factual trajectory and the counterfactual trajectory.
+        cov0 = torch.rand(n_samples, self.n_covariates, generator=self.rng)
+        zeros = torch.zeros(n_samples, horizon)
+        cov_prop, _ = self._roll(zeros, noise_x, noise_y, cov0)
+        propensity = self._propensity(zeros, cov_prop)
         actions = (torch.rand(n_samples, horizon, generator=self.rng) < propensity).float()
-        cov, out = self._roll(actions, noise_x, noise_y)
-
-        zeros = torch.zeros_like(actions)
-        cov_cf, out_cf = self._roll(zeros, noise_x, noise_y)
+        cov, out = self._roll(actions, noise_x, noise_y, cov0)
+        cov_cf, out_cf = self._roll(zeros, noise_x, noise_y, cov0)
 
         # Standardise the factual observations dimension-wise and apply the
         # *same* transform to the counterfactual.  The raw linear SEM can

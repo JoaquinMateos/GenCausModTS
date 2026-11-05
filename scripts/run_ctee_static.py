@@ -331,10 +331,6 @@ def run_replication(
 ) -> list[StaticResult]:
     train_replication, test_replication = _load_pair(dataset, index, data_dir)
     results: list[StaticResult] = []
-    train_generator = IHDPGenerator(train_replication, seed=index)
-    test_generator = IHDPGenerator(
-        test_replication, seed=index + 10_000, reference=train_generator
-    )
     for method_name in methods:
         factory, epochs, note = METHODS[method_name]
         epochs = max(2, int(round(epochs * epochs_scale)))
@@ -343,6 +339,12 @@ def run_replication(
             "CASE %s_%s replication=%d | %s", method_name, dataset, index, note
         )
         torch.manual_seed(index)
+        # Fresh generators per method give every estimator the same training
+        # stream and the same held-out units for a given replication.
+        train_generator = IHDPGenerator(train_replication, seed=index)
+        test_generator = IHDPGenerator(
+            test_replication, seed=index + 10_000, reference=train_generator
+        )
         model = factory(train_generator)
         n_params = sum(p.numel() for p in model.parameters())
         exp_dir = out_dir / f"{method_name}_{dataset}_{index}"
@@ -394,6 +396,10 @@ def run_replication(
         ("ridge_t", _ridge_t_learner),
         ("nearest_neighbour", _nearest_neighbour),
     ):
+        train_generator = IHDPGenerator(train_replication, seed=index)
+        test_generator = IHDPGenerator(
+            test_replication, seed=index + 10_000, reference=train_generator
+        )
         tau_hat = estimator(train_generator, test_generator)
         metrics = _metrics(tau_hat, test_replication, reference_ate=_REFERENCE_ATE.get(dataset))
         logger.info(

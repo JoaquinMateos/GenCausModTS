@@ -49,6 +49,7 @@ from gcmts.evaluation.report import (
 )
 from gcmts.evaluation.stats import paired_wilcoxon_holm
 from gcmts.evaluation.tracking import StepTracker
+from gcmts.typing import Batch
 
 logger = logging.getLogger("gcmts.ctee")
 
@@ -210,9 +211,13 @@ def _outcome(traj: torch.Tensor, dim: int) -> torch.Tensor:
 
 
 def evaluate(
-    model: BaseEffectEstimator, generator: Generator, device: torch.device
+    model: BaseEffectEstimator,
+    generator: Generator,
+    device: torch.device,
+    *,
+    batch: Batch | None = None,
 ) -> dict[str, float]:
-    batch = move_batch(generator.sample(1024), device)
+    batch = move_batch(batch if batch is not None else generator.sample(1024), device)
     action = batch.context["A"].to(device)
     zeros = torch.zeros_like(action)
 
@@ -278,6 +283,11 @@ def run_case(
     logger.info("CASE %s seed=%d | %s", cfg.name, seed, cfg.note)
     torch.manual_seed(seed)
     generator = cfg.dataset.make_generator(seed)
+    # A fixed evaluation draw, independent of the training RNG and shared by
+    # every method for this dataset/seed.  Sampling after training made the
+    # paired Wilcoxon comparisons compare different units.
+    eval_generator = cfg.dataset.make_generator(seed + 100_000)
+    eval_batch = eval_generator.sample(1024)
     model = cfg.model_factory()
     n_params = sum(p.numel() for p in model.parameters())
     exp_dir = out_dir / cfg.name
@@ -303,7 +313,7 @@ def run_case(
         model.save(exp_dir / "model.pt")
 
     resolved = trainer.resolve_device(model)
-    scores = evaluate(model, generator, resolved)
+    scores = evaluate(model, generator, resolved, batch=eval_batch)
     logger.info(
         "RESULT %s | %s (%.1fs)",
         cfg.name,

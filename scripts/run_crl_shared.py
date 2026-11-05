@@ -682,6 +682,10 @@ def _run(
     # CPU pool: only the index draw changes, and that still uses the CPU RNG.
     if isinstance(source, PooledGenerator) and hasattr(source, "to"):
         source.to(resolved)
+    # Use one fixed evaluation draw per (suite, seed), independent of the
+    # training generator and shared by every method in the block.
+    if eval_batch is None:
+        eval_batch = suite.make_generator(seed + 100_000).sample(2048)
     start = time.perf_counter()
     history = trainer.fit(model, source)
     seconds = wall_seconds(start)
@@ -691,7 +695,7 @@ def _run(
         if tracker is not None:
             tracker.log_curves(method, history)
 
-    raw_eval = eval_batch if eval_batch is not None else source.sample(2048)
+    raw_eval = eval_batch
     batch = move_batch(raw_eval, resolved)
     if suite.name == "sde":
         with torch.no_grad():
@@ -732,14 +736,17 @@ def _run(
         max_lag = max_lag_override if max_lag_override is not None else int(
             getattr(source, "max_lag", 1)
         )
-        adj_est = estimate_latent_adjacency(z_pred, max_lag=max_lag)
-        adjacency = batch.adjacency[..., -max_lag:].to(adj_est.device)
         perm = (
             latent_permutation(z_pred, batch.z)
             if batch.z is not None
-            else torch.arange(adj_est.shape[0])
+            else torch.arange(z_pred.shape[-1], device=z_pred.device)
         )
-        adj_est = adj_est[perm][:, perm]
+        # Align the latents before fitting the instantaneous graph: the
+        # same-time estimator assumes the causal order j < i, so estimating in
+        # the predicted order and permuting afterwards is not equivalent.
+        z_aligned = z_pred[..., perm]
+        adj_est = estimate_latent_adjacency(z_aligned, max_lag=max_lag)
+        adjacency = batch.adjacency[..., -max_lag:].to(adj_est.device)
         # The latents are already aligned by the correlation-based Hungarian
         # assignment, so do not re-optimise the permutation against the true
         # graph inside the metric.
@@ -750,8 +757,8 @@ def _run(
             # same-time edges.  Estimate them in the aligned causal order and
             # add them to the structural score so SHD/AUPRC are not silently
             # restricted to the lagged subgraph.
-            inst_est = estimate_instantaneous_adjacency(z_pred, max_lag=max_lag)
-            inst_est = inst_est[perm][:, perm].to(adj_est.device)
+            inst_est = estimate_instantaneous_adjacency(z_aligned, max_lag=max_lag)
+            inst_est = inst_est.to(adj_est.device)
             inst_true = batch.instantaneous_adjacency.to(adj_est.device)
             shd = float(shd) + float(plain_shd(inst_est, inst_true))
             # Average the two threshold-free rankings instead of concatenating

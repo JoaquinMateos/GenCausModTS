@@ -98,7 +98,7 @@ class iCITRIS(BaseCausalRepresentationLearner):  # noqa: N801
         # Instantaneous adjacency over the K causal groups: strictly lower
         # triangular in the causal order, so it is acyclic by construction.
         self.instantaneous_logits = nn.Parameter(
-            -2.0
+            0.5
             * torch.ones(n_vars, n_vars)
             * torch.tril(torch.ones(n_vars, n_vars), diagonal=-1)
         )
@@ -169,14 +169,14 @@ class iCITRIS(BaseCausalRepresentationLearner):  # noqa: N801
             current = z_seq[:, t]
             for index, group in enumerate(groups[:-1] if self.n_shared > 0 else groups):
                 parents = [
-                    inst[j, index] * current[:, groups[j]] for j in range(self.n_vars) if j != index
+                    inst[index, j] * current[:, groups[j]] for j in range(self.n_vars) if j != index
                 ]
                 parent_value = (
                     torch.cat(parents, dim=-1)
                     if parents
                     else torch.zeros(batch, 0, device=device, dtype=z_seq.dtype)
                 )
-                masked_previous = previous * self._group_expand(temp[:, index])
+                masked_previous = previous * self._group_expand(temp[index])
                 target = (
                     interventions[:, t, index].unsqueeze(-1)
                     if interventions is not None
@@ -300,9 +300,8 @@ class iCITRIS(BaseCausalRepresentationLearner):  # noqa: N801
             for j in range(self.n_groups):
                 child, parent = groups[i], groups[j]
                 if i < self.n_vars and j < self.n_vars and i != j:
-                    value = inst[i, j] if i > j else inst[j, i]
-                    expanded[parent, child, 0] = value
-                expanded[parent, child, 1] = temp[j, i]
+                    expanded[child, parent, 0] = inst[i, j]
+                expanded[child, parent, 1] = temp[i, j]
         return expanded
 
     def get_latent_adjacency(self) -> Tensor | None:

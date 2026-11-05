@@ -56,6 +56,25 @@ def test_icitris_forward_loss_and_adjacency():
     assert torch.isfinite(losses["loss"])
 
 
+def test_icitris_native_graph_orientation() -> None:
+    model = iCITRIS(observed_dim=3, n_vars=2, var_dim=1, n_shared=1, n_flow_layers=2)
+    with torch.no_grad():
+        model.instantaneous_logits.fill_(-10.0)
+        model.instantaneous_logits[1, 0] = 2.0
+        model.temporal_logits.fill_(-10.0)
+        model.temporal_logits[1, 0] = 2.0
+    inst, temp = model._gates()
+    assert inst[1, 0] == 1.0 and inst[0, 1] == 0.0
+    assert temp[1, 0] == 1.0 and temp[0, 1] == 0.0
+    adjacency = model.get_latent_adjacency()
+    assert adjacency is not None
+    # Public convention: A[child, parent, lag].
+    assert adjacency[1, 0, 0] == 1.0
+    assert adjacency[0, 1, 0] == 0.0
+    assert adjacency[1, 0, 1] == 1.0
+    assert adjacency[0, 1, 1] == 0.0
+
+
 def test_wu_iptw_forward_loss_and_counterfactual():
     generator = HarmonicOscillatorGenerator(n_units=2, observed_dim=4, horizon=8, seed=0)
     batch = generator.sample(8)
