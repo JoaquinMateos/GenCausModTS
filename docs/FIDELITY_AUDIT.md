@@ -96,3 +96,35 @@ These are the largest fidelity gaps. The shared ranking is a comparison of simpl
 3. CTEE temporal, 10 seeds, after shared-evaluation fix.
 4. IHDP/static, 100 replications, after static loss scope and GANITE/CEPAE/CRN/CaTSG fixes.
 5. Rebuild tables and regenerated statistics; update Table 23 and the affected result paragraphs.
+
+## Result checks in progress
+
+### Linear SEM (one seed, full budget)
+
+After the paired-counterfactual fix, the one-seed full-budget check in
+`outputs_sem_check` gives:
+
+| Method | PEHE |
+|---|---:|
+| CEPAE | 1.025 |
+| CATSG | 1.068 |
+| Wu-IPTW | 1.124 |
+| GANITE | 1.159 |
+| CRN | 1.561 |
+| No effect | 1.081 |
+| Oracle mean | 1.028 |
+
+The previous CRN PEHE of 0.110 was an artefact of unpaired initial covariate
+states; CRN is not the best estimator after the fix, and no method improves on
+the oracle-mean reference. The paper's linear-SEM result is marked provisional
+until the ten-seed block (`outputs_sem_fixed`) replaces it.
+
+### Pending result reruns
+
+- Linear SEM: ten seeds running in `outputs_sem_fixed`.
+- CTEE temporal harmonic/tumour: must be rerun after the shared-evaluation fix.
+- Static IHDP/ACIC/Twins/News: must be rerun after the static loss-scope and
+  model adaptations are resolved.
+- Benchmark B / Voronoi: must be rerun after the instantaneous-graph alignment
+  fix.
+- New representatives: rerun after the `SHDMetric(aligned=False)` correction.
