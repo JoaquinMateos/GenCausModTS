@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from gcmts.causal_representation_learning.methods import CEGEN, MOSAIC, NCTRL, TDRL
+from gcmts.causal_representation_learning.methods import CEGEN, MOSAIC, NCTRL, TDRL, TDRLOfficial
 from gcmts.causal_representation_learning.methods._temporal import hmm_log_marginal
 from gcmts.core import SimpleTrainer, move_batch
 from gcmts.core.utils import mcc
@@ -28,6 +28,26 @@ def test_hmm_log_marginal_shapes():
     result = hmm_log_marginal(log_emission, log_transition, log_initial)
     assert result.shape == (batch,)
     assert torch.isfinite(result).all()
+
+
+def test_official_tdrl_forward_loss() -> None:
+    from gcmts.causal_representation_learning.methods.tdrl_official import TDRLOfficial
+    generator = _temporal(n_regimes=2)
+    batch = generator.sample(8)
+    model = TDRLOfficial(
+        observed_dim=6,
+        latent_fix_dim=1,
+        latent_dyn_dim=1,
+        latent_obs_dim=1,
+        u_dim=2,
+    )
+    outputs = model.forward(batch)
+    assert outputs.z.shape == (8, 12, 3)
+    assert outputs.x_recon is not None and outputs.x_recon.shape == batch.x.shape
+    losses = model.loss(outputs, batch)
+    assert torch.isfinite(losses["loss"])
+    losses["loss"].backward()
+    assert any(p.grad is not None for p in model.parameters())
 
 
 # --- TDRL -------------------------------------------------------------------
