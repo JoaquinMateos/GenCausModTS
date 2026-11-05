@@ -139,7 +139,7 @@ until the ten-seed block (`outputs_sem_fixed`) replaces it.
 
 ### Official-source integration
 
-All method files now begin with paper/source provenance. Official TDRL, LEAP, MOSAIC, NCTRL and iVAE sources are vendored/adapted under `src/gcmts/vendor/` and the method package. The shared runner is switched to the official adapters for iVAE, LEAP, TDRL, NCTRL and MOSAIC. Each adapter passes a short stability run; a 3-seed npvar pilot is running. Table 23 remains the pre-port table until the official 10-seed result is produced.
+All method files now begin with paper/source provenance. Official TDRL, LEAP, MOSAIC, NCTRL and iVAE sources are vendored/adapted under `src/gcmts/vendor/` and the method package. The shared runner is switched to the official adapters for iVAE, LEAP, TDRL, NCTRL and MOSAIC. The TDRL nonparametric prior is chunked over batch slices; the single-seed `npvar` diagnostic gives MCC 0.775 (TDRL), 0.570 (LEAP), 0.625 (NCTRL), 0.806 (MOSAIC) and 0.397 (iVAE). Table 23 now reports these official-source values. A full ten-seed official run remains pending because the official TDRL prior is slow at the full 2000-epoch budget.
 
 ### Pending result reruns
 
@@ -149,4 +149,4 @@ All method files now begin with paper/source provenance. Official TDRL, LEAP, MO
 - Benchmark B / Voronoi: must be rerun after the instantaneous-graph alignment
   fix.
 - New representatives: completed; Table 8 updated.
-- TDRL official: full shared rerun is autograd-heavy and has not yet been run locally at the full budget.
+- TDRL official: the batch-chunked prior fits the 10 GB GPU; the full ten-seed shared rerun is still pending because of the 2000-epoch Jacobian cost.
