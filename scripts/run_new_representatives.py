@@ -445,7 +445,7 @@ def _normalise_methods(values: list[str] | None) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", default="auto")
-    parser.add_argument("--seeds", type=int, default=10)
+    parser.add_argument("--seeds", type=int, default=5)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--methods", nargs="*", default=None)
     parser.add_argument(

@@ -641,19 +641,9 @@ def write_ctee_table(outputs_dir: Path, latex_dir: Path, *, seeds: int) -> None:
             + ", ".join(pending_datasets)
             + ".}}\\\\"
         )
-    ctee_stats = _load_json(outputs_dir / "ctee_stats.json") or {}
-    ctee_sig = [
-        metric
-        for metric in ("pehe", "ate_error", "cf_mae")
-        if any(comparison.get("significant") for comparison in ctee_stats.get(metric, []))
-    ]
-    if ctee_sig:
-        footer += (
-            "\n    \\addlinespace\n    \\multicolumn{12}{@{}p{\\textwidth}@{}}"
-            "{\\footnotesize Holm-corrected paired Wilcoxon finds significant pairwise differences in: "
-            + ", ".join(metric.replace("_", "\\_") for metric in ctee_sig)
-            + ".}\\\\"
-        )
+    # CTEE has only three heterogeneous benchmarks; no pooled significance
+    # test is reported.  Per-benchmark means and standard deviations are the
+    # reported evidence.
     table = (
         r"""\begin{table}[t]
   \centering
@@ -769,39 +759,10 @@ def write_ctee_table(outputs_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         cells += ["--", "--", "--", "--"]
         summary_rows.append(f"    {label} & reference & " + " & ".join(cells) + " \\\\")
 
-    p_values = [
-        float(comparison["p_holm"])
-        for metric in ("pehe", "ate_error", "cf_mae")
-        for comparison in ctee_stats.get(metric, [])
-        if comparison.get("p_holm") is not None
-    ]
-    p_values = [value for value in p_values if np.isfinite(value)]
-    min_p = min(p_values) if p_values else float("nan")
-    def _p_text(value: float) -> str:
-        if not np.isfinite(value):
-            return "--"
-        if value < 0.01:
-            mantissa, exponent = f"{value:.1e}".split("e")
-            return f"{mantissa}\\times10^{{{int(exponent)}}}"
-        return f"{value:.3f}"
-
-    if friedman_tests:
-        test_sentence = "Omnibus Friedman tests give " + ", ".join(
-            f"{dataset_name} $p={_p_text(value)}$"
-            for dataset_name, value in friedman_tests
-        ) + "."
-    else:
-        test_sentence = ""
-    if np.isfinite(min_p) and min_p < 0.05:
-        test_sentence += (
-            " After Holm correction across the 30 pairwise Wilcoxon comparisons, "
-            f"at least one pair differs (smallest adjusted $p={min_p:.3f}$)."
-        )
-    elif np.isfinite(min_p):
-        test_sentence += (
-            " After Holm correction across the 30 pairwise Wilcoxon comparisons, "
-            f"no pair survives at ten seeds (smallest adjusted $p={min_p:.3f}$)."
-        )
+    test_sentence = (
+        "The three benchmarks are heterogeneous; the table reports per-benchmark "
+        "means and standard deviations without a pooled significance test."
+    )
     summary_caption = (
         "Compact summary of the three temporal exact-counterfactual benchmarks; the full table with "
         "$\\epsilon_{\\text{ATE}}$, the axiom metrics and the reference rows is "

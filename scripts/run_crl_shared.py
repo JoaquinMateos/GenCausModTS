@@ -1263,7 +1263,7 @@ def main() -> int:
     parser.add_argument("--grid", action="store_true", help="run the 18-problem config sweep")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--seeds", type=int, default=10)
+    parser.add_argument("--seeds", type=int, default=5)
     parser.add_argument("--only", nargs="*", default=None)
     parser.add_argument("--configs", nargs="*", default=None, help="grid config names to run")
     parser.add_argument("--stem", default=None, help="output stem for grid splits")

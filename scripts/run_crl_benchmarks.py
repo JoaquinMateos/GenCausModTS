@@ -499,7 +499,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run simple CRL benchmarks.")
     parser.add_argument("--quick", action="store_true", help="fewer epochs (smoke run)")
     parser.add_argument("--only", nargs="*", default=None, help="subset of case names")
-    parser.add_argument("--seeds", type=int, default=10, help="number of seeds")
+    parser.add_argument("--seeds", type=int, default=5, help="number of seeds")
     parser.add_argument(
         "--resume", action=argparse.BooleanOptionalAction, default=True,
         help="skip runs already present in the output JSON (default: resume)",

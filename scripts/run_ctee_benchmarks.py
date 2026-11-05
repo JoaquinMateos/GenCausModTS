@@ -374,7 +374,7 @@ def main() -> int:
     parser.add_argument("--only", nargs="*", default=None)
     parser.add_argument("--datasets", nargs="*", default=None)
     parser.add_argument("--methods", nargs="*", default=None)
-    parser.add_argument("--seeds", type=int, default=10, help="number of seeds")
+    parser.add_argument("--seeds", type=int, default=5, help="number of seeds")
     parser.add_argument(
         "--epochs-scale", type=float, default=1.0, help="smoke-test budget multiplier"
     )

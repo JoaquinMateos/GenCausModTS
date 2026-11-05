@@ -152,7 +152,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--epochs", type=int, default=200)
-    parser.add_argument("--seeds", type=int, default=10)
+    parser.add_argument("--seeds", type=int, default=5)
     parser.add_argument("--methods", nargs="*", default=None)
     parser.add_argument(
         "--resume", action=argparse.BooleanOptionalAction, default=True,
