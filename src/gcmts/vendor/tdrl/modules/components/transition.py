@@ -80,7 +80,7 @@ class NPTransitionPrior(nn.Module):
                 inputs = torch.cat((yy*mask, xx[:,:,i]),dim=-1)
             residual = self.gs[i](inputs)
             with torch.enable_grad():
-                pdd = jacobian(self.gs[i], inputs, create_graph=True, vectorize=True)
+                pdd = jacobian(self.gs[i], inputs, create_graph=True, vectorize=False)
             # Determinant of low-triangular mat is product of diagonal entries
             logabsdet = torch.log(torch.abs(torch.diag(pdd[:,0,:,-1])))
             sum_log_abs_det_jacobian += logabsdet
@@ -114,7 +114,7 @@ class NPChangeTransitionPrior(nn.Module):
                                  num_layers=2,
                                  hidden_dim=hidden_dim)
 
-    def forward(self, x, embeddings, masks=None):
+    def _forward_chunk(self, x, embeddings, masks=None):
         # x: [BS, T, D] -> [BS, T-L, L+1, D]
         # embeddings: [BS, embed_dims]
         batch_size, length, input_dim = x.shape
@@ -139,7 +139,7 @@ class NPChangeTransitionPrior(nn.Module):
                 inputs = torch.cat((embeddings, yy*mask, xx[:,:,i]),dim=-1)
             residual = self.gs[i](inputs)
             with torch.enable_grad():
-                pdd = jacobian(self.gs[i], inputs, create_graph=True, vectorize=True)
+                pdd = jacobian(self.gs[i], inputs, create_graph=True, vectorize=False)
             # Determinant of low-triangular mat is product of diagonal entries
             logabsdet = torch.log(torch.abs(torch.diag(pdd[:,0,:,-1])))
             sum_log_abs_det_jacobian += logabsdet
@@ -149,3 +149,29 @@ class NPChangeTransitionPrior(nn.Module):
         residuals = residuals.reshape(batch_size, -1, input_dim)
         sum_log_abs_det_jacobian = torch.sum(sum_log_abs_det_jacobian.reshape(batch_size, length-self.L), dim=1)
         return residuals, sum_log_abs_det_jacobian
+
+    def forward(self, x, embeddings, masks=None):
+        """Chunk the batch before the per-latent Jacobian.
+
+        The full-batch graph does not fit on a 10 GB GPU.  This keeps the exact
+        same computation but runs it on bounded batch slices; gradients flow
+        through every slice.
+        """
+        import os
+
+        batch_size = x.shape[0]
+        chunk = int(os.environ.get("GCMTS_TDRL_PRIOR_CHUNK", "2"))
+        if chunk <= 0 or batch_size <= chunk:
+            return self._forward_chunk(x, embeddings, masks)
+        residuals = []
+        logdets = []
+        for start in range(0, batch_size, chunk):
+            stop = min(start + chunk, batch_size)
+            xb = x[start:stop]
+            eb = embeddings[start:stop]
+            mb = None if masks is None else masks[start:stop]
+            rb, lb = self._forward_chunk(xb, eb, mb)
+            residuals.append(rb)
+            logdets.append(lb)
+        return torch.cat(residuals, dim=0), torch.cat(logdets, dim=0)
+
