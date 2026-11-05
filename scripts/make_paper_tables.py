@@ -331,8 +331,8 @@ def write_crl_table(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
             "are a downstream-utility diagnostic, not a soundness metric; "
             "persistence and AR(1) reference rows anchor them. Bold marks the "
             "best value and every value within one standard deviation of it. "
-            "``Time (s)'' is the mean wall-clock training time per seed from a "
-            "sequential pass on the Apple M4 host (MPS backend)."
+            "``Time (s)'' is deferred until the approximate timing pass; ``--'' "
+            "marks a deferred value."
         )
         table = (
             "\\begin{table}[t]\n  \\centering\n  \\scriptsize\n"
@@ -607,7 +607,7 @@ def write_ctee_table(outputs_dir: Path, latex_dir: Path, *, seeds: int) -> None:
     caption = (
         "Counterfactual and treatment-effect estimators (Branches II.A observed-data adjustment, II.B representation-based identification, II.C latent-confounder \\& environment models) on three benchmarks with exact counterfactuals: the damped harmonic oscillator, the tumour-growth simulator (time-varying chemo/radio treatment) and a time-varying-treatment linear SEM. Methods are grouped by branch, not by performance. The corrected run adds two reference rows per benchmark that make the absolute error interpretable: ``No effect (0)'' predicts a zero individual effect and ``Oracle mean effect'' predicts the true average effect for every unit. Mean $\\pm$ standard deviation over "
         + str(seeds)
-        + " seeds; lower is better except ``Eff.'' (higher is better) and ``MBE'' (closer to zero is better); bold marks the best value and every value within one standard deviation of it. ``Time (s)'' is the mean$\\pm$std wall-clock training time per run on the Apple M4 host (MPS backend; hardware-dependent). ``Rec.'' is the reconstruction axiom $\\text{MAE}(\\hat X(\\mathrm{do}(a_{\\mathrm{f}})),X^{\\mathrm{f}})$, ``Eff.'' the fraction of seeds whose average estimated effect has the correct sign (an effect-sign check, not the effectiveness axiom), and ``Rev.'' the reversibility MAE after applying the reverse treatment. See Section~\\ref{sec:exp_ctee}."
+        + " seeds; lower is better except ``Eff.'' (higher is better) and ``MBE'' (closer to zero is better); bold marks the best value and every value within one standard deviation of it. ``Time (s)'' is deferred until the approximate timing pass; ``--'' marks a deferred value. ``Rec.'' is the reconstruction axiom $\\text{MAE}(\\hat X(\\mathrm{do}(a_{\\mathrm{f}})),X^{\\mathrm{f}})$, ``Eff.'' the fraction of seeds whose average estimated effect has the correct sign (an effect-sign check, not the effectiveness axiom), and ``Rev.'' the reversibility MAE after applying the reverse treatment. See Section~\\ref{sec:exp_ctee}."
     )
     footer = ""
     if rows and not any("pehe_zero" in row for row in rows):
@@ -724,9 +724,7 @@ def write_sdd_table(outputs_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         + str(seeds) + " seeds; lower is better for OOD error and higher for domain-identification "
         "accuracy, MIG and CDS; bold marks the best value and every value within one standard "
         "deviation of it. The last row is a ridge regression on the \\emph{true} causal factors and "
-        "is the achievable floor. ``Time (s)'' is the mean$\\pm$std wall-clock training time per run "
-        "on the Apple M4 host (MPS backend); ``--'' in the time column marks the CPU "
-        "validation run that regenerated the post-audit table."
+        "is the achievable floor. ``Time (s)'' is deferred until the approximate timing pass; ``--'' marks a deferred value."
     )
     table = (
         r"""\begin{table}[t]
@@ -935,8 +933,7 @@ def write_ctee_static_table(
         "replication with the factual mean and standard deviation; its ``mu0/mu1'' are the "
         "realised potential outcomes released by the challenge mirror, not noiseless surfaces. The Jobs cohort is reported separately "
         "in the real-cohort table because it releases only a marginal reference effect. "
-        "``Time (s)'' is the mean$\\pm$std wall-clock training time per replication on the "
-        "Apple M4 host (MPS backend)."
+        "``Time (s)'' is deferred until the approximate timing pass; ``--'' marks a deferred value."
     )
     table = (
         r"""\begin{table}[t]
@@ -998,9 +995,7 @@ def write_adjacent_table(outputs_dir: Path, latex_dir: Path, *, seeds: int = 10)
         + " seeds, each on the benchmark that exposes its object's ground truth and scored on its "
         "headline soundness metric (Section~\\ref{sec:experiments}). The three adjacent objects---a "
         "propagation path, a policy and an attribution---are heterogeneous, so the comparison is "
-        "per-object rather than head-to-head. ``Time (s)'' is the mean$\\pm$std wall-clock training "
-        "time per run on the Apple M4 host (MPS backend); the LacaDM hypervolume uses the corrected "
-        "maximisation reference."
+        "per-object rather than head-to-head. ``Time (s)'' is deferred until the approximate timing pass; ``--'' marks a deferred value. The LacaDM hypervolume uses the corrected maximisation reference."
     )
     table = (
         r"""\begin{table}[t]
@@ -1162,8 +1157,7 @@ def write_external_validity_table(outputs_dir: Path, latex_dir: Path, *, seeds: 
             "chronologically later held-out split and reconstruction MSE. A lower "
             "MSE means the learned representation generalises better; bold marks "
             "the best value and every value within one standard deviation of it; "
-            "no soundness claim is made. ``Time (s)'' is the mean$\\pm$std "
-            "wall-clock training time per run on the Apple M4 host (MPS backend)."
+            "no soundness claim is made. ``Time (s)'' is deferred until the approximate timing pass; ``--'' marks a deferred value."
         )
         table = (
             r"""\begin{table}[t]
@@ -1232,8 +1226,7 @@ def write_ctee_real_table(outputs_dir: Path, latex_dir: Path, *, replications: i
         "as a published adjusted estimate for NHEFS and Oregon---so individual metrics (PEHE, "
         "policy risk) are undefined and only $\\epsilon_{\\text{ATE}}$ is reported; for NHEFS and "
         "Oregon this is a reference comparison, not a soundness claim. Each cohort is a single "
-        "deterministic run, so every entry has zero seed dispersion. ``Time (s)'' is the "
-        "wall-clock training time per run on the Apple M4 host (MPS backend)."
+        "deterministic run, so every entry has zero seed dispersion. ``Time (s)'' is deferred until the approximate timing pass; ``--'' marks a deferred value."
     )
     table = (
         r"""\begin{table}[t]
