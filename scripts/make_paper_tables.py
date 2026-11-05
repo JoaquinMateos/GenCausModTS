@@ -584,17 +584,11 @@ def write_ctee_table(outputs_dir: Path, latex_dir: Path, *, seeds: int) -> None:
 
     available = [item for item in order if _case_complete(rows, item[0], seeds)]
     pending_datasets = sorted({item[3] for item in order if item not in available})
-    lines = []
-    last_dataset = None
-    for item in available:
-        if last_dataset is not None and item[3] != last_dataset:
-            lines.append(r"    \midrule")
-        lines.append(row(*item))
-        last_dataset = item[3]
     # Reference predictors: no effect and the oracle mean effect.  These make
     # the absolute PEHE interpretable (a learned PEHE above the no-effect row
-    # means the model is worse than predicting zero).
-    reference_lines = []
+    # means the model is worse than predicting zero).  Keep each pair inside
+    # its own benchmark block.
+    reference_lines: dict[str, list[str]] = {}
     for dataset, case in (
         ("Harmonic", "ganite_harmonic"),
         ("Tumour", "ganite_tumour"),
@@ -605,15 +599,28 @@ def write_ctee_table(outputs_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         zero = _fmt(aggregated, case, "pehe_zero", digits=2)
         mean = _fmt(aggregated, case, "pehe_mean", digits=2)
         ate_zero = _fmt(aggregated, case, "ate_zero", digits=2)
-        reference_lines.append(
-            f"    No effect (0) & reference & {dataset} & {zero} & {ate_zero} & -- & -- & -- & -- & -- & -- & -- \\\\"
-        )
-        reference_lines.append(
-            f"    Oracle mean effect & reference & {dataset} & {mean} & 0.00 & -- & -- & -- & -- & -- & -- & -- \\\\"
-        )
-    if reference_lines:
-        lines.append(r"    \midrule")
-        lines.extend(reference_lines)
+        reference_lines[dataset] = [
+            f"    No effect (0) & reference & {dataset} & {zero} & {ate_zero} & -- & -- & -- & -- & -- & -- & -- \\\\",
+            f"    Oracle mean effect & reference & {dataset} & {mean} & 0.00 & -- & -- & -- & -- & -- & -- & -- \\\\",
+        ]
+
+    by_dataset: dict[str, list[tuple[str, str, str, str]]] = {}
+    dataset_order: list[str] = []
+    for item in available:
+        dataset = item[3]
+        if dataset not in by_dataset:
+            by_dataset[dataset] = []
+            dataset_order.append(dataset)
+        by_dataset[dataset].append(item)
+    lines = []
+    for dataset in dataset_order:
+        if lines:
+            lines.append(r"    \midrule")
+        lines.extend(row(*item) for item in by_dataset[dataset])
+        refs = reference_lines.get(dataset)
+        if refs:
+            lines.append(r"    \addlinespace")
+            lines.extend(refs)
     caption = (
         "Counterfactual and treatment-effect estimators (Branches II.A observed-data adjustment, II.B representation-based identification, II.C latent-confounder \\& environment models) on three benchmarks with exact counterfactuals: the damped harmonic oscillator, the tumour-growth simulator (time-varying chemo/radio treatment) and a time-varying-treatment linear SEM. Methods are grouped by branch, not by performance. The corrected run adds two reference rows per benchmark that make the absolute error interpretable: ``No effect (0)'' predicts a zero individual effect and ``Oracle mean effect'' predicts the true average effect for every unit. Mean $\\pm$ standard deviation over "
         + str(seeds)
