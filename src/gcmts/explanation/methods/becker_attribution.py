@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Becker et al., Explainable Neural Network for Time-Series Condition Monitoring, 2026.
+# Official implementation: none used; this is a paper-based adaptation.
+# Status: compact surrogate.
+
 """Compact Becker et al. attribution model for branch III.C (explanation).
 
 Reference: Becker, Niemietz & Bergs, *Explainable neural network for

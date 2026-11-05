@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Lippe et al., Causal Representation Learning for Instantaneous and Temporal Effects, ICLR 2023.
+# Official implementation: none used; this is a paper-based adaptation.
+# Status: paper-only adaptation.
+
 """iCITRIS: causal representation learning for instantaneous and temporal effects.
 
 Reference: Lippe et al., *Causal Representation Learning for Instantaneous and

@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Remlinger et al., Conditional Loss for Deep Generative Models of Time Series, 2021.
+# Official implementation: none used; this is a paper-based adaptation.
+# Status: paper-only adaptation.
+
 """CEGEN: Conditional Loss and Deep Euler Scheme for time-series generation.
 
 Reference: Remlinger et al., *Conditional Loss and Deep Euler Scheme for Time

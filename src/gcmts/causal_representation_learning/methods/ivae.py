@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Khemakhem et al., Variational Autoencoders and Nonlinear ICA, AISTATS 2020.
+# Official implementation: https://github.com/ilkhem/iVAE (see gcmts/vendor/ for vendored copies and licenses).
+# Status: official implementation is cloned but not yet wired into this file.
+
 """Identifiable VAE (iVAE).
 
 Reference: Khemakhem et al., *Variational Autoencoders and Nonlinear ICA: A

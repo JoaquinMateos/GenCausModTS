@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Song et al., Temporally Disentangled Representation Learning under Unknown Nonstationarity, 2023.
+# Official implementation: none used; this is a paper-based adaptation.
+# Status: no official code used; paper-only adaptation.
+
 """NCTRL: Temporally Disentangled Representation Learning under Unknown
 Non-stationarity.
 

@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Kocaoglu et al., CausalGAN: Learning Causal Implicit Generative Models with Adversarial Training, ICLR 2017.
+# Official implementation: https://github.com/00mjk/CausalGAN (see gcmts/vendor/ for vendored copies and licenses).
+# Status: paper-based adaptation.
+
 """CausalGAN: causal implicit generative models with adversarial training.
 
 Reference: Kocaoglu et al., *CausalGAN: Learning Causal Implicit Generative

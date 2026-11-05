@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Pineau et al., Time-Series Source Separation with Slow Flows, 2020.
+# Official implementation: none used; this is a paper-based adaptation.
+# Status: paper-only adaptation.
+
 """Slow Flows: time-series source separation with slow normalizing flows.
 
 Reference: Pineau et al., *Time Series Source Separation with Slow Flows*,

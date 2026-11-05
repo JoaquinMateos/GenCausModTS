@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Garriga et al., CEPAE: Conditional Entropy Penalized Autoencoders, 2026.
+# Official implementation: none used; this is a paper-based adaptation.
+# Status: paper-only adaptation.
+
 r"""CEPAE: Conditional Entropy-Penalised AutoEncoder for time-series counterfactuals.
 
 Reference: Garriga, Sanz, Serrahima & Brando, *CEPAE: Conditional Entropy-

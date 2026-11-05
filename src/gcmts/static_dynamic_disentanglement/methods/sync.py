@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: He et al., Learning Time-Aware Causal Representation for Model Generalization, 2025.
+# Official implementation: none used; this is a paper-based adaptation.
+# Status: compact surrogate.
+
 """Static-dynamic disentanglers for evolving-domain generalisation.
 
 * :class:`SYNC` — four-way split into static/dynamic causal and spurious factors,

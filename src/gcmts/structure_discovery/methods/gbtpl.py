@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Zhu et al., GBTPL: Graph-Constrained Generative Back-Tracing, 2026.
+# Official implementation: none used; this is a paper-based adaptation.
+# Status: partial reimplementation.
+
 """GBTPL: graph-constrained generative back-tracing for propagation paths.
 
 Reference: Zhu et al., *GBTPL: Graph-Constrained Generative Back-Tracing for

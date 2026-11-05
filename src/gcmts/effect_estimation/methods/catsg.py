@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Xia et al., Causal Time Series Generation via Diffusion Models, 2025.
+# Official implementation: none used; this is a paper-based adaptation.
+# Status: paper-only adaptation.
+
 """CaTSG: causality-guided conditional diffusion for time series.
 
 Reference: Xia et al., *Causal Time Series Generation via Diffusion Models*,

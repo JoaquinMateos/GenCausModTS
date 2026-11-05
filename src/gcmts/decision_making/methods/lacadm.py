@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Yan et al., LacaDM: Latent Causal Diffusion for Multi-Objective Reinforcement Learning, 2025.
+# Official implementation: none used; this is a paper-based adaptation.
+# Status: compact surrogate.
+
 """LacaDM: a latent causal diffusion model for multi-objective RL.
 
 Reference: Yan et al., *LacaDM: A Latent Causal Diffusion Model for

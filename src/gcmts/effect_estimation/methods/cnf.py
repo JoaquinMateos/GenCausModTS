@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Conditional normalizing flow source paper in the review bibliography.
+# Official implementation: none used; this is a paper-based adaptation.
+# Status: compact surrogate.
+
 r"""Counterfactual Generative Network (CNF) for compositional images.
 
 Reference: Sauer & Geiger, *Counterfactual Generative Networks*, ICLR 2021,

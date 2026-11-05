@@ -37,7 +37,7 @@ from gcmts.causal_representation_learning.methods import (
     LEAP,
     MOSAIC,
     NCTRL,
-    TDRL,
+    TDRLOfficial,
     CHiLD,
     iCITRIS,
 )
@@ -401,14 +401,13 @@ def build_methods(suite: Suite, *, epochs_scale: float = 1.0) -> list[MethodSpec
         ),
         (
             "TDRL",
-            lambda: TDRL(
+            lambda: TDRLOfficial(
                 observed_dim=D,
                 latent_fix_dim=fix,
                 latent_dyn_dim=dyn,
                 latent_obs_dim=obs,
                 u_dim=u,
-                kl_weight=0.01,
-                obs_noise=0.1,
+                obs_weight=0.1,
                 image_shape=image,
             ),
             common_epochs,

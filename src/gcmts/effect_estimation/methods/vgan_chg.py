@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Zhou et al., Variational GAN Enhanced Causal Effect Inference, 2026.
+# Official implementation: none used; this is a paper-based adaptation.
+# Status: compact surrogate.
+
 """VGAN-CHG: variational GAN with global/regional latent confounders.
 
 Compact surrogate for Zhou et al., *Variational GAN-Enhanced Causal Effect

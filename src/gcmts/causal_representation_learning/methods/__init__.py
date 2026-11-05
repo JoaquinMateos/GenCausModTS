@@ -15,6 +15,7 @@ from gcmts.causal_representation_learning.methods.mosaic import MOSAIC
 from gcmts.causal_representation_learning.methods.nctrl import NCTRL
 from gcmts.causal_representation_learning.methods.slow_flows import SlowFlows
 from gcmts.causal_representation_learning.methods.tdrl import TDRL
+from gcmts.causal_representation_learning.methods.tdrl_official import TDRLOfficial
 
 __all__ = [
     "CaDRe",
@@ -28,4 +29,5 @@ __all__ = [
     "NCTRL",
     "SlowFlows",
     "TDRL",
+    "TDRLOfficial",
 ]

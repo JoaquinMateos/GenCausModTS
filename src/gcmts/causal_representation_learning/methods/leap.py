@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Yao et al., Learning Temporally Causal Latent Processes from General Temporal Data, ICLR 2022.
+# Official implementation: https://github.com/weirayao/leap (see gcmts/vendor/ for vendored copies and licenses).
+# Status: official implementation cloned; this file is a simplified reimplementation.
+
 """LEAP: Learning Temporally Causal Latent Processes.
 
 Reference: Yao et al., *Learning Temporally Causal Latent Processes from

@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Li et al., Towards Identifiability of Hierarchical Temporal Causal Representations, 2025.
+# Official implementation: none used; this is a paper-based adaptation.
+# Status: paper-only adaptation.
+
 """CHiLD: hierarchical temporal causal representation learning.
 
 Reference: Li et al., *Towards Identifiability of Hierarchical Temporal Causal

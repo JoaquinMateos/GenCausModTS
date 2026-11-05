@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Gumucio and Zhang, Algorithmic Recourse in Sequential Decision Making, 2026.
+# Official implementation: none used; this is a paper-based adaptation.
+# Status: compact surrogate.
+
 """SCARF: sequential causal algorithmic recourse for long-term fairness.
 
 Reference: Gumucio & Zhang, *Algorithmic recourse in sequential decision-making

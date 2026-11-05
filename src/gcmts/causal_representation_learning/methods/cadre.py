@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: CaDRe source paper in the review bibliography.
+# Official implementation: none used; this is a paper-based adaptation.
+# Status: independent reimplementation from the paper.
+
 """CaDRe: Causal Discovery and Representation learning.
 
 Reference: Fu et al., *Learning General Causal Structures with Hidden Dynamic

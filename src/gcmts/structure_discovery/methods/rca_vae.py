@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Adesunkanmi et al., Root Cause Analysis with Variational Autoencoders, 2025.
+# Official implementation: none used; this is a paper-based adaptation.
+# Status: compact surrogate.
+
 """RCA-VAE: regime-aware edge discovery and root-cause scoring.
 
 Reference: Adesunkanmi, Khokhar, Trajcevski and Murad, *Root Cause Analysis of

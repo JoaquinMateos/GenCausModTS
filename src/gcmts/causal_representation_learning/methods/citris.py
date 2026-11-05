@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Lippe et al., CITRIS: Causal Identifiability from Temporal Intervened Sequences, ICML 2022.
+# Official implementation: none used; this is a paper-based adaptation.
+# Status: paper-only adaptation.
+
 """CITRIS: Causal Identifiability from Temporal Intervened Sequences.
 
 Reference: Lippe et al., *CITRIS: Causal Identifiability from Temporal

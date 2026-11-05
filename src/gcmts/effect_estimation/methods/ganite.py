@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Yoon et al., GANITE: Estimation of Individualized Treatment Effects using Generative Adversarial Nets, ICLR 2018.
+# Official implementation: https://github.com/vanderschaarlab/mlforhealthlabpub/tree/main/alg/ganite (see gcmts/vendor/ for vendored copies and licenses).
+# Status: paper-based adaptation.
+
 """GANITE: individualized treatment effects with a two-block conditional GAN.
 
 Reference: Yoon, Jordon & van der Schaar, *GANITE: Estimation of Individualized

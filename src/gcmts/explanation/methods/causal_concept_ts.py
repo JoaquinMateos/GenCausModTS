@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Lopez Alcaraz and Strodthoff, CausalConceptTS, 2025.
+# Official implementation: none used; this is a paper-based adaptation.
+# Status: compact surrogate.
+
 """CausalConceptTS: causal concept-based explanations of time-series classifiers.
 
 Reference: Lopez Alcaraz & Strodthoff, *Explaining Time Series Classification

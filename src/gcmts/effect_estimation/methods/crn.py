@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Bica et al., Estimating Counterfactual Treatment Outcomes over Time through Adversarially Balanced Representations, ICLR 2020.
+# Official implementation: https://github.com/ioanabica/Counterfactual-Recurrent-Network (see gcmts/vendor/ for vendored copies and licenses).
+# Status: paper-based adaptation.
+
 """Counterfactual Recurrent Network (CRN) with a recurrent encoder/decoder.
 
 Reference: Bica, Alaa, Lambert & van der Schaar, *Estimating Counterfactual

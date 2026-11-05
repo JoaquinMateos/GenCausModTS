@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Wu et al., Counterfactual Generative Models for Time-Varying Treatments, 2024.
+# Official implementation: none used; this is a paper-based adaptation.
+# Status: paper-only adaptation.
+
 """Wu-IPTW: counterfactual generative models for time-varying treatments.
 
 Reference: Wu et al., *Counterfactual Generative Models for Time-Varying

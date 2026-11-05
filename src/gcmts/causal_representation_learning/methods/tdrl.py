@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Yao et al., Temporally Disentangled Representation Learning, 2022.
+# Official implementation: https://github.com/weirayao/tdrl (see gcmts/vendor/ for vendored copies and licenses).
+# Status: official implementation adapted in tdrl_official.py; this file is the legacy surrogate.
+
 """TDRL: Temporally Disentangled Representation Learning.
 
 Reference: Yao et al., *Temporally Disentangled Representation Learning*, 2022

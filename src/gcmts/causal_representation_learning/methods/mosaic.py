@@ -1,3 +1,8 @@
+# Adapted-source provenance:
+# Paper: Fan et al., MOSAIC: Module Discovery via Sparse Additive Identifiable Causal Learning, 2026.
+# Official implementation: https://github.com/shichengf/mosaic (see gcmts/vendor/ for vendored copies and licenses).
+# Status: official implementation cloned; this file is a single-stage simplification.
+
 """MOSAIC: Module Discovery via Sparse Additive Identifiable Causal Learning.
 
 Reference: Fan et al., *MOSAIC: Module Discovery via Sparse Additive
