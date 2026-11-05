@@ -1,7 +1,7 @@
 # Adapted-source provenance:
 # Paper: Song et al., Temporally Disentangled Representation Learning under Unknown Nonstationarity, 2023.
-# Official implementation: none used; this is a paper-based adaptation.
-# Status: no official code used; paper-only adaptation.
+# Official implementation: https://github.com/xiangchensong/nctrl (MIT); cloned/vendored but not yet wired into this file.
+# Status: current file is a paper-based simplification; official source is vendored for porting.
 
 """NCTRL: Temporally Disentangled Representation Learning under Unknown
 Non-stationarity.
