@@ -143,8 +143,7 @@ All method files now begin with paper/source provenance. Official TDRL, LEAP and
 
 ### Pending result reruns
 
-- CTEE temporal: all three datasets are rerunning in `outputs_ctee_fixed2` with same-seed evaluation streams.
-- Linear SEM: included in that same corrected run; the `outputs_sem_fixed` values are invalid.
+- CTEE temporal and linear SEM: completed in `outputs_ctee_fixed2`; Table 7/31 updated.
 - Static IHDP/ACIC/Twins/News: must be rerun after the static loss-scope and
   model adaptations are resolved.
 - Benchmark B / Voronoi: must be rerun after the instantaneous-graph alignment
