@@ -94,6 +94,8 @@ def move_batch(
         batch.context = {k: v.to(device) for k, v in batch.context.items()}
     if batch.adjacency is not None and want("adjacency"):
         batch.adjacency = batch.adjacency.to(device)
+    if batch.instantaneous_adjacency is not None and want("instantaneous_adjacency"):
+        batch.instantaneous_adjacency = batch.instantaneous_adjacency.to(device)
     if batch.counterfactual is not None and want("counterfactual"):
         batch.counterfactual = batch.counterfactual.to(device)
     if batch.outcome is not None and want("outcome"):
@@ -228,11 +230,13 @@ def _subset_batch(batch: Batch, indices: Tensor) -> Batch:
         context=context,
         mask=None if batch.mask is None else batch.mask[indices],
         adjacency=batch.adjacency,
+        instantaneous_adjacency=batch.instantaneous_adjacency,
         counterfactual=None
         if batch.counterfactual is None
         else batch.counterfactual[indices],
         outcome=None if batch.outcome is None else batch.outcome[indices],
         domain=None if batch.domain is None else batch.domain[indices],
+        target=None if batch.target is None else batch.target[indices],
     )
 
 

@@ -36,11 +36,13 @@ def _index_batch(batch: Batch, indices: torch.Tensor) -> Batch:
         context=context,
         mask=None if batch.mask is None else batch.mask[indices],
         adjacency=batch.adjacency,
+        instantaneous_adjacency=batch.instantaneous_adjacency,
         counterfactual=None
         if batch.counterfactual is None
         else batch.counterfactual[indices],
         outcome=None if batch.outcome is None else batch.outcome[indices],
         domain=None if batch.domain is None else batch.domain[indices],
+        target=None if batch.target is None else batch.target[indices],
     )
 
 

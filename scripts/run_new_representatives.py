@@ -148,7 +148,7 @@ def _cadre(device: str, epochs: int, seed: int) -> dict[str, Any]:
     return {
         "seconds": seconds,
         "mcc": mcc(batch.z, outputs.z),
-        "latent_shd": SHDMetric()(latent_adjacency, batch.adjacency).value,
+        "latent_shd": SHDMetric(aligned=False)(latent_adjacency, batch.adjacency).value,
         "observed_shd": SHDMetric(aligned=False)(
             observed_adjacency, batch.context["observed_adjacency"]
         ).value,

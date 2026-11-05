@@ -173,16 +173,22 @@ class GANITE(BaseEffectEstimator):
         flat_action = action.reshape(batch_size * time, self.treatment_dim)
         arm, index = self._one_hot(flat_action)
         noise = torch.randn(flat_x.shape[0], self.noise_dim, device=flat_x.device)
+        outcome_index = -1 if time == 1 else 0
+        target_outcome = target[..., outcome_index]
+        # The factual-outcome slot is scalar in the paper's G(x,t,y_f,z);
+        # do not duplicate the covariate matrix into it.
+        factual_slot = torch.zeros_like(flat_x)
+        factual_slot[..., outcome_index] = target_outcome
         generated = cast(
             Tensor,
             self.counterfactual_generator(
-                torch.cat([flat_x, arm, flat_x, noise], dim=-1)
+                torch.cat([flat_x, arm, factual_slot, noise], dim=-1)
             ),
         ).clamp(-10.0, 10.0)
         generated_arms = generated.reshape(flat_x.shape[0], self.n_arms, self.observed_dim)
         g_supervised = nn.functional.mse_loss(
-            generated_arms[torch.arange(flat_x.shape[0], device=flat_x.device), index],
-            target,
+            generated_arms[torch.arange(flat_x.shape[0], device=flat_x.device), index, outcome_index],
+            target_outcome,
         )
         potential = self._potential(generated, target, index)
         completed = potential.reshape(flat_x.shape[0], -1)
@@ -209,6 +215,14 @@ class GANITE(BaseEffectEstimator):
         flat_x = outputs["flat_x"]
         flat_target = outputs["flat_target"]
         index = outputs["index"]
+        time = batch.x.shape[1]
+        outcome_index = -1 if time == 1 else 0
+        target_outcome = flat_target[..., outcome_index]
+        counterfactual = batch.counterfactual
+        if counterfactual is not None:
+            cf_target = counterfactual.reshape(flat_target.shape)[..., outcome_index]
+        else:
+            cf_target = target_outcome
         noise = torch.randn(flat_x.shape[0], self.noise_dim, device=flat_x.device)
         generated_ite = cast(
             Tensor,
@@ -217,9 +231,13 @@ class GANITE(BaseEffectEstimator):
         generated_ite_arms = generated_ite.reshape(
             flat_x.shape[0], self.n_arms, self.observed_dim
         )
+        # The paper supervises the difference of potential outcomes, not the
+        # factual arm's outcome level.
+        generated_effect = (
+            generated_ite_arms[:, 1, outcome_index] - generated_ite_arms[:, 0, outcome_index]
+        )
         ite_supervised = nn.functional.mse_loss(
-            generated_ite_arms[torch.arange(flat_x.shape[0], device=flat_x.device), index],
-            flat_target,
+            generated_effect, target_outcome - cf_target
         )
         real = outputs["potential"].detach().reshape(flat_x.shape[0], -1)
         fake = generated_ite
