@@ -93,6 +93,14 @@ These are the largest fidelity gaps. The shared ranking is a comparison of simpl
 - CTEE static smoke (IHDP, one replication, GANITE/CRN/CEPAE/CaTSG): runs end-to-end with per-method generator rewind.
 - One-seed full-budget Linear SEM check is running in `outputs_sem_check`; the result will determine whether the paper's linear-SEM table changes.
 
+## Protocol decision (2026-11-05)
+
+Official modules will be used, but the shared comparison keeps the common
+benchmark protocol (same seeds, data and training budget) so the ranking remains
+controlled. Paper-specific fidelity checks are reported separately, not mixed
+into the shared table. Large reruns will run on `gpu_212`; only corrected CTEE
+blocks and one-seed pilots are run locally first.
+
 ## Next reruns, in order
 
 1. Linear SEM, 10 seeds, after SEM fix.
