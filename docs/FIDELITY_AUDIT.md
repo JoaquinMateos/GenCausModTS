@@ -139,7 +139,7 @@ until the ten-seed block (`outputs_sem_fixed`) replaces it.
 
 ### Official-source integration
 
-All method files now begin with paper/source provenance. Official TDRL, LEAP, MOSAIC, NCTRL and iVAE sources are vendored/adapted under `src/gcmts/vendor/` and the method package. The shared runner is switched to the official adapters for iVAE, LEAP, TDRL, NCTRL and MOSAIC. The TDRL nonparametric prior is chunked over batch slices; the single-seed `npvar` diagnostic gives MCC 0.775 (TDRL), 0.570 (LEAP), 0.625 (NCTRL), 0.806 (MOSAIC) and 0.397 (iVAE). Table 23 now reports these official-source values. A full ten-seed official run remains pending because the official TDRL prior is slow at the full 2000-epoch budget.
+All method files now begin with paper/source provenance. Official TDRL, LEAP, MOSAIC, NCTRL and iVAE sources are vendored/adapted under `src/gcmts/vendor/` and the method package. The shared runner uses the official adapters for LEAP, TDRL, NCTRL and MOSAIC. The official iVAE adapter is retained for the fidelity diagnostic; the shared temporal table uses the image/temporal `IVAE` adapter because the official i.i.d. iVAE diverges on long flattened sequences. The TDRL nonparametric prior is chunked over batch slices; the single-seed `npvar` diagnostic gives MCC 0.775 (TDRL), 0.570 (LEAP), 0.625 (NCTRL), 0.806 (MOSAIC) and 0.397 (iVAE). Table 23 now reports these official-source values. A five-seed 200-epoch benchmark, using the Optuna-selected budget and early stopping, is running on `gpu_212` in two pinned workers.
 
 ### Pending result reruns
 
