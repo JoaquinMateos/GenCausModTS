@@ -240,7 +240,7 @@ class SRNNSyntheticNS(pl.LightningModule):
         # VAE ELBO loss: recon_loss + kld_loss
         recon_loss = self.reconstruction_loss(x[:,:self.lag], x_recon[:,:self.lag], self.decoder_dist) + \
         (self.reconstruction_loss(x[:,self.lag:], x_recon[:,self.lag:], self.decoder_dist))/(length-self.lag)
-        q_dist = D.Normal(mus, torch.exp(logvars / 2))
+        q_dist = D.Normal(mus, torch.exp(logvars / 2).clamp(min=1e-6, max=1e6))
         log_qz = q_dist.log_prob(zs)
         # Past KLD
         p_dist = D.Normal(torch.zeros_like(mus[:,:self.lag]), torch.ones_like(logvars[:,:self.lag]))
@@ -337,7 +337,7 @@ class SRNNSyntheticNS(pl.LightningModule):
         # VAE ELBO loss: recon_loss + kld_loss
         recon_loss = self.reconstruction_loss(x[:,:self.lag], x_recon[:,:self.lag], self.decoder_dist) + \
         (self.reconstruction_loss(x[:,self.lag:], x_recon[:,self.lag:], self.decoder_dist))/(length-self.lag)
-        q_dist = D.Normal(mus, torch.exp(logvars / 2))
+        q_dist = D.Normal(mus, torch.exp(logvars / 2).clamp(min=1e-6, max=1e6))
         log_qz = q_dist.log_prob(zs)
         # Past KLD
         p_dist = D.Normal(torch.zeros_like(mus[:,:self.lag]), torch.ones_like(logvars[:,:self.lag]))

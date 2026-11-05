@@ -85,6 +85,18 @@ class LEAPOfficial(BaseCausalRepresentationLearner):
             decoder_dist="gaussian",
         )
         self.core.log = lambda *args, **kwargs: None
+        # The official training script warm-starts the component-wise spline
+        # flow on a standard normal/Laplace prior before fitting the VAE.
+        # Without this, the spline can produce non-finite log-Jacobians early.
+        for spline in self.core.spline_list:
+            optimizer = torch.optim.Adam(spline.parameters(), lr=1e-3)
+            for _ in range(300):
+                y = torch.randn(64, latent_dim, device=next(spline.parameters()).device)
+                z, logdet = spline(y)
+                loss = -(spline.base_dist.log_prob(z) + logdet).mean()
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
         # The official synthetic config uses input_dim == z_dim.  Our suites do
         # not, so keep the encoder/decoder shapes but adapt their widths.
         self.core.enc = NLayerLeakyMLP(
