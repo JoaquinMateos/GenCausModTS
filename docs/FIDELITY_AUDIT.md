@@ -16,6 +16,10 @@ Status: 2026-11-05. Scope: implementations, architectures, hyperparameters, metr
 | Table 23 / claims | The fidelity table now states that LEAP/TDRL/NCTRL/MOSAIC are simplified reimplementations and that current values are diagnostics, not replications | paper build |
 | SDD claim | The paper no longer says VREx fails; it states that the DGP is a mechanism-shift stress test, not a positive invariance test | paper build |
 | Adjacent/SDD labels | Surrogate/partial status is explicit in Table 5, the adjacent caption and the SDD caption | paper build |
+| Pool provenance | Pools now carry a generator-revision hash; a finite stale pool is rejected | `tests/test_synthetic_store.py`, `tests/test_regressions.py` |
+| Batch preservation | `instantaneous_adjacency` and `target` survive pooling, subsetting and device moves | `tests/test_regressions.py` |
+| New-representative SHD | Latents are aligned before `SHDMetric(aligned=False)`; the earlier optimistic default is removed | new-representatives rerun in progress |
+| LaLonde covariates | `educ/hisp/marr` are mapped to the canonical names | `tests/test_real.py` |
 
 ## Audit items already fixed or verified
 

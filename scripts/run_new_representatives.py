@@ -46,6 +46,7 @@ from gcmts.data.sequential_recourse import SequentialRecourseGenerator
 from gcmts.decision_making.methods import SCARF
 from gcmts.effect_estimation.methods import CNF, VGANCHG
 from gcmts.evaluation.benchmarks import EMA_DECAY
+from gcmts.core.graph_ops import latent_permutation
 from gcmts.evaluation.metrics import (
     ATEMetric,
     CFMAEMetric,
@@ -145,6 +146,8 @@ def _cadre(device: str, epochs: int, seed: int) -> dict[str, Any]:
     observed_adjacency = model.get_observed_adjacency()
     if latent_adjacency is None:
         raise ValueError("CaDRe did not expose a latent adjacency.")
+    perm = latent_permutation(outputs.z, batch.z).to(latent_adjacency.device)
+    latent_adjacency = latent_adjacency[..., :][perm][:, perm]
     return {
         "seconds": seconds,
         "mcc": mcc(batch.z, outputs.z),
