@@ -43,6 +43,12 @@ class IVAEOfficial(BaseCausalRepresentationLearner):
         observed_dim: int,
         latent_dim: int,
         u_dim: int = 0,
+        hidden_dim: int = 100,
+        n_layers: int = 3,
+        activation: str = "xtanh",
+        lr: float = 1e-3,
+        decoder_var: float = 0.01,
+        x_scale: float = 1.0,
         hidden_dims: tuple[int, ...] = (128, 128),
         decoder_hidden: tuple[int, ...] = (128, 128),
         kl_weight: float = 1.0,
@@ -59,16 +65,18 @@ class IVAEOfficial(BaseCausalRepresentationLearner):
             image_feature_dim=image_feature_dim,
         )
         self.n_aux = max(int(u_dim), 1)
-        self.x_scale = 1.0
+        self.x_scale = float(x_scale)
+        self.trainer_lr = float(lr)
         self.core = IVAECore(
             latent_dim=latent_dim,
             data_dim=self.encoder_input_dim(observed_dim),
             aux_dim=self.n_aux,
-            n_layers=3,
-            hidden_dim=100,
-            activation="xtanh",
+            n_layers=int(n_layers),
+            hidden_dim=int(hidden_dim),
+            activation=str(activation),
             device="cpu",
         )
+        self.core.decoder_var = torch.tensor(float(decoder_var))
 
     def to(self, *args, **kwargs):
         """Move the official iVAE plain-tensor distribution state with the module."""
@@ -104,12 +112,17 @@ class IVAEOfficial(BaseCausalRepresentationLearner):
     def decode(self, z: Tensor) -> Tensor:
         flat = z.reshape(-1, z.shape[-1])
         rec = self.core.f(flat)
-        return rec.reshape(z.shape[0], z.shape[1], self.observed_dim)
+        return rec.reshape(z.shape[0], z.shape[1], -1)
 
     def forward(self, batch: Batch) -> CausalRepresentationOutput:
         flat, u, b, t = self._flat(batch.x, batch.context)
         decoder_params, (mean, logvar), z, prior = self.core.forward(flat, u)
-        rec = (self.core.f(z) / self.x_scale).reshape(b, t, self.observed_dim)
+        rec = self.core.f(z)
+        if self.image_shape is None:
+            rec = rec / self.x_scale
+            rec = rec.reshape(b, t, self.observed_dim)
+        else:
+            rec = rec.reshape(b, t, -1)
         return CausalRepresentationOutput(
             z=z.reshape(b, t, self.latent_dim),
             x_recon=rec,

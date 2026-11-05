@@ -46,6 +46,11 @@ class NCTRLOfficial(BaseCausalRepresentationLearner):
         observed_dim: int,
         latent_dim: int,
         n_regimes: int = 3,
+        hidden_dim: int = 128,
+        beta: float = 0.0025,
+        gamma: float = 0.0075,
+        lr: float = 1e-3,
+        hmm_lr: float = 1e-3,
         transition_hidden: int = 128,
         hidden_dims: tuple[int, ...] = (128, 128),
         decoder_hidden: tuple[int, ...] = (128, 128),
@@ -62,18 +67,19 @@ class NCTRLOfficial(BaseCausalRepresentationLearner):
             image_shape=image_shape,
             image_feature_dim=image_feature_dim,
         )
+        self.trainer_lr = float(lr)
         self.core = NCTRL(
             x_dim=self.encoder_input_dim(observed_dim),
             z_dim=latent_dim,
             lags=1,
             n_class=max(int(n_regimes), 1),
-            hidden_dim=128,
-            lr=1e-4,
-            beta=0.0025,
-            gamma=0.0075,
+            hidden_dim=int(hidden_dim),
+            lr=float(lr),
+            beta=float(beta),
+            gamma=float(gamma),
             hmm_mode="mle_scaled:Ht",
         )
-        self.hmm_optimizer = torch.optim.Adam(self.core.hmm.parameters(), lr=1e-3)
+        self.hmm_optimizer = torch.optim.Adam(self.core.hmm.parameters(), lr=float(hmm_lr))
         self.core.log = lambda *args, **kwargs: None
 
     def _obs(self, x: Tensor) -> Tensor:
@@ -90,7 +96,7 @@ class NCTRLOfficial(BaseCausalRepresentationLearner):
     def decode(self, z: Tensor) -> Tensor:
         flat = z.reshape(-1, z.shape[-1])
         rec = self.core.net._decode(flat)
-        return rec.reshape(z.shape[0], z.shape[1], self.observed_dim)
+        return rec.reshape(z.shape[0], z.shape[1], -1) if self.image_shape is not None else rec.reshape(z.shape[0], z.shape[1], self.observed_dim)
 
     def forward(self, batch: Batch) -> CausalRepresentationOutput:
         obs = self._obs(batch.x)

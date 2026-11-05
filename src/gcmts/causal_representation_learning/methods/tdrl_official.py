@@ -48,6 +48,11 @@ class TDRLOfficial(BaseCausalRepresentationLearner):
         latent_obs_dim: int,
         max_lag: int = 1,
         u_dim: int = 0,
+        hidden_dim: int = 128,
+        embedding_dim: int = 8,
+        beta: float = 0.0025,
+        gamma: float = 0.0075,
+        lr: float = 1e-3,
         hidden_dims: tuple[int, ...] = (128, 128),
         decoder_hidden: tuple[int, ...] = (128, 128),
         kl_weight: float = 0.01,
@@ -66,17 +71,19 @@ class TDRLOfficial(BaseCausalRepresentationLearner):
             image_feature_dim=image_feature_dim,
         )
         self.n_classes = max(int(u_dim), 1)
+        self.trainer_lr = float(lr)
         self.core = TimeVaryingProcess(
             input_dim=self.encoder_input_dim(observed_dim),
             length=1,
             z_dim=latent_dim,
             lag=max_lag,
             nclass=self.n_classes,
-            hidden_dim=128,
+            hidden_dim=int(hidden_dim),
+            embedding_dim=int(embedding_dim),
             trans_prior="NP",
             infer_mode="F",
-            beta=0.0025,
-            gamma=0.0075,
+            beta=float(beta),
+            gamma=float(gamma),
             decoder_dist="gaussian",
         )
         # The official LightningModule logs through self.log(); we drive it
@@ -102,7 +109,7 @@ class TDRLOfficial(BaseCausalRepresentationLearner):
     def decode(self, z: Tensor) -> Tensor:
         flat = z.reshape(-1, z.shape[-1])
         recon = self.core.net._decode(flat)
-        return recon.reshape(z.shape[0], z.shape[1], self.observed_dim)
+        return recon.reshape(z.shape[0], z.shape[1], -1) if self.image_shape is not None else recon.reshape(z.shape[0], z.shape[1], self.observed_dim)
 
     def forward(self, batch: Batch) -> CausalRepresentationOutput:
         obs = self._obs(batch.x)

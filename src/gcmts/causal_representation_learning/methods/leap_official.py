@@ -49,6 +49,10 @@ class LEAPOfficial(BaseCausalRepresentationLearner):
         max_lag: int = 1,
         u_dim: int = 0,
         length: int = 1,
+        hidden_dim: int = 128,
+        beta: float = 2e-3,
+        gamma: float = 2e-2,
+        lr: float = 1e-3,
         hidden_dims: tuple[int, ...] = (128, 128),
         decoder_hidden: tuple[int, ...] = (128, 128),
         kl_weight: float = 0.01,
@@ -65,21 +69,22 @@ class LEAPOfficial(BaseCausalRepresentationLearner):
             image_feature_dim=image_feature_dim,
         )
         self.n_classes = max(int(u_dim), 1)
+        self.trainer_lr = float(lr)
         self.core = SRNNSyntheticNS(
             input_dim=self.encoder_input_dim(observed_dim),
             length=max(1, int(length)),
             z_dim=latent_dim,
             lag=max_lag,
             nclass=self.n_classes,
-            hidden_dim=128,
+            hidden_dim=int(hidden_dim),
             trans_prior="PNL",
             infer_mode="R",
             bound=5,
             count_bins=8,
             order="linear",
-            lr=2e-3,
-            beta=2e-3,
-            gamma=2e-2,
+            lr=float(lr),
+            beta=float(beta),
+            gamma=float(gamma),
             sigma=1e-6,
             bias=False,
             decoder_dist="gaussian",
@@ -137,7 +142,7 @@ class LEAPOfficial(BaseCausalRepresentationLearner):
     def decode(self, z: Tensor) -> Tensor:
         flat = z.reshape(-1, z.shape[-1])
         rec = self.core.dec(flat)
-        return rec.reshape(z.shape[0], z.shape[1], self.observed_dim)
+        return rec.reshape(z.shape[0], z.shape[1], -1) if self.image_shape is not None else rec.reshape(z.shape[0], z.shape[1], self.observed_dim)
 
     def forward(self, batch: Batch) -> CausalRepresentationOutput:
         obs = self._obs(batch.x)

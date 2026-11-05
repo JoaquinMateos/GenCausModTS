@@ -47,6 +47,9 @@ dev = [
     "mypy>=1.11",
     "pre-commit>=3.8",
 ]
+tune = [
+    "optuna>=4.0",
+]
 docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",

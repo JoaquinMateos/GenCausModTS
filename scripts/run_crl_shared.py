@@ -33,11 +33,12 @@ from gcmts.causal_representation_learning.base import BaseCausalRepresentationLe
 from gcmts.causal_representation_learning.methods import (
     CEGEN,
     CITRIS,
+    CaDRe,
     IVAE,
     LEAP,
     MOSAIC,
     NCTRL,
-    TDRLOfficial, IVAEOfficial, LEAPOfficial, NCTRLOfficial, MOSAICOfficial,
+    TDRL, TDRLOfficial, IVAEOfficial, LEAPOfficial, NCTRLOfficial, MOSAICOfficial,
     CHiLD,
     iCITRIS,
 )
@@ -92,6 +93,27 @@ from gcmts.typing import Batch
 logger = logging.getLogger("gcmts.crl_shared")
 
 MethodSpec = tuple[str, Callable[[], BaseCausalRepresentationLearner], int]
+HPO_CONFIG: dict[str, dict[str, Any]] = {}
+
+
+def configure_hpo(path: str | None) -> None:
+    """Load per-method hyperparameters produced by ``tune_crl_methods.py``."""
+    HPO_CONFIG.clear()
+    if not path:
+        return
+    payload = json.loads(Path(path).read_text())
+    methods = payload.get("methods", payload)
+    if not isinstance(methods, dict):
+        raise ValueError(f"HPO config {path} must contain a method->params mapping")
+    HPO_CONFIG.update({str(k): dict(v) for k, v in methods.items()})
+
+
+def _hp(method: str) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in HPO_CONFIG.get(method, {}).items()
+        if not key.startswith(("hpo_", "_"))
+    }
 
 
 @dataclass
@@ -378,13 +400,21 @@ def build_methods(suite: Suite, *, epochs_scale: float = 1.0) -> list[MethodSpec
     # in which iVAE gets 1500 epochs, LEAP/TDRL/NCTRL 2000* and MOSAIC 1200 is
     # not a comparison of inductive biases.
     common_epochs = max(int(2000 * epochs_scale), 200)
-    return [
+    # The official iVAE is an i.i.d. model; its temporal flattening is stable
+    # only for a shorter budget and is capped after the Optuna pilot selected
+    # this regime. The other methods use the common 2000-epoch maximum.
+    ivaE_epochs = min(common_epochs, max(int(500 * epochs_scale), 200))
+    methods = [
         (
             "iVAE",
             lambda: IVAEOfficial(
-                observed_dim=D, latent_dim=d, u_dim=u, obs_noise=0.1, image_shape=image
+                observed_dim=D,
+                latent_dim=d,
+                u_dim=u,
+                image_shape=image,
+                **_hp("iVAE"),
             ),
-            common_epochs,
+            ivaE_epochs,
         ),
         (
             "LEAP",
@@ -395,6 +425,7 @@ def build_methods(suite: Suite, *, epochs_scale: float = 1.0) -> list[MethodSpec
                 u_dim=u,
                 length=suite.horizon,
                 image_shape=image,
+                **_hp("LEAP"),
             ),
             common_epochs,
         ),
@@ -407,6 +438,7 @@ def build_methods(suite: Suite, *, epochs_scale: float = 1.0) -> list[MethodSpec
                 latent_obs_dim=obs,
                 u_dim=u,
                 image_shape=image,
+                **_hp("TDRL"),
             ),
             common_epochs,
         ),
@@ -417,6 +449,7 @@ def build_methods(suite: Suite, *, epochs_scale: float = 1.0) -> list[MethodSpec
                 latent_dim=d,
                 n_regimes=u,
                 image_shape=image,
+                **_hp("NCTRL"),
             ),
             common_epochs,
         ),
@@ -427,9 +460,46 @@ def build_methods(suite: Suite, *, epochs_scale: float = 1.0) -> list[MethodSpec
                 latent_dim=d,
                 u_dim=u,
                 image_shape=image,
+                **_hp("MOSAIC"),
             ),
             common_epochs,
         ),
+        (
+            "CaDRe",
+            lambda: CaDRe(
+                observed_dim=D,
+                latent_dim=d,
+                u_dim=u,
+                image_shape=image,
+                **_hp("CaDRe"),
+            ),
+            common_epochs,
+        ),
+    ]
+    # These two adapters are defined on vector observations in their official
+    # implementations; the rendered-image suite uses the other four methods.
+    if image is not None:
+        unsupported = {"iVAE", "LEAP", "MOSAIC", "CaDRe"}
+        methods = [m for m in methods if m[0] not in unsupported]
+    return methods
+
+
+def build_image_methods(suite: Suite, epochs_scale: float = 1.0) -> list[MethodSpec]:
+    """Rendered-image branch uses the stable vector adapters.
+
+    The official vector-only decoders in iVAE/LEAP/TDRL/MOSAIC assume vector
+    observations; the rendered-image suite therefore uses the benchmark's
+    image-aware adapters, which operate on the shared CNN feature map.
+    """
+    d, r, D = suite.latent_dim, suite.n_regimes, suite.observed_dim
+    image = suite.image_shape
+    fix, dyn, obs = _tdrl_blocks(d)
+    epochs = max(int(2000 * epochs_scale), 200)
+    return [
+        ("iVAE", lambda: IVAE(observed_dim=D, latent_dim=d, u_dim=max(r, 1), image_shape=image), epochs),
+        ("LEAP", lambda: LEAP(observed_dim=D, latent_dim=d, max_lag=1, u_dim=max(r, 1), image_shape=image), epochs),
+        ("TDRL", lambda: TDRL(observed_dim=D, latent_fix_dim=fix, latent_dyn_dim=dyn, latent_obs_dim=obs, u_dim=max(r, 1), image_shape=image), epochs),
+        ("NCTRL", lambda: NCTRL(observed_dim=D, latent_dim=d, n_regimes=max(r, 1), image_shape=image), epochs),
     ]
 
 
@@ -652,7 +722,7 @@ def _run(
     model = factory()
     trainer = SimpleTrainer(
         max_epochs=epochs,
-        lr=1e-3,
+        lr=float(getattr(model, "trainer_lr", 1e-3)),
         batch_size=batch_size,
         steps_per_epoch=15,
         log_every=max(epochs // 10, 1),
@@ -860,6 +930,8 @@ def _report_statistics(
 
 
 def _methods_for(suite: Suite, epochs_scale: float) -> list[MethodSpec]:
+    if suite.name == "causal3d_img":
+        return build_image_methods(suite, epochs_scale)
     if suite.name == "voronoi":
         return build_voronoi_methods(suite, epochs_scale)
     if suite.name == "sde":
@@ -946,6 +1018,7 @@ def configure_logging(out_dir: Path, name: str) -> None:
 
 
 def run_suite(args: argparse.Namespace) -> int:
+    configure_hpo(getattr(args, "hpo_config", None))
     suite = SUITES[args.suite]
     methods = _methods_for(suite, args.epochs_scale)
     only = getattr(args, "only", None)
@@ -974,6 +1047,7 @@ def run_suite(args: argparse.Namespace) -> int:
         "ema_decay": args.ema_decay,
         "kl_warmup_epochs": args.kl_warmup_epochs,
         "batch_size": args.batch_size,
+        "hpo_config": str(args.hpo_config) if getattr(args, "hpo_config", None) else None,
     }
     ok, reason = guard_resume(args.out_dir, stem, config, force=args.force)
     if not ok:
@@ -1258,6 +1332,11 @@ def main() -> int:
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--seeds", type=int, default=5)
     parser.add_argument("--only", nargs="*", default=None)
+    parser.add_argument(
+        "--hpo-config",
+        default=None,
+        help="JSON with per-method hyperparameters from scripts/tune_crl_methods.py",
+    )
     parser.add_argument("--configs", nargs="*", default=None, help="grid config names to run")
     parser.add_argument("--stem", default=None, help="output stem for grid splits")
     parser.add_argument(

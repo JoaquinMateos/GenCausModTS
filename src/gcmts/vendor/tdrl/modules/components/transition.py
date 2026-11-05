@@ -80,7 +80,7 @@ class NPTransitionPrior(nn.Module):
                 inputs = torch.cat((yy*mask, xx[:,:,i]),dim=-1)
             residual = self.gs[i](inputs)
             with torch.enable_grad():
-                pdd = jacobian(self.gs[i], inputs, create_graph=True, vectorize=False)
+                pdd = jacobian(self.gs[i], inputs, create_graph=True, vectorize=(__import__("os").environ.get("GCMTS_TDRL_VECTORIZE", "0") == "1"))
             # Determinant of low-triangular mat is product of diagonal entries
             logabsdet = torch.log(torch.abs(torch.diag(pdd[:,0,:,-1])))
             sum_log_abs_det_jacobian += logabsdet
@@ -139,7 +139,7 @@ class NPChangeTransitionPrior(nn.Module):
                 inputs = torch.cat((embeddings, yy*mask, xx[:,:,i]),dim=-1)
             residual = self.gs[i](inputs)
             with torch.enable_grad():
-                pdd = jacobian(self.gs[i], inputs, create_graph=True, vectorize=False)
+                pdd = jacobian(self.gs[i], inputs, create_graph=True, vectorize=(__import__("os").environ.get("GCMTS_TDRL_VECTORIZE", "0") == "1"))
             # Determinant of low-triangular mat is product of diagonal entries
             logabsdet = torch.log(torch.abs(torch.diag(pdd[:,0,:,-1])))
             sum_log_abs_det_jacobian += logabsdet

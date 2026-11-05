@@ -102,6 +102,7 @@ class CaDRe(BaseCausalRepresentationLearner):
         alpha: float = 1e-4,
         beta: float = 5e-5,
         obs_noise: float = 1.0,
+        lr: float = 1e-3,
         image_shape: tuple[int, int, int] | None = None,
         image_feature_dim: int = 64,
     ) -> None:
@@ -125,6 +126,7 @@ class CaDRe(BaseCausalRepresentationLearner):
         self.kl_s_weight = float(kl_s_weight)
         self.alpha = float(alpha)
         self.beta = float(beta)
+        self.trainer_lr = float(lr)
 
         # q(z|x,u), q(s|x), p(x|z,s)
         self.z_encoder = GaussianHead(
