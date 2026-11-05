@@ -139,7 +139,7 @@ until the ten-seed block (`outputs_sem_fixed`) replaces it.
 
 ### Official-source integration
 
-All method files now begin with paper/source provenance. Official TDRL, LEAP and MOSAIC sources are vendored under `src/gcmts/vendor/` (with licenses). `TDRLOfficial` runs forward/loss/backward on our batches; `LEAPOfficial` runs a forward and one loss/backward step but is numerically unstable over longer training; it is kept as a WIP file, not exported as a benchmark method, until the official spline warm-start/clipping schedule is added. The shared runner still uses the legacy LEAP/TDRL/MOSAIC/NCTRL so the current table remains consistent with its simplified labels.
+All method files now begin with paper/source provenance. Official TDRL, LEAP, MOSAIC, NCTRL and iVAE sources are vendored/adapted under `src/gcmts/vendor/` and the method package. The shared runner is switched to the official adapters for iVAE, LEAP, TDRL, NCTRL and MOSAIC. Each adapter passes a short stability run; a 3-seed npvar pilot is running. Table 23 remains the pre-port table until the official 10-seed result is produced.
 
 ### Pending result reruns
 
