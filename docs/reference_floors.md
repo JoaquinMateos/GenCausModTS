@@ -1,1 +1,26 @@
-+ uv run --no-sync python scripts/reference_floors.py --outputs outputs
+| Panel | Replications | Zero-effect floor | Constant-ATE floor | Method | Mean PEHE | Median PEHE | Beats constant ATE |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| ihdp | 100 | 7.960 | 5.640 | catsg | 5.451 | 2.898 | 39% |
+| ihdp | 100 | 7.960 | 5.640 | cepae | 3.924 | 2.187 | 57% |
+| ihdp | 100 | 7.960 | 5.640 | crn | 4.540 | 2.008 | 69% |
+| ihdp | 100 | 7.960 | 5.640 | ganite | 2.787 | 2.395 | 51% |
+| ihdp | 100 | 7.960 | 5.640 | nearest_neighbour | 5.475 | 2.664 | 37% |
+| ihdp | 100 | 7.960 | 5.640 | ridge_t | 2.397 | 1.015 | 87% |
+| acic | 100 | 0.199 | 0.053 | catsg | 0.174 | 0.047 | 0% |
+| acic | 100 | 0.199 | 0.053 | cepae | 0.694 | 0.488 | 1% |
+| acic | 100 | 0.199 | 0.053 | crn | 0.309 | 0.255 | 1% |
+| acic | 100 | 0.199 | 0.053 | ganite | 1.310 | 1.250 | 0% |
+| acic | 100 | 0.199 | 0.053 | nearest_neighbour | 0.984 | 0.998 | 0% |
+| acic | 100 | 0.199 | 0.053 | ridge_t | 0.649 | 0.596 | 1% |
+| twins | 100 | 0.319 | 0.319 | catsg | 0.319 | 0.320 | 0% |
+| twins | 100 | 0.319 | 0.319 | cepae | 0.320 | 0.320 | 2% |
+| twins | 100 | 0.319 | 0.319 | crn | 0.319 | 0.320 | 10% |
+| twins | 100 | 0.319 | 0.319 | ganite | 0.472 | 0.431 | 0% |
+| twins | 100 | 0.319 | 0.319 | nearest_neighbour | 0.536 | 0.536 | 0% |
+| twins | 100 | 0.319 | 0.319 | ridge_t | 0.321 | 0.322 | 0% |
+| news | 50 | 4.327 | 3.326 | catsg | 4.326 | 4.130 | 0% |
+| news | 50 | 4.327 | 3.326 | cepae | 3.449 | 3.257 | 2% |
+| news | 50 | 4.327 | 3.326 | crn | 3.802 | 3.722 | 12% |
+| news | 50 | 4.327 | 3.326 | ganite | 12.948 | 11.022 | 0% |
+| news | 50 | 4.327 | 3.326 | nearest_neighbour | 4.641 | 4.589 | 8% |
+| news | 50 | 4.327 | 3.326 | ridge_t | 9.570 | 8.724 | 0% |

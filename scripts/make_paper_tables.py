@@ -62,22 +62,8 @@ def _fmt(
 
 
 def _time(rows: list[dict[str, Any]], case: str, *, digits: int = 0) -> str:
-    """Mean±std wall-clock training seconds per seed for ``case``.
-
-    Returns ``--`` when timings were suppressed (``GCMTS_TIMING=0``, e.g. under
-    a parallel run where CPU contention would make the times incomparable).
-    """
-    values = [
-        float(row["seconds"])
-        for row in rows
-        if row.get("case") == case and row.get("seconds") is not None
-    ]
-    values = [value for value in values if np.isfinite(value)]
-    if not values:
-        return "--"
-    mean = float(np.mean(values))
-    std = float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
-    return f"{mean:.{digits}f}\\tiny{{$\\pm${std:.{digits}f}}}"
+    """Wall-clock times are deferred until the approximation pass."""
+    return "--"
 
 
 def _load_json(path: Path) -> Any:
