@@ -24,7 +24,7 @@ __all__ = ["TDRLOfficial"]
 
 
 def _class_index(context: dict[str, Tensor] | None, batch_size: int, n_classes: int, device: torch.device) -> Tensor:
-    if context is None or "u" not in context:
+    if context is None or "u" not in context or n_classes <= 1:
         return torch.zeros(batch_size, dtype=torch.long, device=device)
     u = context["u"]
     if u.ndim == 3:
@@ -34,10 +34,10 @@ def _class_index(context: dict[str, Tensor] | None, batch_size: int, n_classes: 
         # official models need the regime that labels the sequence window.
         u = u[:, -1]
     if u.ndim == 1:
-        return u.long().to(device)
+        return u.long().clamp(0, n_classes - 1).to(device)
     if u.shape[-1] == 1:
-        return u[:, 0].long().to(device)
-    return u.argmax(dim=-1).long().to(device)
+        return u[:, 0].long().clamp(0, n_classes - 1).to(device)
+    return u.argmax(dim=-1).long().clamp(0, n_classes - 1).to(device)
 
 
 class TDRLOfficial(BaseCausalRepresentationLearner):

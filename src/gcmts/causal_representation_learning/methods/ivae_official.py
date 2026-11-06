@@ -27,8 +27,8 @@ __all__ = ["IVAEOfficial"]
 
 
 def _aux(context: dict[str, Tensor] | None, batch: int, time: int, dim: int, device: torch.device) -> Tensor:
-    if context is None or "u" not in context or dim <= 0:
-        return torch.zeros(batch * time, dim, device=device)
+    if context is None or "u" not in context or dim <= 1:
+        return torch.zeros(batch * time, max(dim, 1), device=device)
     u = context["u"]
     if u.ndim == 1:
         u = u.unsqueeze(1).expand(-1, time)
