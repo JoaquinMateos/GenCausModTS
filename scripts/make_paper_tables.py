@@ -445,6 +445,45 @@ def write_crl_summary(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         cells.append(_fmt(summary, method, "rank", bold=method in best["rank"], digits=2))
         body.append("    " + " & ".join(cells) + " \\\\")
 
+    # Reference rows are deliberately outside the ranking: they are the scale
+    # anchors that also appear in the appendix, not competitor methods.
+    import sys as _sys
+
+    _sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from run_crl_shared import SUITES, _persistence_mse
+    from sklearn.linear_model import Ridge
+
+    from gcmts.core import move_batch
+
+    p1_values: list[float] = []
+    ar_values: list[float] = []
+    for key, bench in temporal:
+        suite = SUITES.get(key)
+        if suite is None:
+            continue
+        eval_batch = move_batch(suite.make_generator(0).sample(4096), "cpu")
+        train_batch = suite.make_generator(12345).sample(8192)
+        flat_x = train_batch.x[:, :-1].reshape(-1, train_batch.x.shape[-1]).numpy()
+        flat_y = train_batch.x[:, 1:].reshape(-1, train_batch.x.shape[-1]).numpy()
+        ar = Ridge(alpha=1e-3).fit(flat_x, flat_y)
+        test_x = eval_batch.x[:, :-1].reshape(-1, eval_batch.x.shape[-1]).numpy()
+        test_y = eval_batch.x[:, 1:].reshape(-1, eval_batch.x.shape[-1]).numpy()
+        ar_values.append(float(((ar.predict(test_x) - test_y) ** 2).mean()))
+        p1_values.append(float(_persistence_mse(eval_batch, 1)))
+    if p1_values:
+        body.append("    \\cmidrule(l){1-8}")
+        body.append(
+            "    Persistence & -- & -- & -- & -- & -- & "
+            f"{float(np.mean(p1_values)):.3f} & -- \\\\"
+        )
+        body.append(
+            "    AR(1) & -- & -- & -- & -- & -- & "
+            f"{float(np.mean(ar_values)):.3f} & -- \\\\"
+        )
+        body.append(
+            "    Oracle representation & 1.00 & 1.00 & 0.00 & 1.00 & 0.00 & -- & -- \\\\"
+        )
+
     n_complete = len(temporal) - len(pending)
     count_word = {17: "seventeen", 18: "eighteen", 19: "nineteen"}.get(
         n_complete, str(n_complete)
@@ -462,7 +501,9 @@ def write_crl_summary(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         "every value within one standard deviation of it. ``Mean rank'' is the "
         "average MCC rank over the complete blocks (one is best). The "
         "per-benchmark values, seed dispersion and the Friedman/Nemenyi test are "
-        "in \\autoref{app:full_results}."
+        "in \\autoref{app:full_results}. The final block reports the persistence, "
+        "AR(1) and oracle-latent references; it is not included in the ranking "
+        "or the best-value marks."
     )
     if pending:
         caption += (
