@@ -22,6 +22,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import optuna
 
 from gcmts.evaluation.report import save_rows
@@ -58,6 +59,14 @@ def _search_space(method: str, trial: optuna.Trial) -> dict[str, Any]:
             "gamma": trial.suggest_float("gamma", 1e-3, 1e-1, log=True),
             "lr": trial.suggest_float("lr", 5e-4, 2e-3, log=True),
         }
+    if method == "TDRL":
+        return {
+            "hidden_dim": trial.suggest_categorical("hidden_dim", [64, 128, 256]),
+            "embedding_dim": trial.suggest_categorical("embedding_dim", [2, 4, 8]),
+            "beta": trial.suggest_float("beta", 5e-4, 2e-2, log=True),
+            "gamma": trial.suggest_float("gamma", 1e-3, 5e-2, log=True),
+            "lr": trial.suggest_float("lr", 1e-4, 2e-3, log=True),
+        }
     if method == "NCTRL":
         return {
             "hidden_dim": trial.suggest_categorical("hidden_dim", [64, 128, 256]),
@@ -65,6 +74,7 @@ def _search_space(method: str, trial: optuna.Trial) -> dict[str, Any]:
             "gamma": trial.suggest_float("gamma", 1e-3, 1e-1, log=True),
             "lr": trial.suggest_float("lr", 5e-4, 2e-3, log=True),
             "hmm_lr": trial.suggest_float("hmm_lr", 3e-4, 3e-3, log=True),
+            "hmm_mode": trial.suggest_categorical("hmm_mode", ["mle_scaled:H", "mle_scaled:Ht"]),
         }
     if method == "MOSAIC":
         return {
@@ -90,7 +100,7 @@ def _search_space(method: str, trial: optuna.Trial) -> dict[str, Any]:
 
 def _objective(
     method: str,
-    suite_name: str,
+    suite_names: list[str],
     seed: int,
     epochs: int,
     batch_size: int,
@@ -100,35 +110,46 @@ def _objective(
         params = _search_space(method, trial)
         runner.configure_hpo(None)
         runner.HPO_CONFIG[method] = params
-        methods = runner.build_methods(runner.SUITES[suite_name], epochs_scale=1.0)
-        spec = next((m for m in methods if m[0] == method), None)
-        if spec is None:
-            raise ValueError(f"{method} is not in the temporal shared block")
-        _, factory, _ = spec
-        with tempfile.TemporaryDirectory() as tmp:
-            row = runner._run(
-                runner.SUITES[suite_name],
-                method,
-                factory,
-                epochs,
-                seed,
-                device,
-                batch_size,
-                Path(tmp),
-                save_curves=False,
-                scheduler="adaptive",
-                early_stopping_patience=min(100, max(20, epochs // 4)),
-                restore_best_weights=True,
-                kl_warmup_epochs=min(50, max(1, epochs // 5)),
-            )
-        score = row.mcc
-        if not isinstance(score, (int, float)) or score != score:
+        scores: list[float] = []
+        try:
+            for suite_name in suite_names:
+                methods = runner.build_methods(runner.SUITES[suite_name], epochs_scale=1.0)
+                spec = next((m for m in methods if m[0] == method), None)
+                if spec is None:
+                    raise ValueError(f"{method} is not in the temporal shared block")
+                _, factory, _ = spec
+                with tempfile.TemporaryDirectory() as tmp:
+                    row = runner._run(
+                        runner.SUITES[suite_name],
+                        method,
+                        factory,
+                        epochs,
+                        seed,
+                        device,
+                        batch_size,
+                        Path(tmp),
+                        save_curves=False,
+                        scheduler="adaptive",
+                        early_stopping_patience=min(100, max(20, epochs // 4)),
+                        restore_best_weights=True,
+                        kl_warmup_epochs=min(50, max(1, epochs // 5)),
+                    )
+                score = row.mcc
+                if not isinstance(score, (int, float)) or score != score:
+                    logger.warning("%s trial %d produced a non-finite score", method, trial.number)
+                    return float("-inf")
+                if row.shd is not None and row.shd == row.shd:
+                    score -= 0.01 * float(row.shd)
+                scores.append(float(score))
+        except Exception as exc:  # noqa: BLE001 - unstable trial is a failed trial
+            logger.warning("%s trial %d failed: %s", method, trial.number, exc)
             return float("-inf")
-        # SHD is a secondary objective only when the process exposes a graph.
-        if row.shd is not None and row.shd == row.shd:
-            score -= 0.01 * float(row.shd)
-        logger.info("%s trial %d score=%.4f params=%s", method, trial.number, score, params)
-        return float(score)
+        mean_score = float(np.mean(scores))
+        logger.info(
+            "%s trial %d mean_score=%.4f suites=%s params=%s",
+            method, trial.number, mean_score, suite_names, params,
+        )
+        return mean_score
 
     return objective
 
@@ -136,7 +157,13 @@ def _objective(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--methods", nargs="+", default=["iVAE", "LEAP", "TDRL", "NCTRL", "MOSAIC", "CaDRe"])
-    parser.add_argument("--suite", default="npvar", choices=sorted(runner.SUITES))
+    parser.add_argument(
+        "--suites",
+        nargs="+",
+        default=["npvar", "causal3d", "cartpole"],
+        choices=sorted(runner.SUITES),
+        help="representative suites averaged in the HPO objective",
+    )
     parser.add_argument("--trials", type=int, default=8)
     parser.add_argument("--epochs", type=int, default=250)
     parser.add_argument("--batch-size", type=int, default=32)
@@ -146,11 +173,16 @@ def main() -> int:
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    payload: dict[str, Any] = {"suite": args.suite, "seed": args.seed, "epochs": args.epochs, "methods": {}}
+    payload: dict[str, Any] = {
+        "suites": args.suites,
+        "seed": args.seed,
+        "epochs": args.epochs,
+        "methods": {},
+    }
     for method in args.methods:
         study = optuna.create_study(direction="maximize", study_name=f"crl-{method}")
         study.optimize(
-            _objective(method, args.suite, args.seed, args.epochs, args.batch_size, args.device),
+            _objective(method, args.suites, args.seed, args.epochs, args.batch_size, args.device),
             n_trials=args.trials,
         )
         payload["methods"][method] = dict(study.best_params)
