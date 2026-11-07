@@ -502,6 +502,7 @@ def build_image_methods(suite: Suite, epochs_scale: float = 1.0) -> list[MethodS
 def build_voronoi_methods(suite: Suite, epochs_scale: float = 1.0) -> list[MethodSpec]:
     n_vars = suite.observed_dim - 1
     epochs = max(int(2000 * epochs_scale), 200)
+    fix, dyn, obs = _tdrl_blocks(suite.latent_dim)
     return [
         (
             "CITRIS",
@@ -524,11 +525,49 @@ def build_voronoi_methods(suite: Suite, epochs_scale: float = 1.0) -> list[Metho
             ),
             epochs,
         ),
+        # Source-paper baselines: the CITRIS/iCITRIS papers compare against
+        # temporal latent-variable models that do not consume intervention
+        # targets. These are the same shared-protocol references, with u_dim=0.
+        (
+            "iVAE",
+            lambda: IVAE(
+                observed_dim=suite.observed_dim,
+                latent_dim=suite.latent_dim,
+                u_dim=0,
+                obs_noise=0.1,
+            ),
+            epochs,
+        ),
+        (
+            "LEAP",
+            lambda: LEAP(
+                observed_dim=suite.observed_dim,
+                latent_dim=suite.latent_dim,
+                max_lag=1,
+                u_dim=0,
+                image_shape=None,
+            ),
+            epochs,
+        ),
+        (
+            "TDRL",
+            lambda: TDRL(
+                observed_dim=suite.observed_dim,
+                latent_fix_dim=fix,
+                latent_dyn_dim=dyn,
+                latent_obs_dim=obs,
+                u_dim=0,
+                image_shape=None,
+            ),
+            epochs,
+        ),
     ]
 
 
 def build_child_methods(suite: Suite, epochs_scale: float = 1.0) -> list[MethodSpec]:
     """CHiLD is the only representative of the hierarchical temporal suite."""
+    epochs = max(int(1500 * epochs_scale), 200)
+    fix, dyn, obs = _tdrl_blocks(suite.latent_dim)
     return [
         (
             "CHiLD",
@@ -537,8 +576,42 @@ def build_child_methods(suite: Suite, epochs_scale: float = 1.0) -> list[MethodS
                 latent_dim=suite.observed_dim,
                 n_layers=2,
             ),
-            max(int(1500 * epochs_scale), 200),
-        )
+            epochs,
+        ),
+        # Source-paper baselines for the hierarchical block: temporal
+        # latent-variable models without the hierarchy, run under the same
+        # stationary protocol.
+        (
+            "iVAE",
+            lambda: IVAE(
+                observed_dim=suite.observed_dim,
+                latent_dim=suite.latent_dim,
+                u_dim=0,
+                obs_noise=0.1,
+            ),
+            epochs,
+        ),
+        (
+            "LEAP",
+            lambda: LEAP(
+                observed_dim=suite.observed_dim,
+                latent_dim=suite.latent_dim,
+                max_lag=1,
+                u_dim=0,
+            ),
+            epochs,
+        ),
+        (
+            "TDRL",
+            lambda: TDRL(
+                observed_dim=suite.observed_dim,
+                latent_fix_dim=fix,
+                latent_dyn_dim=dyn,
+                latent_obs_dim=obs,
+                u_dim=0,
+            ),
+            epochs,
+        ),
     ]
 
 
