@@ -1144,23 +1144,47 @@ def write_adjacent_table(outputs_dir: Path, latex_dir: Path, *, seeds: int = 10)
         print("no adjacent rows; leaving adjacent_results.tex unchanged")
         return
     aggregated = aggregate_rows(rows)
-    order = [
-        ("GBTPL", "III.A", "Propagation path", "Path-F1 $\\uparrow$", "path_f1"),
-        ("LacaDM", "III.B", "Multi-objective MDP", "Hypervolume $\\uparrow$", "hypervolume"),
-        ("CausalConceptTS", "III.C", "Concept-annotated series", "Faithfulness $\\uparrow$", "faithfulness"),
-        ("CausalGAN", "II.D", "Binary-label SCM", "CF MAE $\\downarrow$", "cf_mae"),
+    groups = [
+        (
+            "GBTPL",
+            "III.B",
+            "Propagation path",
+            [
+                ("Path-F1 $\\uparrow$", "path_f1"),
+                ("Source accuracy $\\uparrow$", "source_accuracy"),
+                ("Structural violation $\\downarrow$", "structural_violation"),
+            ],
+        ),
+        (
+            "LacaDM",
+            "III.A",
+            "Multi-objective MDP",
+            [
+                ("Hypervolume $\\uparrow$", "hypervolume"),
+                ("Policy sparsity $\\downarrow$", "sparsity"),
+            ],
+        ),
+        ("CausalConceptTS", "III.C", "Concept-annotated series", [("Faithfulness $\\uparrow$", "faithfulness")]),
+        ("CausalGAN", "II.D", "Binary-label SCM", [("CF MAE $\\downarrow$", "cf_mae")]),
     ]
     lines = []
-    for case, branch, bench, metric_label, metric in order:
+    for group_index, (case, branch, bench, metrics) in enumerate(groups):
         if not _case_complete(rows, case, seeds):
             continue
-        lines.append(
-            f"    {case} & {branch} & {bench} & {metric_label} & "
-            + _fmt(aggregated, case, metric)
-            + " & "
-            + _time(rows, case)
-            + " \\\\"
-        )
+        for metric_index, (metric_label, metric) in enumerate(metrics):
+            if metric_index == 0:
+                prefix = f"    {case} & {branch} & {bench} & "
+            else:
+                prefix = "     & & & "
+            lines.append(
+                prefix
+                + metric_label
+                + " & "
+                + _fmt(aggregated, case, metric)
+                + " \\\\"
+            )
+        if group_index < len(groups) - 1:
+            lines.append("    \\cmidrule(l){1-5}")
     if not lines:
         print("no complete adjacent blocks; leaving adjacent_results.tex unchanged")
         return
@@ -1182,9 +1206,9 @@ def write_adjacent_table(outputs_dir: Path, latex_dir: Path, *, seeds: int = 10)
         + caption
         + r"""}
   \label{tab:exp_adjacent_results}
-  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}} l l l l r r @{}}
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}} l l l l r @{}}
     \toprule
-    \textbf{Method} & \textbf{Branch} & \textbf{Benchmark} & \textbf{Headline metric} & \textbf{Value} & \textbf{Time (s)} \\
+    \textbf{Method} & \textbf{Branch} & \textbf{Benchmark} & \textbf{Metric} & \textbf{Value} \\
     \midrule
 """
         + "\n".join(lines)
