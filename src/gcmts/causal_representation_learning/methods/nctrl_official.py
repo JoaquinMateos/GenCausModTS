@@ -55,6 +55,7 @@ class NCTRLOfficial(BaseCausalRepresentationLearner):
         gamma: float = 0.0075,
         lr: float = 1e-3,
         hmm_lr: float = 1e-3,
+        hmm_mode: str = "mle_scaled:Ht",
         transition_hidden: int = 128,
         hidden_dims: tuple[int, ...] = (128, 128),
         decoder_hidden: tuple[int, ...] = (128, 128),
@@ -81,7 +82,7 @@ class NCTRLOfficial(BaseCausalRepresentationLearner):
             lr=float(lr),
             beta=float(beta),
             gamma=float(gamma),
-            hmm_mode="mle_scaled:Ht",
+            hmm_mode=str(hmm_mode),
         )
         self.hmm_optimizer = torch.optim.Adam(self.core.hmm.parameters(), lr=float(hmm_lr))
         self.core.log = lambda *args, **kwargs: None

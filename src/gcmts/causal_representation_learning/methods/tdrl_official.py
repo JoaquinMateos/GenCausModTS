@@ -3,7 +3,7 @@
 Paper: Yao et al., *Temporally Disentangled Representation Learning* (2022),
 BibTeX ``yaoTemporallyDisentangledRepresentation2022``.
 Official source: https://github.com/weirayao/tdrl (MIT license).
-The official factorized temporal-VAE and nonparametric change prior are used;
+The official modular temporal-VAE (ModularShifts) and nonparametric change prior are used;
 this file only adapts the batch/interface and registers the model in ``gcmts``.
 """
 
@@ -16,7 +16,7 @@ from torch import Tensor
 
 from gcmts.causal_representation_learning.base import BaseCausalRepresentationLearner
 from gcmts.typing import AmbiguityClass, Batch, CausalRepresentationOutput
-from gcmts.vendor.tdrl.modules.change import TimeVaryingProcess
+from gcmts.vendor.tdrl.modules.modular import ModularShifts
 
 logger = logging.getLogger(__name__)
 
@@ -76,18 +76,22 @@ class TDRLOfficial(BaseCausalRepresentationLearner):
         )
         self.n_classes = max(int(u_dim), 1)
         self.trainer_lr = float(lr)
-        self.core = TimeVaryingProcess(
+        self.core = ModularShifts(
             input_dim=self.encoder_input_dim(observed_dim),
             length=1,
-            z_dim=latent_dim,
+            obs_dim=int(latent_obs_dim),
+            dyn_dim=int(latent_fix_dim + latent_dyn_dim),
             lag=max_lag,
             nclass=self.n_classes,
             hidden_dim=int(hidden_dim),
-            embedding_dim=int(embedding_dim),
+            dyn_embedding_dim=int(embedding_dim),
+            obs_embedding_dim=2,
             trans_prior="NP",
+            lr=float(lr),
             infer_mode="F",
             beta=float(beta),
             gamma=float(gamma),
+            sigma=0.01,
             decoder_dist="gaussian",
         )
         # The official LightningModule logs through self.log(); we drive it
