@@ -91,7 +91,17 @@ def main() -> int:
     for suite, title, label in DATASETS:
         body.append(f"    \\multicolumn{{10}}{{@{{}}l}}{{\\emph{{{title}}}}}\\\\")
         for method in METHODS:
-            cells = [_cell(_stat(by_dataset[suite][method], metric), digits, unavailable=(metric == "shd")) for metric, digits in METRICS]
+            cells = [
+                _cell(
+                    _stat(by_dataset[suite][method], metric),
+                    digits,
+                    unavailable=(
+                        metric == "shd"
+                        or (metric == "triplet" and suite in {"causal3d_img", "pinball"})
+                    ),
+                )
+                for metric, digits in METRICS
+            ]
             body.append(f"    {label} & {method} & " + " & ".join(cells) + " \\\\")
         if suite != DATASETS[-1][0]:
             body.append("    \\cmidrule(l){1-10}")
