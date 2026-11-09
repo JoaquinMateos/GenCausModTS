@@ -1365,23 +1365,29 @@ def run_suite(args: argparse.Namespace) -> int:
     progress.finish()
     step.close()
     _log_aggregate(rows, [name for name, _, _ in methods], args.seeds)
-    if args.baselines:
+    if args.baselines and suite.image_shape is None:
         _baselines(suite)
-    _report_statistics(
-        rows,
-        args.out_dir,
-        stem=stem,
-        metrics=[
-            ("mcc", True),
-            ("r2_diag", True),
-            ("r2_sep", False),
-            ("shd", False),
-            ("auprc", True),
-            ("triplet", False),
-            ("forecast1", False),
-            ("forecast4", False),
-        ],
-    )
+    if suite.image_shape is None:
+        _report_statistics(
+            rows,
+            args.out_dir,
+            stem=stem,
+            metrics=[
+                ("mcc", True),
+                ("r2_diag", True),
+                ("r2_sep", False),
+                ("shd", False),
+                ("auprc", True),
+                ("triplet", False),
+                ("forecast1", False),
+                ("forecast4", False),
+            ],
+        )
+    else:
+        logger.info(
+            "Skipping pooled significance/CD report for the visual block; "
+            "the per-dataset rows are the reported record."
+        )
     return 0
 
 
