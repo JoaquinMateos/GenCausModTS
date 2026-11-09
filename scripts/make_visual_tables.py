@@ -47,6 +47,8 @@ def _load(path: Path) -> list[dict[str, Any]]:
 
 
 def _stat(rows: list[dict[str, Any]], metric: str) -> tuple[float, float] | None:
+    if len({row.get("seed") for row in rows}) < 5:
+        return None
     values = [
         float(row[metric])
         for row in rows
