@@ -41,6 +41,8 @@ from gcmts.causal_representation_learning.methods import (
     TDRL, TDRLOfficial, IVAEOfficial, LEAPOfficial, NCTRLOfficial, MOSAICOfficial,
     CHiLD,
     iCITRIS,
+    CITRISImage,
+    iCITRISImage,
 )
 from gcmts.core import SimpleTrainer, move_batch, save_training_report
 from gcmts.core.graph_ops import (
@@ -54,6 +56,12 @@ from gcmts.core.graph_ops import (
 )
 from gcmts.core.trainer import TrainingDivergedError
 from gcmts.data.causal3dident import Causal3DIdentImageGenerator
+from gcmts.data.citris import (
+    BallInBoxesGenerator,
+    CausalPinballGenerator,
+    InterventionalPongGenerator,
+    TemporalCausal3DIdentGenerator,
+)
 from gcmts.data.control import MountainCarGenerator, PendulumGenerator
 from gcmts.data.hierarchical import HierarchicalTemporalGenerator
 from gcmts.data.linear_processes import OUProcessGenerator, VARMAProcessGenerator
@@ -125,6 +133,7 @@ class Suite:
     n_regimes: int
     make_generator: Callable[[int], Any]
     image_shape: tuple[int, int, int] | None = None
+    n_targets: int | None = None
 
 
 SUITES: dict[str, Suite] = {
@@ -179,14 +188,45 @@ SUITES: dict[str, Suite] = {
     ),
     "causal3d_img": Suite(
         name="causal3d_img",
-        observed_dim=3 * 32 * 32,
-        latent_dim=6,
+        observed_dim=3 * 64 * 64,
+        latent_dim=12,
         horizon=8,
         n_regimes=1,
-        make_generator=lambda seed: Causal3DIdentImageGenerator(
-            horizon=8, image_size=32, seed=seed
+        make_generator=lambda seed: TemporalCausal3DIdentGenerator(
+            horizon=8, seed=seed
         ),
+        image_shape=(3, 64, 64),
+        n_targets=7,
+    ),
+    "pong": Suite(
+        name="pong",
+        observed_dim=3 * 32 * 32,
+        latent_dim=8,
+        horizon=8,
+        n_regimes=1,
+        make_generator=lambda seed: InterventionalPongGenerator(horizon=8, seed=seed),
         image_shape=(3, 32, 32),
+        n_targets=8,
+    ),
+    "pinball": Suite(
+        name="pinball",
+        observed_dim=3 * 64 * 64,
+        latent_dim=12,
+        horizon=8,
+        n_regimes=1,
+        make_generator=lambda seed: CausalPinballGenerator(horizon=8, seed=seed),
+        image_shape=(3, 64, 64),
+        n_targets=5,
+    ),
+    "ball_in_boxes": Suite(
+        name="ball_in_boxes",
+        observed_dim=3 * 32 * 32,
+        latent_dim=3,
+        horizon=8,
+        n_regimes=1,
+        make_generator=lambda seed: BallInBoxesGenerator(horizon=8, seed=seed),
+        image_shape=(3, 32, 32),
+        n_targets=3,
     ),
     "cartpole": Suite(
         name="cartpole",
@@ -492,10 +532,98 @@ def build_image_methods(suite: Suite, epochs_scale: float = 1.0) -> list[MethodS
     fix, dyn, obs = _tdrl_blocks(d)
     epochs = max(int(2000 * epochs_scale), 200)
     return [
-        ("iVAE", lambda: IVAE(observed_dim=D, latent_dim=d, u_dim=max(r, 1), image_shape=image), epochs),
-        ("LEAP", lambda: LEAP(observed_dim=D, latent_dim=d, max_lag=1, u_dim=max(r, 1), image_shape=image), epochs),
-        ("TDRL", lambda: TDRL(observed_dim=D, latent_fix_dim=fix, latent_dyn_dim=dyn, latent_obs_dim=obs, u_dim=max(r, 1), image_shape=image), epochs),
+        ("iVAE", lambda: IVAE(observed_dim=D, latent_dim=d, u_dim=0, image_shape=image), epochs),
+        ("LEAP", lambda: LEAP(observed_dim=D, latent_dim=d, max_lag=1, u_dim=0, image_shape=image), epochs),
+        ("TDRL", lambda: TDRL(observed_dim=D, latent_fix_dim=fix, latent_dyn_dim=dyn, latent_obs_dim=obs, u_dim=0, image_shape=image), epochs),
         ("NCTRL", lambda: NCTRL(observed_dim=D, latent_dim=d, n_regimes=max(r, 1), image_shape=image), epochs),
+    ]
+
+
+def build_visual_methods(suite: Suite, epochs_scale: float = 1.0) -> list[MethodSpec]:
+    """Official image CITRIS/iCITRIS plus image-aware CRL references.
+
+    The visual block uses the authors' convolutional models for the two
+    methods that define it.  The remaining rows are generative CRL references
+    implemented with the shared image feature encoder; they are included only
+    when they can consume the same ``(B, T, C*H*W)`` tensors and intervention
+    targets.
+    """
+    d, r, D = suite.latent_dim, suite.n_regimes, suite.observed_dim
+    image = suite.image_shape
+    n_targets = int(suite.n_targets or d)
+    epochs = max(int(2000 * epochs_scale), 200)
+    fix, dyn, obs = _tdrl_blocks(d)
+    return [
+        (
+            "CITRIS",
+            lambda: CITRISImage(
+                observed_dim=D,
+                latent_dim=d,
+                n_vars=n_targets,
+                image_shape=image,
+                c_hid=32,
+                lr=1e-3,
+                **_hp("CITRIS"),
+            ),
+            epochs,
+        ),
+        (
+            "iCITRIS",
+            lambda: iCITRISImage(
+                observed_dim=D,
+                latent_dim=d,
+                n_vars=n_targets,
+                image_shape=image,
+                c_hid=32,
+                lr=1e-3,
+                **_hp("iCITRIS"),
+            ),
+            epochs,
+        ),
+        (
+            "iVAE",
+            lambda: IVAE(
+                observed_dim=D,
+                latent_dim=d,
+                u_dim=0,
+                image_shape=image,
+                **_hp("iVAE"),
+            ),
+            epochs,
+        ),
+        (
+            "LEAP",
+            lambda: LEAP(
+                observed_dim=D,
+                latent_dim=d,
+                max_lag=1,
+                u_dim=0,
+                image_shape=image,
+            ),
+            epochs,
+        ),
+        (
+            "TDRL",
+            lambda: TDRL(
+                observed_dim=D,
+                latent_fix_dim=fix,
+                latent_dyn_dim=dyn,
+                latent_obs_dim=obs,
+                u_dim=0,
+                image_shape=image,
+            ),
+            epochs,
+        ),
+        (
+            "NCTRL",
+            lambda: NCTRL(
+                observed_dim=D,
+                latent_dim=d,
+                n_regimes=1,
+                image_shape=image,
+            ),
+            epochs,
+        ),
     ]
 
 
@@ -685,7 +813,11 @@ def _triplet_score(
     if batch.context is None or "I" not in batch.context or batch.z is None:
         return None
     targets = batch.context["I"]
-    if targets.shape[-1] < 1:
+    if targets.shape[-1] < 1 or targets.shape[-1] != batch.z.shape[-1]:
+        # The isolation score pairs each target column with the latent it is
+        # assumed to move.  Coarse Causal3D targets and the split Pinball
+        # targets do not have that one-to-one layout, so the diagnostic is
+        # undefined rather than silently mis-indexed.
         return None
     with torch.no_grad():
         z_pred = model.encode(batch.x, batch.context)
@@ -799,7 +931,7 @@ def _run(
         seed=seed,
         grad_clip=1.0,
         scheduler=scheduler,
-        val_size=512,
+        val_size=64 if suite.image_shape is not None else 512,
         val_every=20,
         early_stopping_patience=early_stopping_patience,
         early_stopping_min_delta_ratio=1e-4,
@@ -817,7 +949,9 @@ def _run(
     # Use one fixed evaluation draw per (suite, seed), independent of the
     # training generator and shared by every method in the block.
     if eval_batch is None:
-        eval_batch = suite.make_generator(seed).sample(2048)
+        eval_batch = suite.make_generator(seed).sample(
+            128 if suite.image_shape is not None else 2048
+        )
     start = time.perf_counter()
     history = trainer.fit(model, source)
     seconds = wall_seconds(start)
@@ -999,8 +1133,8 @@ def _report_statistics(
 
 
 def _methods_for(suite: Suite, epochs_scale: float) -> list[MethodSpec]:
-    if suite.name == "causal3d_img":
-        return build_image_methods(suite, epochs_scale)
+    if suite.name in {"causal3d_img", "pong", "pinball", "ball_in_boxes"}:
+        return build_visual_methods(suite, epochs_scale)
     if suite.name == "voronoi":
         return build_voronoi_methods(suite, epochs_scale)
     if suite.name == "sde":

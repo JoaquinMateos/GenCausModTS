@@ -65,3 +65,7 @@ data/static/
 # materialised synthetic pools (see scripts/generate_synthetic_data.py)
 data/synthetic/
 data/synthetic_*/
+
+# official CITRIS/iCITRIS video releases (see scripts/download_citris_datasets.py)
+data/citris/*
+!data/citris/README.md

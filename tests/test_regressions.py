@@ -404,13 +404,18 @@ def test_image_suite_is_registered() -> None:
     import run_crl_shared
 
     suite = run_crl_shared.SUITES["causal3d_img"]
-    assert suite.image_shape == (3, 32, 32)
-    assert suite.observed_dim == 3 * 32 * 32
-    batch = suite.make_generator(0).sample(4)
-    assert batch.x.shape == (4, suite.horizon, 3 * 32 * 32)
-    assert batch.z is not None and batch.z.shape[-1] == suite.latent_dim
-    assert batch.adjacency is not None and batch.adjacency.shape == (6, 6, 1)
-    assert batch.context is not None and "u" in batch.context
+    assert suite.image_shape == (3, 64, 64)
+    assert suite.observed_dim == 3 * 64 * 64
+    assert suite.latent_dim == 12 and suite.n_targets == 7
+    # The official video release is intentionally not committed.  When it is
+    # present, also exercise the contiguous-window loader.
+    from pathlib import Path
+    data = Path("data/citris/temporal_causal3d/causal3d_time_dep_all7_conthue_01_coarse/train.npz")
+    if data.exists():
+        batch = suite.make_generator(0).sample(4)
+        assert batch.x.shape == (4, suite.horizon, 3 * 64 * 64)
+        assert batch.z is not None and batch.z.shape[-1] == suite.latent_dim
+        assert batch.context is not None and batch.context["I"].shape[-1] == 7
 
 
 def test_dataset_manifest_detects_a_changed_snapshot(tmp_path: Path) -> None:

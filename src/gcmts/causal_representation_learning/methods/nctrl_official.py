@@ -87,6 +87,18 @@ class NCTRLOfficial(BaseCausalRepresentationLearner):
         self.hmm_optimizer = torch.optim.Adam(self.core.hmm.parameters(), lr=float(hmm_lr))
         self.core.log = lambda *args, **kwargs: None
 
+    def parameters(self, recurse: bool = True):  # type: ignore[override]
+        """Exclude the ARHMM parameters from the shared model optimiser.
+
+        The official NCTRL training step gives the ARHMM its own optimiser and
+        likelihood, then updates the VAE separately.  The shared trainer builds
+        a single optimiser from ``model.parameters()``; without this split the
+        ARHMM would receive two conflicting updates per step.
+        """
+        for name, parameter in self.named_parameters(recurse=recurse):
+            if not name.startswith("core.hmm."):
+                yield parameter
+
     def _obs(self, x: Tensor) -> Tensor:
         if self.image_shape is None:
             return x

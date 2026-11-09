@@ -51,11 +51,11 @@ def _fmt(
     aggregated: dict[str, Any], case: str, metric: str, *, bold: bool = False, digits: int = 2
 ) -> str:
     if case not in aggregated or metric not in aggregated[case]:
-        return "--"
+        return "\textcolor{red}{--}"
     entry = aggregated[case][metric]
     mean, std = entry["mean"], entry["std"]
     if np.isnan(mean):
-        return "--"
+        return "\textcolor{red}{--}"
     text = f"{mean:.{digits}f}"
     body = f"{text}\\tiny{{$\\pm${std:.{digits}f}}}"
     return f"\\textbf{{{body}}}" if bold else body
@@ -63,7 +63,7 @@ def _fmt(
 
 def _time(rows: list[dict[str, Any]], case: str, *, digits: int = 0) -> str:
     """Wall-clock times are deferred until the approximation pass."""
-    return "--"
+    return "\textcolor{red}{--}"
 
 
 def _load_json(path: Path) -> Any:
@@ -246,6 +246,10 @@ def write_crl_table(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
     blocks: list[tuple[str, str, str]] = []
     missing: list[str] = []
     for key, benchmark in CRL_BENCHMARKS.items():
+        if benchmark.kind == "visual":
+            # The visual block has its own table (official image models and
+            # real Zenodo releases); do not duplicate it in the vector table.
+            continue
         methods = METHODS_FOR_KIND[benchmark.kind]
         lines_block = _suite_block(
             rows,
@@ -461,8 +465,13 @@ def write_crl_summary(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         suite = SUITES.get(key)
         if suite is None:
             continue
-        eval_batch = move_batch(suite.make_generator(0).sample(4096), "cpu")
-        train_batch = suite.make_generator(12345).sample(8192)
+        try:
+            eval_batch = move_batch(suite.make_generator(0).sample(4096), "cpu")
+            train_batch = suite.make_generator(12345).sample(8192)
+        except FileNotFoundError:
+            # Real video releases are not committed; their reference rows are
+            # produced by the visual runner, not the vector CRL summary.
+            continue
         flat_x = train_batch.x[:, :-1].reshape(-1, train_batch.x.shape[-1]).numpy()
         flat_y = train_batch.x[:, 1:].reshape(-1, train_batch.x.shape[-1]).numpy()
         ar = Ridge(alpha=1e-3).fit(flat_x, flat_y)

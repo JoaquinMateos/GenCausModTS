@@ -61,6 +61,7 @@ METHODS_FOR_KIND: dict[str, list[str]] = {
     "voronoi": ["CITRIS", "iCITRIS"],
     "sde": ["CEGEN"],
     "child": ["CHiLD"],
+    "visual": ["CITRIS", "iCITRIS", "iVAE", "LEAP", "TDRL", "NCTRL"],
 }
 
 # key -> CrlBenchmark
@@ -86,7 +87,16 @@ CRL_BENCHMARKS: dict[str, CrlBenchmark] = {
     ),
     "causal3d": CrlBenchmark("A.4", "Temporal Causal3DIdent factor process", "temporal", True),
     "causal3d_img": CrlBenchmark(
-        "A.4b", "Temporal Causal3DIdent (rendered images)", "temporal", True
+        "A.4b", "real Temporal Causal3DIdent (official seven-shape release)", "visual", False, summary=False
+    ),
+    "pong": CrlBenchmark(
+        "A.4c", "Interventional Pong (official release)", "visual", False, summary=False
+    ),
+    "pinball": CrlBenchmark(
+        "A.4d", "Causal Pinball (official release)", "visual", False, summary=False
+    ),
+    "ball_in_boxes": CrlBenchmark(
+        "A.4e", "Ball-in-Boxes (official release)", "visual", False, summary=False
     ),
     "lorenz": CrlBenchmark("A.5", "Lorenz-63 physical SCM", "temporal", False),
     "lorenz96": CrlBenchmark("A.6", "Lorenz-96 ring SCM", "temporal", False),

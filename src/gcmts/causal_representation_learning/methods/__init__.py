@@ -8,6 +8,7 @@ from gcmts.causal_representation_learning.methods.cadre import CaDRe
 from gcmts.causal_representation_learning.methods.cegen import CEGEN
 from gcmts.causal_representation_learning.methods.child import CHiLD
 from gcmts.causal_representation_learning.methods.citris import CITRIS
+from gcmts.causal_representation_learning.methods.citris_image import CITRISImage, iCITRISImage
 from gcmts.causal_representation_learning.methods.icitris import iCITRIS
 from gcmts.causal_representation_learning.methods.ivae import IVAE
 from gcmts.causal_representation_learning.methods.leap import LEAP
@@ -27,6 +28,8 @@ __all__ = [
     "CHiLD",
     "CITRIS",
     "iCITRIS",
+    "CITRISImage",
+    "iCITRISImage",
     "IVAE",
     "LEAP",
     "MOSAIC",
