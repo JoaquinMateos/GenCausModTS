@@ -57,7 +57,7 @@ class CrlBenchmark:
 
 
 METHODS_FOR_KIND: dict[str, list[str]] = {
-    "temporal": ["iVAE", "LEAP", "TDRL", "NCTRL", "MOSAIC"],
+    "temporal": ["iVAE", "LEAP", "TDRL", "NCTRL", "MOSAIC", "CaDRe"],
     "voronoi": ["CITRIS", "iCITRIS"],
     "sde": ["CEGEN"],
     "child": ["CHiLD"],

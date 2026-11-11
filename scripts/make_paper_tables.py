@@ -51,11 +51,11 @@ def _fmt(
     aggregated: dict[str, Any], case: str, metric: str, *, bold: bool = False, digits: int = 2
 ) -> str:
     if case not in aggregated or metric not in aggregated[case]:
-        return "\textcolor{red}{--}"
+        return r"\textcolor{red}{--}"
     entry = aggregated[case][metric]
     mean, std = entry["mean"], entry["std"]
     if np.isnan(mean):
-        return "\textcolor{red}{--}"
+        return r"\textcolor{red}{--}"
     text = f"{mean:.{digits}f}"
     body = f"{text}\\tiny{{$\\pm${std:.{digits}f}}}"
     return f"\\textbf{{{body}}}" if bold else body
@@ -63,7 +63,7 @@ def _fmt(
 
 def _time(rows: list[dict[str, Any]], case: str, *, digits: int = 0) -> str:
     """Wall-clock times are deferred until the approximation pass."""
-    return "\textcolor{red}{--}"
+    return r"\textcolor{red}{--}"
 
 
 def _load_json(path: Path) -> Any:
@@ -341,7 +341,7 @@ def write_crl_table(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         table = (
             "\\begin{table}[t]\n  \\centering\n  \\scriptsize\n"
             "  \\setlength{\\tabcolsep}{4pt}\n"
-            "  \\renewcommand{\\arraystretch}{1.10}\n"
+            "  \\renewcommand{\\arraystretch}{1.0}\n"
             "  \\caption{" + caption + "}\n"
             "  \\label{" + label + "}\n"
             "  \\begin{tabular*}{\\textwidth}{@{\\extracolsep{\\fill}} "
@@ -482,15 +482,15 @@ def write_crl_summary(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
     if p1_values:
         body.append("    \\cmidrule(l){1-8}")
         body.append(
-            "    Persistence & -- & -- & -- & -- & -- & "
+            "    Persistence & \\textcolor{red}{--} & \\textcolor{red}{--} & \\textcolor{red}{--} & \\textcolor{red}{--} & \\textcolor{red}{--} & "
             f"{float(np.mean(p1_values)):.3f} & -- \\\\"
         )
         body.append(
-            "    AR(1) & -- & -- & -- & -- & -- & "
+            "    AR(1) & \\textcolor{red}{--} & \\textcolor{red}{--} & \\textcolor{red}{--} & \\textcolor{red}{--} & \\textcolor{red}{--} & "
             f"{float(np.mean(ar_values)):.3f} & -- \\\\"
         )
         body.append(
-            "    Oracle representation & 1.00 & 1.00 & 0.00 & 1.00 & 0.00 & -- & -- \\\\"
+            "    Oracle representation & 1.00 & 1.00 & 0.00 & 1.00 & 0.00 & \\textcolor{red}{--} & \\textcolor{red}{--} \\\\"
         )
 
     n_complete = len(temporal) - len(pending)
@@ -498,7 +498,7 @@ def write_crl_summary(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         n_complete, str(n_complete)
     )
     caption = (
-        "Summary of representation recovery and downstream utility for the five "
+        "Summary of representation recovery and downstream utility for the six "
         "temporal CRL methods across the " + count_word + " shared benchmarks. "
         "Each cell is the mean across benchmarks of the per-benchmark seed "
         "means, with the mean of the per-benchmark seed standard deviations: "
@@ -1004,7 +1004,7 @@ def write_stats_section(shared_dir: Path, latex_dir: Path) -> None:
   \footnotesize
   \setlength{\tabcolsep}{4pt}
   \renewcommand{\arraystretch}{1.15}
-  \caption{Statistical comparison of the five temporal CRL methods over the """
+  \caption{Statistical comparison of the six temporal CRL methods over the """
         + f"{n_problems}"
         + r"""-problem configuration grid (Section~\ref{sec:exp_protocol}). The Friedman test is the omnibus test; the Nemenyi critical difference (CD) is the smallest average-rank gap significant at $\alpha=0.05$ for this number of problems and methods. Average ranks use one as best (lower is better).}
   \label{tab:exp_stats}
