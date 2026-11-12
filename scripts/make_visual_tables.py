@@ -30,8 +30,8 @@ METRICS = [
     ("dci", 3),
     ("shd", 2),
     ("triplet", 3),
-    ("forecast1", 3),
-    ("forecast4", 3),
+    ("forecast1", 4),
+    ("forecast4", 4),
 ]
 RED = r"\textcolor{red}{--}"
 NA = r"\textcolor{red}{n/a}"

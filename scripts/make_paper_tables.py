@@ -150,8 +150,8 @@ def _suite_block(
             if method not in aggregated:
                 continue
             w2 = _fmt(aggregated, method, "w2", bold=method in best_w2, digits=4)
-            f1 = _fmt(aggregated, method, "forecast1", bold=method in best_f1)
-            f4 = _fmt(aggregated, method, "forecast4", bold=method in best_f4)
+            f1 = _fmt(aggregated, method, "forecast1", bold=method in best_f1, digits=4)
+            f4 = _fmt(aggregated, method, "forecast4", bold=method in best_f4, digits=4)
             lines.append(
                 f"    {method} & {suite_tex} & {w2} & n/a & n/a & n/a & n/a & n/a & {f1} & {f4} & {_time(subset, method)} \\\\"
             )
@@ -174,8 +174,8 @@ def _suite_block(
         dci = _fmt(aggregated, method, "dci", bold=method in best_dci)
         shd = _fmt(aggregated, method, "shd", bold=method in best_shd) if shd_available else "n/a"
         triplet = _fmt(aggregated, method, "triplet", bold=method in best_triplet)
-        f1 = _fmt(aggregated, method, "forecast1", bold=method in best_f1)
-        f4 = _fmt(aggregated, method, "forecast4", bold=method in best_f4)
+        f1 = _fmt(aggregated, method, "forecast1", bold=method in best_f1, digits=4)
+        f4 = _fmt(aggregated, method, "forecast4", bold=method in best_f4, digits=4)
         lines.append(
             f"    {method} & {suite_tex} & {mcc} & {r2d} & {r2s} & {dci} & {shd} & {triplet} & {f1} & {f4} & {_time(subset, method)} \\\\"
         )
@@ -208,8 +208,8 @@ def _baselines(suite_name: str) -> list[str]:
     p4 = _persistence_mse(eval_batch, 4)
     label = suite_name.replace("_", r"\_")
     return [
-        f"    Persistence & {label} & n/a & n/a & n/a & n/a & n/a & n/a & {p1:.2f} & {p4:.2f} & n/a \\\\",
-        f"    AR(1) & {label} & n/a & n/a & n/a & n/a & n/a & n/a & {ar_mse:.2f} & -- & n/a \\\\",
+        f"    Persistence & {label} & n/a & n/a & n/a & n/a & n/a & n/a & {p1:.4f} & {p4:.4f} & n/a \\\\",
+        f"    AR(1) & {label} & n/a & n/a & n/a & n/a & n/a & n/a & {ar_mse:.4f} & -- & n/a \\\\",
     ]
 
 
@@ -399,7 +399,7 @@ def write_crl_summary(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         ("r2_sep", r"$R^2_{\mathrm{sep}}$ $\downarrow$", False, 3),
         ("dci", r"DCI $\uparrow$", True, 3),
         ("shd", r"SHD $\downarrow$", False, 2),
-        ("forecast1", r"1-step MSE $\downarrow$", False, 3),
+        ("forecast1", r"1-step MSE $\downarrow$", False, 4),
     ]
     summary: dict[str, dict[str, dict[str, float]]] = {m: {} for m in methods}
     for method in methods:
@@ -483,11 +483,11 @@ def write_crl_summary(shared_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         body.append("    \\cmidrule(l){1-8}")
         body.append(
             "    Persistence & \\textcolor{red}{--} & \\textcolor{red}{--} & \\textcolor{red}{--} & \\textcolor{red}{--} & \\textcolor{red}{--} & "
-            f"{float(np.mean(p1_values)):.3f} & -- \\\\"
+            f"{float(np.mean(p1_values)):.4f} & -- \\\\"
         )
         body.append(
             "    AR(1) & \\textcolor{red}{--} & \\textcolor{red}{--} & \\textcolor{red}{--} & \\textcolor{red}{--} & \\textcolor{red}{--} & "
-            f"{float(np.mean(ar_values)):.3f} & -- \\\\"
+            f"{float(np.mean(ar_values)):.4f} & -- \\\\"
         )
         body.append(
             "    Oracle representation & 1.00 & 1.00 & 0.00 & 1.00 & 0.00 & \\textcolor{red}{--} & \\textcolor{red}{--} \\\\"
