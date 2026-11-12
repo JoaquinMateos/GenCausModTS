@@ -28,7 +28,7 @@ Status: 2026-11-05. Scope: implementations, architectures, hyperparameters, metr
 | 1. nilpotent temporal generator | fixed in default path | `data/synthetic.py` lower-triangular positive-persistence VAR; stored pool radii/autocorrelation checks |
 | 2a. Voronoi instantaneous upper triangle | fixed | `data/voronoi.py` lower-triangular instantaneous mask; generator test |
 | 3. NCTRL regime radii | fixed | `data/synthetic.py` rescales regime matrices to radius <= 0.8 |
-| 5. SDD zero-average spurious coefficients | fixed for 5-domain design | `data/synthetic_sdd.py` coefficients `[1,.8,.6,.4]` train, `-1` test |
+| 5. SDD zero-average spurious coefficients | fixed for 5-domain design | `data/synthetic_sdd.py` coefficients `[1,.8,.6,.4]` train, `0` test; domain location shift added to the spurious static factor |
 | 6. IHDP train/test split | fixed | `run_ctee_static.py` loads canonical train/test files |
 | 7. synthetic static panels | fixed for executed panels | canonical Twins/News/ACIC/Jobs loaders; `static_effect.py` is a dead fallback |
 | 8a/8b/8c/8d/8e/8f. metrics | fixed/partial | unclipped R2, one-edit SHD, KSG MIG, median MMD, worst-corner hypervolume, `ddof=1`; see residual notes below |
@@ -69,7 +69,7 @@ These are the largest fidelity gaps. The shared ranking is a comparison of simpl
 - CausalConceptTS uses a deterministic MLP instead of a diffusion imputer and fixed classifier.
 - Becker does not apply Ada-GVAE alignment to the predictor/attributions.
 - SYNC is a compact surrogate, not the paper's MI/contrastive model.
-- The SDD DGP does not provide a positive DANN test (domain classifier at chance) or VREx test (risk-variance optimum at the average spurious coefficient). The paper now reports this as "not testable", not a refutation.
+- The SDD DGP now provides a domain signal in the observations and a harmful spurious shortcut on the held-out domain (spurious coefficient zero). The corrected ten-seed run separates SYNC from ERM and VREx; DANN remains high-variance and is not separated from ERM. The published VREx advantage is not reproduced.
 
 ### P1/P2 — data and protocol
 

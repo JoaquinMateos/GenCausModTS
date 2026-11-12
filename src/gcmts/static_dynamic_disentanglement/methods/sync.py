@@ -150,7 +150,7 @@ class SYNC(_BaseDisentangler):
         spurious_dynamic_dim: int = 1,
         n_domains: int = 5,
         hidden_dims: tuple[int, ...] = (128, 128),
-        adversarial_weight: float = 5.0,
+        adversarial_weight: float = 100.0,
         outcome_weight: float = 20.0,
         obs_noise: float = 0.1,
     ) -> None:
@@ -254,7 +254,7 @@ class DANN(_BaseDisentangler):
         spurious_dynamic_dim: int = 1,
         n_domains: int = 5,
         hidden_dims: tuple[int, ...] = (128, 128),
-        adversarial_weight: float = 5.0,
+        adversarial_weight: float = 100.0,
         outcome_weight: float = 20.0,
         obs_noise: float = 0.1,
     ) -> None:
@@ -337,7 +337,7 @@ class VREx(_BaseDisentangler):
         spurious_static_dim: int = 1,
         spurious_dynamic_dim: int = 1,
         hidden_dims: tuple[int, ...] = (128, 128),
-        variance_weight: float = 100.0,
+        variance_weight: float = 1000.0,
         outcome_weight: float = 20.0,
         obs_noise: float = 0.1,
     ) -> None:

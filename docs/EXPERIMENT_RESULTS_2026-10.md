@@ -480,11 +480,10 @@ A.1 (TDRL 0.75 instead of a five-way tie at 0.86) and Temporal Causal3DIdent
 
 ## 9. SDD and adjacent blocks (already final)
 
-SDD (ten seeds): oracle OOD MSE 0.662; SYNC 1.927, DANN 1.927, VREx 1.927, ERM
-1.928 — statistically indistinguishable, as the paper states. ID MSE 0.046–0.047
-against the oracle's 0.374; MIG 0.100–0.121; CDS 0.576–0.611. The paper's values
-(SYNC 1.966, DANN 1.969, VREx 1.978, ERM 1.977; MIG 0.11–0.12; CDS 0.58–0.61)
-agree to within the aggregation used here.
+SDD (ten seeds, corrected DGP): oracle OOD MSE 0.073; SYNC 2.052, DANN 2.549,
+VREx 3.043, ERM 3.164. SYNC separates from ERM and VREx after Holm correction;
+DANN is high-variance and is not separated from ERM. MIG is 0.094–0.231 and
+CDS 0.526–0.750. The published VREx advantage is not reproduced.
 
 Adjacent: GBTPL path-F1 0.805, source accuracy 0.197, zero structural violations
 (paper: 0.79, 0.18, none). CausalConceptTS faithfulness 0.044 (paper 0.04).

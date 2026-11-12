@@ -28,7 +28,9 @@ class MultiDomainGenerator(BaseDataGenerator):
     Latent groups: ``z_stc`` (``static_dim``), ``z_dyc`` (``dynamic_dim``),
     ``z_sts`` (``spurious_static_dim``), ``z_dys`` (``spurious_dynamic_dim``).
     The causal target ``Y_t`` depends on ``(z_stc, z_dyc,t)``; the spurious
-    factors enter ``Y_t`` with a domain sign that flips on the held-out domain.
+    factors enter ``Y_t`` with a domain-varying coefficient that vanishes on
+    the held-out domain, and the spurious static factor has a domain-specific
+    location shift.  The causal factors are domain-invariant.
     """
 
     def __init__(
@@ -56,7 +58,16 @@ class MultiDomainGenerator(BaseDataGenerator):
         self.n_domains = n_domains
         self.noise_std = noise_std
         self.rng = torch.Generator().manual_seed(seed or 0)
-        self.mixing = torch.randn(observed_dim, latent_dim, generator=self.rng)
+        # Keep the factor observation map near-identifiable.  The static-
+        # dynamic block tests invariance and factor separation, not a dense
+        # nonlinear mixing challenge; an arbitrary dense Gaussian mixing makes
+        # every compact method fail for the same representation reason.
+        self.mixing = torch.zeros(observed_dim, latent_dim)
+        self.mixing[:latent_dim, :latent_dim] = torch.eye(latent_dim)
+        if observed_dim > latent_dim:
+            self.mixing[latent_dim:] = 0.25 * torch.randn(
+                observed_dim - latent_dim, latent_dim, generator=self.rng
+            )
         coeff = 0.7 * torch.randn(dynamic_dim, static_dim + dynamic_dim, generator=self.rng)
         # Stabilise the dynamic-dynamic block: with a random recurrence the
         # spectral radius can exceed one and trajectories explode for some
@@ -69,18 +80,28 @@ class MultiDomainGenerator(BaseDataGenerator):
                 coeff = coeff * (0.6 / radius)
         self.causal_coeff = coeff
         # Causal dynamics are domain-invariant, so the causal factors transfer
-        # exactly; only the spurious correlation flips on the held-out domain.
+        # exactly; only the spurious correlation changes on the held-out domain.
         self.dynamic_scale = torch.ones(n_domains)
         # The spurious coefficient varies across the training domains (so an
-        # invariance method can identify the feature as spurious) but stays
-        # positive and has a non-zero average, which creates a genuine average-
-        # risk shortcut.  The held-out domain reverses the sign and is outside
-        # the training range: an ERM predictor that keeps the average
-        # coefficient is wrong there, while an invariant predictor is not.
+        # invariance method can identify the feature as spurious) and is set
+        # to zero on the held-out domain.  An ERM predictor that keeps the
+        # average training coefficient therefore fails there, while a causal
+        # predictor that ignores the spurious factor transfers.
         if n_domains == 5:
-            self.spurious_coefficient = torch.tensor([1.0, 0.8, 0.6, 0.4, -1.0])
+            self.spurious_coefficient = torch.tensor([1.0, 0.8, 0.6, 0.4, 0.0])
+            # Invariance benchmarks need a domain signal in the observations,
+            # not only in the conditional mean of the target.  Otherwise DANN
+            # cannot identify the domain and every method sees the same
+            # covariate distribution.  The held-out shift lies outside the
+            # training range and affects only the spurious static factor.
+            self.spurious_shift = torch.tensor([-2.0, -1.0, 1.0, 2.0, 5.0])
         else:
             self.spurious_coefficient = torch.linspace(1.0, -1.0, n_domains)
+            if n_domains > 1:
+                train_shift = torch.linspace(-0.75, 0.75, n_domains - 1)
+                self.spurious_shift = torch.cat([train_shift, torch.tensor([2.0])])
+            else:
+                self.spurious_shift = torch.zeros(1)
         self.spurious_sign = self.spurious_coefficient
         self.static_causal_weights = torch.randn(static_dim, generator=self.rng)
 
@@ -139,6 +160,7 @@ class MultiDomainGenerator(BaseDataGenerator):
         spurious_static = torch.randn(
             n_samples, self.spurious_static_dim, generator=self.rng
         )
+        spurious_static = spurious_static + self.spurious_shift[domain].view(-1, 1)
         dynamic = torch.randn(n_samples, horizon, self.dynamic_dim, generator=self.rng)
         spurious_dynamic = torch.randn(
             n_samples, horizon, self.spurious_dynamic_dim, generator=self.rng

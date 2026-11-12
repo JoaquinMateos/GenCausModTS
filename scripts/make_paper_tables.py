@@ -882,7 +882,10 @@ def write_sdd_table(outputs_dir: Path, latex_dir: Path, *, seeds: int) -> None:
         lines.append(
             f"    {label} & Multi-domain synthetic & "
             + " & ".join(
-                _fmt(aggregated, case, metric, bold=case in sdd_best[metric])
+                _fmt(
+                    aggregated, case, metric, bold=case in sdd_best[metric],
+                    digits=4 if metric in ("ood_mse", "ood_mae") else 3,
+                )
                 for metric in ("ood_mse", "ood_mae", "domain_accuracy", "mig", "cds")
             )
             + " & " + _time(rows, case) + " \\\\"
@@ -891,18 +894,20 @@ def write_sdd_table(outputs_dir: Path, latex_dir: Path, *, seeds: int) -> None:
     if oracle is not None:
         lines.append(
             "    \\cmidrule(l){1-8}\n    Oracle (true causal factors) & Multi-domain synthetic & "
-            + _fmt(aggregated, "oracle_causal", "ood_mse")
+            + _fmt(aggregated, "oracle_causal", "ood_mse", digits=4)
             + " & "
-            + _fmt(aggregated, "oracle_causal", "ood_mae")
+            + _fmt(aggregated, "oracle_causal", "ood_mae", digits=4)
             + " & -- & -- & -- & -- \\\\"
         )
     caption = (
         "Static--dynamic (invariance) sub-branch of non-stationarity \\& environment shift (Branch I.B.2) "
         "on the multi-domain SCM of Section~\\ref{sec:exp_sdd}. Models train on domains $0$--$3$, "
-        "whose spurious coefficient is positive but decreasing ($1.0,0.8,0.6,0.4$), and are tested "
-        "on held-out domain $4$, whose coefficient is $-1.0$; the average-risk shortcut is therefore "
-        "genuine while the training domains still exhibit variation. This is the current "
-        "generator. Methods are listed as invariance baselines "
+        "whose spurious coefficient is positive but decreasing ($1.0,0.8,0.6,0.4$) and whose "
+        "spurious static factor has a location shift; they are tested on held-out domain $4$, "
+        "whose coefficient is $0.0$ and whose spurious location is outside the training range. "
+        "The average-risk shortcut is therefore genuine while the causal factors remain "
+        "domain-invariant. The observation map is near-identifiable; this block isolates "
+        "invariance rather than dense nonlinear mixing. Methods are listed as invariance baselines "
         "(DANN, VREx), the static--dynamic model (SYNC) and the ERM control, not by performance. "
         "Mean $\\pm$ standard deviation over "
         + str(seeds) + " seeds; lower is better for OOD error and higher for domain-identification "
