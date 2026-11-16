@@ -9,6 +9,7 @@ import torch
 from gcmts.causal_representation_learning.methods.cadre import CaDRe
 from gcmts.core import SimpleTrainer
 from gcmts.data.latent_scm import LatentStructuralGenerator
+from gcmts.typing import Batch
 
 
 def _generator(horizon: int = 16, seed: int = 7) -> LatentStructuralGenerator:
@@ -132,3 +133,112 @@ def test_cadre_two_epoch_cpu_smoke_fit():
     history = trainer.fit(model, generator)
     assert len(history["loss"]) == 2
     assert all(math.isfinite(value) for value in history["loss"])
+
+
+# --- conditional-context contract -------------------------------------------
+
+
+def test_unconditional_model_ignores_the_batch_context():
+    """``u_dim=0`` builds an unconditional model even when batches carry ``u``.
+
+    Benchmark generators always attach a regime context to the batch, so the
+    unconditional path must drop it rather than append a tensor the encoder was
+    not sized for.
+    """
+    generator = _generator()
+    batch = generator.sample(6)
+    assert batch.context is not None and "u" in batch.context
+
+    model = CaDRe(
+        observed_dim=6,
+        latent_dim=3,
+        u_dim=0,
+        hidden_dims=(16,),
+        s_hidden=(16,),
+        decoder_hidden=(16,),
+        prior_hidden=(16,),
+    )
+    outputs = model(batch)
+    assert outputs.z.shape == (6, 16, 3)
+    losses = model.loss(outputs, batch)
+    assert torch.isfinite(losses["loss"])
+
+    with torch.no_grad():
+        with_context = model.encode(batch.x, batch.context)
+        without_context = model.encode(batch.x, None)
+        torch.testing.assert_close(with_context, without_context)
+        z_next = model.transition(batch.z[:, -2:], batch.context)
+    assert z_next.shape == (6, 3)
+    assert torch.isfinite(z_next).all()
+
+
+def test_context_width_mismatch_is_reported():
+    """A context of the wrong width fails with an actionable message."""
+    generator = _generator()
+    batch = generator.sample(4)
+    model = CaDRe(
+        observed_dim=6,
+        latent_dim=3,
+        u_dim=3,  # generator emits a 4-wide one-hot
+        hidden_dims=(16,),
+        s_hidden=(16,),
+        decoder_hidden=(16,),
+        prior_hidden=(16,),
+    )
+    try:
+        model(batch)
+    except ValueError as error:
+        assert "width 4" in str(error) and "u_dim=3" in str(error)
+    else:  # pragma: no cover - the shape error must be raised, not swallowed
+        raise AssertionError("expected a ValueError for a misdeclared context width")
+
+
+# --- separation metric floor on the control suites ---------------------------
+
+
+def test_cartpole_true_latents_are_not_separable_under_r2_sep():
+    """On CartPole, ``R^2_sep`` has a floor near 0.7 even for a perfect model.
+
+    The four physical state variables are mutually predictable (x from x-dot,
+    theta-dot from theta, ...), so feeding the *true* latents back through the
+    benchmark's leakage metric already scores ``R^2_sep ~= 0.70`` at
+    ``R^2_diag = 1``.  A reported ``R^2_sep`` of that size on this suite is the
+    metric's floor, not evidence that a representation leaks across factors.
+    """
+    from gcmts.data.synthetic import CartPoleGenerator
+    from gcmts.evaluation.metrics import R2DiagMetric, R2SepMetric
+
+    batch = CartPoleGenerator(horizon=16, observed_dim=4, n_regimes=3, seed=0).sample(256)
+    assert batch.z is not None
+    diagonal = R2DiagMetric()(batch.z, batch.z).value
+    separation = R2SepMetric()(batch.z, batch.z).value
+    assert diagonal > 0.95
+    assert separation > 0.6, (
+        "the CartPole metric floor changed; re-check how R2_sep is read on the control suites"
+    )
+
+
+def test_conditional_model_requires_a_context():
+    """A conditional model cannot be evaluated without the regime it was built for."""
+    generator = _generator()
+    batch = generator.sample(4)
+    model = CaDRe(
+        observed_dim=6,
+        latent_dim=3,
+        u_dim=4,
+        hidden_dims=(16,),
+        s_hidden=(16,),
+        decoder_hidden=(16,),
+        prior_hidden=(16,),
+    )
+    for call in (
+        lambda: model.encode(batch.x, None),
+        lambda: model(Batch(x=batch.x, z=batch.z)),
+        lambda: model.transition(batch.z[:, -1:], None),
+    ):
+        try:
+            call()
+        except ValueError as error:
+            assert "u_dim=4" in str(error)
+        else:  # pragma: no cover - the missing-context path must be reported
+            raise AssertionError("expected a ValueError for a missing context")

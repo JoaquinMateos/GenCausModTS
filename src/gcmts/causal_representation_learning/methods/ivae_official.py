@@ -6,12 +6,24 @@ Unifying Framework* (AISTATS 2020), BibTeX
 Official source: https://github.com/ilkhem/iVAE.
 The official exponential-family prior, encoder and decoder are used; temporal
 observations are flattened per timestep and the auxiliary variable is repeated
-across the sequence.
+across the sequence. The vendored model bounds the encoder log-variance and the
+prior log-scale to ``[-6, 6]`` as a numerical guard; the prior family, the
+networks and the fixed decoder variance are unchanged from the official code.
+
+Objective. The official model maximises the evidence lower bound
+
+    ELBO = E_{q(z|x,u)} [ log p(x|z) + log p(z|u) - log q(z|x,u) ],
+
+with ``p(z|u) = N(z; 0, diag(exp(2 * logl(u))))`` and a fixed Gaussian decoder
+variance. Training minimises ``-ELBO``; :meth:`IVAEOfficial.loss` returns that
+negative ELBO (plus separate ``recon``/``kl`` terms), because
+:class:`~gcmts.core.trainer.SimpleTrainer` minimises the reported ``loss``.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 
 import torch
 import torch.nn.functional as F
@@ -19,34 +31,138 @@ from torch import Tensor
 
 from gcmts.causal_representation_learning.base import BaseCausalRepresentationLearner
 from gcmts.typing import AmbiguityClass, Batch, CausalRepresentationOutput
+from gcmts.vendor.ivaE.nets import Normal as NormalDist
 from gcmts.vendor.ivaE.nets import iVAE as IVAECore
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["IVAEOfficial"]
 
+_LOG_2PI = math.log(2.0 * math.pi)
 
-def _aux(context: dict[str, Tensor] | None, batch: int, time: int, dim: int, device: torch.device) -> Tensor:
-    if context is None or "u" not in context or dim <= 1:
-        return torch.zeros(batch * time, max(dim, 1), device=device)
+
+def _gaussian_logpdf(x: Tensor, mean: Tensor, var: Tensor) -> Tensor:
+    """Per-dimension Gaussian log-density.
+
+    This is the official ``nets.Normal.log_pdf(..., reduce=False)`` formula
+    written with scalars instead of the vendored ``Dist`` helpers, so that it is
+    device- and dtype-agnostic (the vendored helpers keep their base
+    distributions on the construction device).
+    """
+    return -0.5 * (_LOG_2PI + var.log() + (x - mean).pow(2) / var)
+
+
+def _check_batch(size: int, batch: int) -> None:
+    if size != batch:
+        raise ValueError(f"context['u'] has {size} rows but the observation batch has {batch}.")
+
+
+def _aux(
+    context: dict[str, Tensor] | None,
+    batch: int,
+    time: int,
+    dim: int,
+    device: torch.device,
+) -> Tensor:
+    """Return the auxiliary variable ``u`` as ``(batch * time, dim)`` floats.
+
+    The benchmark generators store regimes in two equivalent encodings:
+
+    * an already one-hot/soft indicator of width ``dim``, either per trajectory
+      ``(B, dim)`` or per timestep ``(B, T, dim)`` (NP/VAR, CartPole, ...), and
+    * integer labels ``(B,)``, ``(B, 1)`` or ``(B, T)`` (physics, control and
+      linear-process suites).
+
+    Dtype (floating vs integer) decides between the two when the width happens
+    to coincide with ``T``. A one-dimensional auxiliary variable cannot carry
+    regime information (the official prior then has a constant input), so it is
+    encoded as a constant zero column: one-hot encoding a constant label would
+    either be a no-op or crash for label ``1`` with a single class.
+    """
+    dim = max(int(dim), 1)
+    constant = torch.zeros(batch * time, dim, device=device)
+    if context is None or "u" not in context:
+        return constant
     u = context["u"]
-    if u.ndim == 1:
-        u = u.unsqueeze(1).expand(-1, time)
-    elif u.ndim == 2 and u.shape[1] == time:
-        # One integer regime per timestep (physics/control suites).
-        u = F.one_hot(u.long(), num_classes=dim).to(torch.float32)
-    elif u.ndim == 2 and u.shape[1] == 1:
-        u = u.expand(-1, time)
-        u = F.one_hot(u.long().squeeze(1), num_classes=dim).to(torch.float32)
-    elif u.ndim == 2:
-        u = u.unsqueeze(1).expand(-1, time, -1)
-    elif u.ndim == 3 and u.shape[-1] == 1:
-        u = F.one_hot(u.long().squeeze(-1), num_classes=dim).to(torch.float32)
-    return u.reshape(batch * time, -1).to(device=device, dtype=torch.float32)
+    if u.ndim == 0:
+        u = u.reshape(1, 1)
+    if dim == 1:
+        _check_batch(int(u.shape[0]), batch)
+        return constant
+    if u.dtype.is_floating_point and u.shape[-1] == dim:
+        # Already encoded (one-hot or soft) auxiliary vector.
+        if u.ndim == 2:
+            u = u.unsqueeze(1).expand(-1, time, -1)
+        elif u.ndim == 3:
+            if u.shape[1] == 1:
+                u = u.expand(-1, time, -1)
+            elif u.shape[1] != time:
+                raise ValueError(
+                    f"context['u'] has {u.shape[1]} timesteps but the observation batch has {time}."
+                )
+        else:
+            raise ValueError(
+                "context['u'] must be (B, aux_dim), (B, T, aux_dim), (B,), "
+                f"(B, 1) or (B, T); got shape {tuple(u.shape)}."
+            )
+        _check_batch(int(u.shape[0]), batch)
+        return u.reshape(batch * time, dim).to(device=device, dtype=torch.float32)
+
+    # Integer regime labels, possibly with a trailing singleton dimension.
+    labels = u
+    if labels.ndim == 3 and labels.shape[-1] == 1:
+        labels = labels.squeeze(-1)
+    if labels.ndim == 2 and labels.shape[1] == 1:
+        labels = labels.expand(-1, time)
+    if labels.ndim == 1:
+        labels = labels.unsqueeze(1).expand(-1, time)
+    if labels.ndim != 2 or labels.shape[1] != time:
+        raise ValueError(
+            "context['u'] must be (B, aux_dim), (B, T, aux_dim), (B,), "
+            f"(B, 1) or (B, T); got shape {tuple(u.shape)}."
+        )
+    if labels.dtype.is_floating_point:
+        if not bool(torch.allclose(labels, labels.round())):
+            raise ValueError(
+                "context['u'] is floating point but neither one-hot with width "
+                f"aux_dim={dim} nor integer-valued: shape {tuple(u.shape)}."
+            )
+        labels = labels.round()
+    labels = labels.long()
+    if labels.numel() and (int(labels.min()) < 0 or int(labels.max()) >= dim):
+        raise ValueError(
+            f"regime labels must lie in [0, {dim}); got [{int(labels.min())}, {int(labels.max())}]."
+        )
+    _check_batch(int(labels.shape[0]), batch)
+    return (
+        F.one_hot(labels, num_classes=dim)
+        .to(device=device, dtype=torch.float32)
+        .reshape(batch * time, dim)
+    )
 
 
 class IVAEOfficial(BaseCausalRepresentationLearner):
-    """Interface around the official iVAE model."""
+    """Interface around the official iVAE model.
+
+    Args:
+        observed_dim: dimension ``D`` of ``x`` (``C*H*W`` for rendered images).
+        latent_dim: dimension ``d`` of ``z``.
+        u_dim: width of the one-hot regime encoding (0/1 = unconditional VAE).
+        hidden_dim: width of every hidden layer of the official MLPs.
+        n_layers: number of linear layers in the official MLPs.
+        activation: official activation (``"lrelu"``, ``"xtanh"``, ``"sigmoid"``).
+        decoder_var: fixed variance of the official Gaussian decoder.
+        obs_noise: optional observation-noise *standard deviation*; when given it
+            overrides ``decoder_var`` with ``obs_noise ** 2`` (matching the
+            ``obs_noise`` argument of the repository's :class:`IVAE` adapter).
+        x_scale: multiplicative rescaling applied to the encoder input.
+        kl_weight: weight of the KL term (1.0 = the official ELBO). The shared
+            trainer may anneal this value as a beta warm-up.
+        decoder_clip: hard bound on the decoder mean in scaled observation space
+            (numerical guard; the official model has none).
+        image_shape / image_feature_dim: shared CNN feature encoder for rendered
+            observations.
+    """
 
     def __init__(
         self,
@@ -63,11 +179,12 @@ class IVAEOfficial(BaseCausalRepresentationLearner):
         hidden_dims: tuple[int, ...] = (128, 128),
         decoder_hidden: tuple[int, ...] = (128, 128),
         kl_weight: float = 1.0,
-        obs_noise: float = 1.0,
+        obs_noise: float | None = None,
+        decoder_clip: float = 20.0,
         image_shape: tuple[int, int, int] | None = None,
         image_feature_dim: int = 64,
     ) -> None:
-        del hidden_dims, decoder_hidden, kl_weight, obs_noise
+        del hidden_dims, decoder_hidden
         super().__init__(
             observed_dim=observed_dim,
             latent_dim=latent_dim,
@@ -75,8 +192,18 @@ class IVAEOfficial(BaseCausalRepresentationLearner):
             image_shape=image_shape,
             image_feature_dim=image_feature_dim,
         )
+        if obs_noise is not None:
+            if obs_noise <= 0:
+                raise ValueError("obs_noise must be positive.")
+            decoder_var = float(obs_noise) ** 2
+        if decoder_var <= 0:
+            raise ValueError("decoder_var must be positive.")
+        if x_scale <= 0:
+            raise ValueError("x_scale must be positive.")
         self.n_aux = max(int(u_dim), 1)
         self.x_scale = float(x_scale)
+        self.kl_weight: float = float(kl_weight)
+        self.decoder_clip = float(decoder_clip)
         self.trainer_lr = float(lr)
         self.core = IVAECore(
             latent_dim=latent_dim,
@@ -87,21 +214,40 @@ class IVAEOfficial(BaseCausalRepresentationLearner):
             activation=str(activation),
             device="cpu",
         )
-        self.core.decoder_var = torch.tensor(float(decoder_var))
+        # The official module keeps the prior mean and decoder variance as plain
+        # tensors: they would stay on the construction device and would not be
+        # saved in the state dict. Registering them as buffers of the wrapped
+        # module makes them follow ``.to()``/``.float()`` and checkpoints.
+        del self.core.prior_mean
+        del self.core.decoder_var
+        self.core.register_buffer("prior_mean", torch.zeros(1))
+        self.core.register_buffer("decoder_var", torch.tensor(float(decoder_var)))
 
-    def to(self, *args, **kwargs):
-        """Move the official iVAE plain-tensor distribution state with the module."""
-        result = super().to(*args, **kwargs)
-        device = next(self.parameters()).device
-        self.core.prior_mean = self.core.prior_mean.to(device)
-        self.core.decoder_var = self.core.decoder_var.to(device)
-        for dist in (self.core.prior_dist, self.core.decoder_dist, self.core.encoder_dist):
-            dist.device = device
-            dist.c = dist.c.to(device)
-            dist._dist = type(dist._dist)(
-                torch.zeros(1, device=device), torch.ones(1, device=device)
-            )
-        return result
+    def _apply(self, fn, recurse: bool = True):  # type: ignore[no-untyped-def]
+        """Move the wrapped module's plain distribution helpers with the model.
+
+        The vendored iVAE keeps its three ``Dist`` helpers as plain Python
+        objects, so ``nn.Module._apply`` cannot move them; without this the
+        official ``sample``/``log_pdf`` helpers would draw CPU noise (or fail on
+        a dtype change). This adapter evaluates log-densities directly, but the
+        wrapped ``core.forward``/``core.elbo`` remain usable after a move.
+        """
+        module = super()._apply(fn, recurse=recurse)
+        reference = next(module.parameters())
+        with torch.no_grad():
+            for dist in (
+                module.core.prior_dist,
+                module.core.decoder_dist,
+                module.core.encoder_dist,
+            ):
+                dist.device = reference.device
+                if hasattr(dist, "c"):
+                    dist.c = fn(dist.c).detach()
+                if isinstance(dist, NormalDist):
+                    zeros = fn(torch.zeros(1)).detach()
+                    ones = fn(torch.ones(1)).detach()
+                    dist._dist = type(dist._dist)(zeros, ones)
+        return module
 
     def _obs(self, x: Tensor) -> Tensor:
         if self.image_shape is None:
@@ -109,11 +255,25 @@ class IVAEOfficial(BaseCausalRepresentationLearner):
         features, (batch, time) = self.observation_features(x)
         return features.reshape(batch, time, -1)
 
-    def _flat(self, x: Tensor, context: dict[str, Tensor] | None) -> tuple[Tensor, Tensor, int, int]:
+    def _flat(
+        self, x: Tensor, context: dict[str, Tensor] | None
+    ) -> tuple[Tensor, Tensor, int, int]:
         obs = self._obs(x)
         batch, time, dim = obs.shape
-        flat = obs.reshape(batch * time, dim) * self.x_scale
-        return flat, _aux(context, batch, time, self.n_aux, obs.device), batch, time
+        flat = obs.reshape(batch * time, dim).to(self.core.prior_mean.dtype) * self.x_scale
+        u = _aux(context, batch, time, self.n_aux, flat.device).to(dtype=flat.dtype)
+        return flat, u, batch, time
+
+    def _sample(self, mean: Tensor, var: Tensor) -> Tensor:
+        """Official reparameterisation ``z = g + sqrt(v) * eps``.
+
+        ``torch.randn_like`` replaces the vendored ``Normal.sample`` so the noise
+        follows the parameters' device and dtype (autocast included).
+        """
+        z = mean + var.sqrt() * torch.randn_like(mean)
+        # Numerical guard: the official implementation leaves z unbounded, which
+        # can overflow the Gaussian log-density when the encoder variance drifts.
+        return z.clamp(-8.0, 8.0)
 
     def encode(self, x: Tensor, context: dict[str, Tensor] | None = None) -> Tensor:
         flat, u, batch, time = self._flat(x, context)
@@ -121,39 +281,55 @@ class IVAEOfficial(BaseCausalRepresentationLearner):
         return mean.reshape(batch, time, self.latent_dim)
 
     def decode(self, z: Tensor) -> Tensor:
-        flat = z.reshape(-1, z.shape[-1])
-        rec = self.core.f(flat)
-        return rec.reshape(z.shape[0], z.shape[1], -1)
+        flat = z.reshape(-1, z.shape[-1]).to(self.core.prior_mean.dtype)
+        rec = self.core.f(flat).clamp(-self.decoder_clip, self.decoder_clip)
+        return (rec / self.x_scale).reshape(z.shape[0], z.shape[1], -1)
 
     def forward(self, batch: Batch) -> CausalRepresentationOutput:
         flat, u, b, t = self._flat(batch.x, batch.context)
-        decoder_params, (mean, logvar), z, prior = self.core.forward(flat, u)
-        rec = self.core.f(z).clamp(-20.0, 20.0)
-        if self.image_shape is None:
-            rec = rec / self.x_scale
-            rec = rec.reshape(b, t, self.observed_dim)
-        else:
-            rec = rec.reshape(b, t, -1)
+        mean, var = self.core.encoder_params(flat, u)
+        z = self._sample(mean, var)
+        decoder_mean, decoder_var = self.core.decoder_params(z)
+        decoder_mean = decoder_mean.clamp(-self.decoder_clip, self.decoder_clip)
+        prior_mean, prior_var = self.core.prior_params(u)
+        # The official ELBO, kept as per-sample sums so that ``loss`` can report
+        # the exact same objective it differentiates (no second sampling pass).
+        log_px = _gaussian_logpdf(flat, decoder_mean, decoder_var).sum(dim=-1)
+        log_q = _gaussian_logpdf(z, mean, var).sum(dim=-1)
+        log_p = _gaussian_logpdf(z, prior_mean, prior_var).sum(dim=-1)
         return CausalRepresentationOutput(
             z=z.reshape(b, t, self.latent_dim),
-            x_recon=rec,
-            extras={"mean": mean.reshape(b, t, self.latent_dim), "logvar": logvar.reshape(b, t, self.latent_dim)},
+            x_recon=(decoder_mean / self.x_scale).reshape(b, t, -1),
+            log_prob=log_p.reshape(b, t),
+            extras={
+                "mean": mean.reshape(b, t, self.latent_dim),
+                # The official encoder head is a variance; report its log.
+                "logvar": var.log().reshape(b, t, self.latent_dim),
+                "log_px": log_px,
+                "log_q": log_q,
+                "log_p": log_p,
+            },
         )
 
     def loss(self, outputs: CausalRepresentationOutput, batch: Batch) -> dict[str, Tensor]:
-        flat, u, _, _ = self._flat(batch.x, batch.context)
-        prior_params = self.core.prior_params(u)
-        g, v = self.core.encoder_params(flat, u)
-        z = self.core.encoder_dist.sample(g, v).clamp(-8.0, 8.0)
-        decoder_params = self.core.decoder_params(z)
-        decoder_mean = decoder_params[0].clamp(-10.0, 10.0)
-        log_px_z = self.core.decoder_dist.log_pdf(flat, decoder_mean, decoder_params[1])
-        log_qz_xu = self.core.encoder_dist.log_pdf(z, g, v)
-        log_pz_u = self.core.prior_dist.log_pdf(z, *prior_params)
-        elbo = (log_px_z + log_pz_u - log_qz_xu).mean()
-        return {"loss": elbo, "recon": torch.zeros((), device=elbo.device)}
+        """Negative official ELBO, decomposed into reconstruction and KL terms.
+
+        ``loss = recon + kl_weight * kl`` with ``recon = -E[log p(x|z)]`` and
+        ``kl = E[log q(z|x,u) - log p(z|u)]``, i.e. exactly the official
+        objective (up to the KL weight) with the sign expected by a minimiser.
+        """
+        if outputs.extras is None or "log_px" not in outputs.extras:
+            raise ValueError("IVAEOfficial.forward did not return the ELBO terms.")
+        log_px = outputs.extras["log_px"]
+        log_q = outputs.extras["log_q"]
+        log_p = outputs.extras["log_p"]
+        recon = -log_px.mean()
+        kl = (log_q - log_p).mean()
+        total = recon + self.kl_weight * kl
+        return {"loss": total, "recon": recon, "kl": kl}
 
     def transition(self, z_past: Tensor, context: dict[str, Tensor] | None = None) -> Tensor:
+        """The prior is static, so the one-step mean is the identity."""
         return z_past[:, -1]
 
     def get_latent_adjacency(self) -> Tensor | None:

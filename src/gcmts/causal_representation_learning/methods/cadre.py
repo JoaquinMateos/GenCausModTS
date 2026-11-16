@@ -36,6 +36,16 @@ Simplifications relative to the paper:
 * Gaussian residual densities replace the paper's learned flow densities;
 * the decoder is a plain MLP (the base class still supplies
   ``observation_features`` for rendered-image inputs).
+
+Known property of the objective: because the latent prior is a triangular
+*conditional* ``p(z_i | z_<i, z_{t-1}, u)`` with unit-variance innovations, a
+latent that is an (almost) deterministic copy of another latent is not
+penalised by the ELBO -- its residual is predictable and its innovation term is
+small.  The model can therefore settle in a redundant solution (several
+near-duplicate latents plus a dead one) when the KL weights are small relative
+to the reconstruction term.  Such a solution scores a high MCC after Hungarian
+matching while ``R^2_diag`` and ``R^2_sep`` become almost equal, so the two
+metrics must be read together.
 """
 
 from __future__ import annotations
@@ -178,9 +188,33 @@ class CaDRe(BaseCausalRepresentationLearner):
     def _condition(x: Tensor, u: Tensor | None) -> Tensor:
         return x if u is None else torch.cat([x, u], dim=-1)
 
+    def _context(self, context: dict[str, Tensor] | None, n: int) -> Tensor | None:
+        """Return the ``(n, u_dim)`` conditional context, or ``None``.
+
+        ``u_dim=0`` builds an unconditional model, so a context carried by the
+        batch (benchmark generators always attach ``u``) must not be appended to
+        the encoder input.  A float context whose width disagrees with ``u_dim``
+        would otherwise surface as an opaque matrix-shape error inside the
+        encoder, so it is reported here instead.
+        """
+        if self.u_dim <= 0:
+            return None
+        u = prepare_context(context, n, n_classes=self.u_dim)
+        if u is None:
+            raise ValueError(
+                f"CaDRe was built with u_dim={self.u_dim} but the batch carries no "
+                "'u' context; build it with u_dim=0 for the unconditional model."
+            )
+        if u.shape[-1] != self.u_dim:
+            raise ValueError(
+                f"Context 'u' has width {u.shape[-1]} but CaDRe was built with "
+                f"u_dim={self.u_dim}."
+            )
+        return u
+
     def encode(self, x: Tensor, context: dict[str, Tensor] | None = None) -> Tensor:
         x_flat, (batch, time) = self.observation_features(x)
-        u = prepare_context(context, x_flat.shape[0], n_classes=self.u_dim)
+        u = self._context(context, x_flat.shape[0])
         mean, _ = self.z_encoder(self._condition(x_flat, u))
         return unflatten_sequence(mean, batch, time)
 
@@ -320,7 +354,7 @@ class CaDRe(BaseCausalRepresentationLearner):
     # ------------------------------------------------------------------
     def forward(self, batch: Batch) -> CausalRepresentationOutput:
         x_flat, (batch_size, time) = self.observation_features(batch.x)
-        u_flat = prepare_context(batch.context, x_flat.shape[0], n_classes=self.u_dim)
+        u_flat = self._context(batch.context, x_flat.shape[0])
         z_mean, z_logvar = self.z_encoder(self._condition(x_flat, u_flat))
         z = reparameterise(z_mean, z_logvar)
         s_mean, s_logvar = self.s_encoder(x_flat)
@@ -439,12 +473,10 @@ class CaDRe(BaseCausalRepresentationLearner):
     # transition / graph getters
     # ------------------------------------------------------------------
     def _transition_context(self, context: dict[str, Tensor] | None, batch: int) -> Tensor | None:
-        if context is None or "u" not in context:
-            return None
-        value = context["u"]
-        if value.ndim == 3:
+        value = None if context is None else context.get("u")
+        if value is not None and value.ndim == 3:
             value = value[:, -1]
-        return prepare_context({"u": value}, batch, n_classes=self.u_dim)
+        return self._context(None if value is None else {"u": value}, batch)
 
     def transition(self, z_past: Tensor, context: dict[str, Tensor] | None = None) -> Tensor:
         """One-step mean of the residual mechanism, solved in causal order.

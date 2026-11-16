@@ -47,8 +47,7 @@ from gcmts.causal_representation_learning.methods import (
 from gcmts.core import SimpleTrainer, move_batch, save_training_report
 from gcmts.core.graph_ops import (
     edge_auprc,
-    estimate_instantaneous_adjacency,
-    estimate_latent_adjacency,
+    estimate_latent_structure,
     latent_permutation,
 )
 from gcmts.core.graph_ops import (
@@ -78,7 +77,7 @@ from gcmts.data.synthetic_store import dataset_path, load_dataset, non_finite_fi
 from gcmts.data.voronoi import VoronoiGenerator
 from gcmts.evaluation import BenchmarkTask, CrlBenchmarkRunner
 from gcmts.evaluation.benchmarks import EMA_DECAY, crl_label
-from gcmts.evaluation.metrics import SHDMetric, TripletDistanceMetric
+from gcmts.evaluation.metrics import TripletDistanceMetric
 from gcmts.evaluation.progress import ProgressTracker
 from gcmts.evaluation.report import (
     aggregate_rows,
@@ -443,12 +442,12 @@ def build_methods(suite: Suite, *, epochs_scale: float = 1.0) -> list[MethodSpec
     methods = [
         (
             "iVAE",
-            lambda: IVAE(
+            lambda: IVAEOfficial(
                 observed_dim=D,
                 latent_dim=d,
                 u_dim=u,
-                obs_noise=0.1,
                 image_shape=image,
+                **_hp("iVAE"),
             ),
             common_epochs,
         ),
@@ -1008,28 +1007,27 @@ def _run(
             else torch.arange(z_pred.shape[-1], device=z_pred.device)
         )
         # Align the latents before fitting the instantaneous graph: the
-        # same-time estimator assumes the causal order j < i, so estimating in
-        # the predicted order and permuting afterwards is not equivalent.
+        # same-time block assumes the causal order j < i, so estimating in the
+        # predicted order and permuting afterwards is not equivalent.
         z_aligned = z_pred[..., perm.to(z_pred.device)]
-        adj_est = estimate_latent_adjacency(z_aligned, max_lag=max_lag)
+        interventions = None
+        if batch.context is not None:
+            interventions = batch.context.get("I")
+        # One joint conditional fit recovers both the lagged and same-time
+        # blocks.  The joint fit avoids the omitted-variable bias that makes a
+        # lag-only estimate attribute instantaneous effects to lagged parents.
+        adj_est, inst_est = estimate_latent_structure(
+            z_aligned,
+            max_lag=max_lag,
+            interventions=interventions,
+        )
         adjacency = batch.adjacency[..., -max_lag:].to(adj_est.device)
-        # The latents are already aligned by the correlation-based Hungarian
-        # assignment, so do not re-optimise the permutation against the true
-        # graph inside the metric.
-        shd = SHDMetric(aligned=False)(adj_est, adjacency).value
+        shd = float(plain_shd(adj_est, adjacency))
         auprc = edge_auprc(adj_est, adjacency)
         if batch.instantaneous_adjacency is not None:
-            # Interventional benchmarks (Voronoi/Causal Pinball) also contain
-            # same-time edges.  Estimate them in the aligned causal order and
-            # add them to the structural score so SHD/AUPRC are not silently
-            # restricted to the lagged subgraph.
-            inst_est = estimate_instantaneous_adjacency(z_aligned, max_lag=max_lag)
             inst_est = inst_est.to(adj_est.device)
             inst_true = batch.instantaneous_adjacency.to(adj_est.device)
-            shd = float(shd) + float(plain_shd(inst_est, inst_true))
-            # Average the two threshold-free rankings instead of concatenating
-            # raw coefficients: instantaneous and lagged blocks have different
-            # scales, so a concatenated AUPRC would be dominated by one block.
+            shd += float(plain_shd(inst_est, inst_true))
             auprc_lag = edge_auprc(adj_est, adjacency)
             auprc_inst = edge_auprc(inst_est, inst_true)
             auprc = float(np.nanmean([auprc_lag, auprc_inst]))
