@@ -77,7 +77,7 @@ from gcmts.data.synthetic_store import dataset_path, load_dataset, non_finite_fi
 from gcmts.data.voronoi import VoronoiGenerator
 from gcmts.evaluation import BenchmarkTask, CrlBenchmarkRunner
 from gcmts.evaluation.benchmarks import EMA_DECAY, crl_label
-from gcmts.evaluation.metrics import TripletDistanceMetric
+from gcmts.evaluation.metrics import R2SepMetric, TripletDistanceMetric
 from gcmts.evaluation.progress import ProgressTracker
 from gcmts.evaluation.report import (
     aggregate_rows,
@@ -772,6 +772,24 @@ class Row:
     seconds: float
     auprc: float | None = None
     w2: float | None = None
+    r2_sep_oracle: float | None = None
+    r2_sep_excess: float | None = None
+    latent_redundancy: float | None = None
+
+
+def _latent_redundancy(z: Tensor | None) -> float | None:
+    """Mean absolute off-diagonal correlation between learned latents."""
+    if z is None or z.shape[-1] < 2:
+        return None
+    flat = z.reshape(-1, z.shape[-1])
+    flat = flat - flat.mean(dim=0, keepdim=True)
+    scale = flat.std(dim=0, keepdim=True).clamp_min(1e-8)
+    corr = (flat.T @ flat) / max(1, flat.shape[0] - 1) / (scale.T @ scale)
+    dim = corr.shape[0]
+    if dim < 2:
+        return None
+    off_diag = corr - torch.diag(torch.diagonal(corr))
+    return float(off_diag.abs().sum() / (dim * (dim - 1)))
 
 
 def _slice_context(context: Any, time: int, new_time: int) -> dict[str, Any]:
@@ -993,11 +1011,17 @@ def _run(
     )
     result = CrlBenchmarkRunner().run(task)
     scores = {m.name: m.value for m in result.metrics}
+    with torch.no_grad():
+        z_pred = model.encode(batch.x, batch.context)
+    r2_sep_oracle: float | None = None
+    r2_sep_excess: float | None = None
+    latent_redundancy = _latent_redundancy(z_pred)
+    if batch.z is not None:
+        r2_sep_oracle = float(R2SepMetric()(batch.z, batch.z).value)
+        r2_sep_excess = float(scores["r2_sep"] - r2_sep_oracle)
     shd: float | None = None
     auprc: float | None = None
     if batch.adjacency is not None:
-        with torch.no_grad():
-            z_pred = model.encode(batch.x, batch.context)
         max_lag = max_lag_override if max_lag_override is not None else int(
             getattr(source, "max_lag", 1)
         )
@@ -1050,6 +1074,9 @@ def _run(
         forecast4=forecast4,
         seconds=seconds,
         auprc=auprc,
+        r2_sep_oracle=r2_sep_oracle,
+        r2_sep_excess=r2_sep_excess,
+        latent_redundancy=latent_redundancy,
     )
 
 
