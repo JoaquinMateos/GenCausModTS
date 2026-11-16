@@ -35,9 +35,14 @@ from gcmts.causal_representation_learning.methods import (
     CHiLD,
     SlowFlows,
     iCITRIS,
+    IVAEOfficial,
+    LEAPOfficial,
+    NCTRLOfficial,
+    MOSAICOfficial,
+    TDRLOfficial,
 )
 from gcmts.core import SimpleTrainer, move_batch, save_training_report
-from gcmts.core.graph_ops import estimate_latent_adjacency, latent_permutation
+from gcmts.core.graph_ops import estimate_latent_structure, latent_permutation, shd as plain_shd
 from gcmts.data.hierarchical import HierarchicalTemporalGenerator
 from gcmts.data.synthetic import (
     InterventionalTemporalGenerator,
@@ -107,7 +112,7 @@ def build_cases(quick: bool) -> list[CaseConfig]:
     cases = [
         CaseConfig(
             name="ivae_linear",
-            model_factory=lambda: IVAE(observed_dim=5, latent_dim=3, u_dim=10, obs_noise=0.05),
+            model_factory=lambda: IVAEOfficial(observed_dim=5, latent_dim=3, u_dim=10, obs_noise=0.05),
             generator_factory=lambda seed: NonlinearICAGenerator(
                 observed_dim=5, latent_dim=3, horizon=1, n_regimes=10, mixing="linear", seed=seed
             ),
@@ -116,7 +121,7 @@ def build_cases(quick: bool) -> list[CaseConfig]:
         ),
         CaseConfig(
             name="ivae_nonlinear",
-            model_factory=lambda: IVAE(observed_dim=5, latent_dim=3, u_dim=10, obs_noise=0.05),
+            model_factory=lambda: IVAEOfficial(observed_dim=5, latent_dim=3, u_dim=10, obs_noise=0.05),
             generator_factory=lambda seed: NonlinearICAGenerator(
                 observed_dim=5, latent_dim=3, horizon=1, n_regimes=10, mixing="nonlinear", seed=seed
             ),
@@ -125,8 +130,8 @@ def build_cases(quick: bool) -> list[CaseConfig]:
         ),
         CaseConfig(
             name="leap_temporal",
-            model_factory=lambda: LEAP(
-                observed_dim=6, latent_dim=3, max_lag=1, u_dim=4, kl_weight=0.01, obs_noise=0.1
+            model_factory=lambda: LEAPOfficial(
+                observed_dim=6, latent_dim=3, max_lag=1, u_dim=4, length=16
             ),
             generator_factory=lambda seed: TemporalNonlinearGenerator(
                 observed_dim=6,
@@ -183,14 +188,12 @@ def build_cases(quick: bool) -> list[CaseConfig]:
         ),
         CaseConfig(
             name="tdrl_modular",
-            model_factory=lambda: TDRL(
+            model_factory=lambda: TDRLOfficial(
                 observed_dim=6,
                 latent_fix_dim=1,
                 latent_dyn_dim=2,
                 latent_obs_dim=1,
                 u_dim=3,
-                kl_weight=0.01,
-                obs_noise=0.1,
             ),
             generator_factory=lambda seed: TDRLGenerator(
                 observed_dim=6,
@@ -206,8 +209,8 @@ def build_cases(quick: bool) -> list[CaseConfig]:
         ),
         CaseConfig(
             name="nctrl_regimes",
-            model_factory=lambda: NCTRL(
-                observed_dim=6, latent_dim=3, n_regimes=3, kl_weight=0.01, obs_noise=0.1
+            model_factory=lambda: NCTRLOfficial(
+                observed_dim=6, latent_dim=3, n_regimes=3
             ),
             generator_factory=lambda seed: NCTRLGenerator(
                 observed_dim=6, latent_dim=3, horizon=16, n_regimes=3, seed=seed
@@ -217,8 +220,8 @@ def build_cases(quick: bool) -> list[CaseConfig]:
         ),
         CaseConfig(
             name="mosaic_modules",
-            model_factory=lambda: MOSAIC(
-                observed_dim=5, latent_dim=3, u_dim=2, kl_weight=0.1, obs_noise=0.1
+            model_factory=lambda: MOSAICOfficial(
+                observed_dim=5, latent_dim=3, u_dim=2
             ),
             generator_factory=lambda seed: TemporalNonlinearGenerator(
                 observed_dim=5,
@@ -386,17 +389,25 @@ def run_case(
         adj_true = eval_batch.adjacency
         if adj_true is not None:
             max_lag = int(getattr(generator, "max_lag", 1))
-            native = model.get_latent_adjacency()
-            if native is not None and tuple(native.shape) == tuple(adj_true.shape):
-                adj_est = native
+            perm = (
+                latent_permutation(z_pred, eval_batch.z)
+                if eval_batch.z is not None and z_pred.shape[-1] == eval_batch.z.shape[-1]
+                else torch.arange(z_pred.shape[-1], device=z_pred.device)
+            )
+            z_aligned = z_pred[..., perm.to(z_pred.device)]
+            interventions = (
+                eval_batch.context.get("I") if eval_batch.context is not None else None
+            )
+            adj_est, inst_est = estimate_latent_structure(
+                z_aligned, max_lag=max_lag, interventions=interventions
+            )
+            if eval_batch.instantaneous_adjacency is not None:
+                inst_true = eval_batch.instantaneous_adjacency
+                shd_value = float(plain_shd(adj_est, adj_true)) + float(
+                    plain_shd(inst_est, inst_true)
+                )
             else:
-                adj_est = estimate_latent_adjacency(z_pred, max_lag=max_lag)
-            if eval_batch.z is not None and adj_est.shape[0] == eval_batch.z.shape[-1]:
-                perm = latent_permutation(z_pred, eval_batch.z)
-                adj_est = adj_est[perm][:, perm]
-            # Hungarian alignment on the correlation matrix (source protocol);
-            # do not additionally optimise the permutation against the graph.
-            shd_value = SHDMetric(aligned=False)(adj_est, adj_true).value
+                shd_value = float(plain_shd(adj_est, adj_true))
             wshd_value = WSHDMetric(aligned=False)(adj_est, adj_true).value
 
         if mcc_value < 0.2:
