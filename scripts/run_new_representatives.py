@@ -146,7 +146,22 @@ def _cadre(device: str, epochs: int, seed: int) -> dict[str, Any]:
     observed_adjacency = model.get_observed_adjacency()
     if latent_adjacency is None:
         raise ValueError("CaDRe did not expose a latent adjacency.")
-    perm = latent_permutation(outputs.z, batch.z).to(latent_adjacency.device)
+    # C2: estimate the latent permutation on a held-out draw (fresh generator
+    # seed), never on the evaluation batch's true latents.
+    alignment = LatentStructuralGenerator(
+        latent_dim=3,
+        observed_dim=6,
+        horizon=16,
+        n_regimes=4,
+        mixing="tanh",
+        seed=seed + 1_000_003,
+    )
+    align_batch = move_batch(alignment.sample(64), resolved)
+    align_outputs = model(align_batch)
+    if align_batch.z is None:
+        perm = torch.arange(align_outputs.z.shape[-1], device=latent_adjacency.device)
+    else:
+        perm = latent_permutation(align_outputs.z, align_batch.z).to(latent_adjacency.device)
     latent_adjacency = latent_adjacency[..., :][perm][:, perm]
     return {
         "seconds": seconds,

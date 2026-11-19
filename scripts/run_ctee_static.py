@@ -60,6 +60,7 @@ from gcmts.evaluation.metrics import PolicyRiskMetric
 from gcmts.evaluation.progress import ProgressTracker
 from gcmts.evaluation.report import (
     aggregate_rows,
+    atomic_write_text,
     guard_resume,
     load_rows,
     save_rows,
@@ -453,8 +454,10 @@ def _report_stats(rows: list[dict[str, Any]], out_dir: Path, dataset: str) -> No
                 comparison.p_holm,
                 " *" if comparison.significant else "",
             )
-    (out_dir / f"ctee_static_{dataset}_stats.json").write_text(
-        json.dumps(summary, indent=2), encoding="utf-8"
+    atomic_write_text(
+        out_dir / f"ctee_static_{dataset}_stats.json",
+        json.dumps(summary, indent=2),
+        backup=True,
     )
 
 

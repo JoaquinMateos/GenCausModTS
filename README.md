@@ -646,8 +646,14 @@ failure was caused by `GCMTS_LIGHT_BATCH=1` dropping the `outcome` tensor that
 
 ```bash
 uv run python scripts/make_paper_tables.py \
-    --shared-dir outputs_shared --outputs-dir outputs --latex-dir ../latex
+    --shared-dir outputs_shared --grid-dir outputs_shared \
+    --outputs-dir outputs --latex-dir ../latex --allow-mixed
 ```
+
+Table generation refuses to write unless every declared source run finished
+cleanly (`--require-finished`, the default); pass `--allow-partial` to build a
+stamped PARTIAL table from an unfinished tree. Every generated `.tex` starts
+with a provenance header naming its source directories and code revision.
 
 ---
 

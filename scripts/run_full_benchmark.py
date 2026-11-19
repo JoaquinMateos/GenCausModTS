@@ -274,8 +274,15 @@ def build_steps(args: argparse.Namespace) -> list[Step]:
     steps.append(
         Step(
             "Regenerate LaTeX tables",
-            [py, "scripts/make_paper_tables.py", "--shared-dir", "outputs_shared",
-             "--outputs-dir", "outputs", "--latex-dir", "../latex"],
+            [py, "scripts/make_paper_tables.py",
+             "--shared-dir", "outputs_shared",
+             "--grid-dir", "outputs_shared",
+             "--grid-stems",
+             ",".join(_GRID_SHARD_STEMS[args.grid_shards]) if args.with_grid else "",
+             "--outputs-dir", "outputs",
+             "--latex-dir", "../latex",
+             "--seeds", str(seeds),
+             "--allow-mixed"],
             barrier=True,
         )
     )

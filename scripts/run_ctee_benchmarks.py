@@ -42,6 +42,7 @@ from gcmts.evaluation.metrics import (
 from gcmts.evaluation.progress import ProgressTracker
 from gcmts.evaluation.report import (
     aggregate_rows,
+    atomic_write_text,
     guard_resume,
     load_rows,
     save_rows,
@@ -364,7 +365,9 @@ def _report_stats(rows: list[dict[str, Any]], out_dir: Path) -> None:
                 comparison.p_holm,
                 " *" if comparison.significant else "",
             )
-    (out_dir / "ctee_stats.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    atomic_write_text(
+        out_dir / "ctee_stats.json", json.dumps(summary, indent=2), backup=True
+    )
 
 
 def main() -> int:

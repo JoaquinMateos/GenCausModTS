@@ -133,7 +133,8 @@ uv run --no-sync python scripts/statds_report.py --outputs outputs \
 uv run --no-sync python scripts/reference_floors.py --outputs outputs \
   > docs/reference_floors.md
 uv run --no-sync python scripts/make_paper_tables.py --shared-dir outputs_shared \
-  --outputs-dir outputs --latex-dir ../latex
+  --grid-dir outputs_shared --outputs-dir outputs --latex-dir ../latex \
+  --seeds 10 --allow-mixed
 
 echo
 echo "Done. Audit: docs/audit_${STAMP}.md (must report FAIL=0)."

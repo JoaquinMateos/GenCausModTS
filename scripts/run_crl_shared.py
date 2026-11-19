@@ -28,6 +28,7 @@ from typing import Any
 
 import numpy as np
 import torch
+from torch import Tensor
 
 from gcmts.causal_representation_learning.base import BaseCausalRepresentationLearner
 from gcmts.causal_representation_learning.methods import (
@@ -81,6 +82,7 @@ from gcmts.evaluation.metrics import R2SepMetric, TripletDistanceMetric
 from gcmts.evaluation.progress import ProgressTracker
 from gcmts.evaluation.report import (
     aggregate_rows,
+    atomic_write_text,
     guard_resume,
     load_rows,
     save_rows,
@@ -778,18 +780,97 @@ class Row:
 
 
 def _latent_redundancy(z: Tensor | None) -> float | None:
-    """Mean absolute off-diagonal correlation between learned latents."""
+    """Mean absolute off-diagonal Pearson correlation between learned latents.
+
+    The correlation is formed explicitly from the unbiased covariance divided
+    by the outer product of the per-column standard deviations (a scalar sum of
+    variances would be dimensionally wrong and would depend on the scale of
+    each column).  Returns ``None`` for fewer than two latents.
+    """
     if z is None or z.shape[-1] < 2:
         return None
-    flat = z.reshape(-1, z.shape[-1])
+    flat = z.reshape(-1, z.shape[-1]).detach().float()
     flat = flat - flat.mean(dim=0, keepdim=True)
-    scale = flat.std(dim=0, keepdim=True).clamp_min(1e-8)
-    corr = (flat.T @ flat) / max(1, flat.shape[0] - 1) / (scale.T @ scale)
+    count = flat.shape[0]
+    if count < 2:
+        return None
+    std = flat.std(dim=0, unbiased=True)
+    if not bool(torch.isfinite(std).all()) or bool((std <= 1e-8).any()):
+        return None
+    covariance = (flat.T @ flat) / float(count - 1)
+    corr = covariance / torch.outer(std, std)
     dim = corr.shape[0]
     if dim < 2:
         return None
-    off_diag = corr - torch.diag(torch.diagonal(corr))
+    off_diag = corr - torch.diag(torch.diag(corr))
     return float(off_diag.abs().sum() / (dim * (dim - 1)))
+
+
+#: The permutation used to align learned latents for the post-hoc graph fit is
+#: estimated on a *held-out* draw generated with ``seed + offset``.  It must
+#: never be estimated from the evaluation batch (that would let the evaluation
+#: target choose the alignment).
+ALIGNMENT_SEED_OFFSET = 1_000_003
+ALIGNMENT_SAMPLES = 512
+
+
+def _structure_permutation(
+    model: BaseCausalRepresentationLearner,
+    suite: Suite,
+    seed: int,
+    device: torch.device | str,
+    *,
+    eval_dim: int,
+) -> tuple[Tensor, str]:
+    """Permutation mapping true factors to learned coordinates, held-out.
+
+    Draws a fresh batch from ``suite.make_generator(seed + offset)`` — disjoint
+    from the evaluation draw — encodes it and applies the Hungarian assignment
+    of :func:`latent_permutation` on that split only.  When the generator does
+    not expose ground-truth latents the identity ordering is returned, so the
+    structure estimate remains permutation-free rather than borrowing the
+    evaluation targets.
+
+    Returns ``(perm, provenance)``; the provenance string is logged with the
+    run and asserted by the focused tests.
+    """
+    alignment_seed = int(seed) + ALIGNMENT_SEED_OFFSET
+    samples = 64 if suite.image_shape is not None else ALIGNMENT_SAMPLES
+    try:
+        align_batch = move_batch(
+            suite.make_generator(alignment_seed).sample(samples), device
+        )
+    except FileNotFoundError as error:  # pragma: no cover - missing real release
+        logger.warning(
+            "Cannot draw a held-out alignment batch for %s (%s); using the "
+            "identity permutation.",
+            suite.name,
+            error,
+        )
+        return torch.arange(eval_dim, device=device), "identity(missing-data)"
+    if align_batch.z is None:
+        return torch.arange(eval_dim, device=device), "identity(no-latents)"
+    with torch.no_grad():
+        z_align = model.encode(align_batch.x, align_batch.context)
+    if z_align.shape[-1] != align_batch.z.shape[-1]:
+        logger.warning(
+            "Alignment latents (%d) and ground-truth latents (%d) differ in "
+            "dimension for %s; using the identity permutation.",
+            z_align.shape[-1],
+            align_batch.z.shape[-1],
+            suite.name,
+        )
+        return torch.arange(eval_dim, device=device), "identity(dim-mismatch)"
+    if not bool(torch.isfinite(z_align).all()):
+        logger.warning(
+            "Held-out alignment latents for %s are non-finite; using the "
+            "identity permutation.",
+            suite.name,
+        )
+        return torch.arange(eval_dim, device=device), "identity(non-finite)"
+    perm = latent_permutation(z_align, align_batch.z).to(torch.device(device))
+    return perm, f"held-out(seed={alignment_seed},n={samples})"
+
 
 
 def _slice_context(context: Any, time: int, new_time: int) -> dict[str, Any]:
@@ -1025,11 +1106,16 @@ def _run(
         max_lag = max_lag_override if max_lag_override is not None else int(
             getattr(source, "max_lag", 1)
         )
-        perm = (
-            latent_permutation(z_pred, batch.z)
-            if batch.z is not None
-            else torch.arange(z_pred.shape[-1], device=z_pred.device)
+        # C2: the graph permutation is estimated on a held-out draw, never on
+        # the evaluation batch's true latents.
+        perm, perm_provenance = _structure_permutation(
+            model,
+            suite,
+            seed,
+            resolved,
+            eval_dim=z_pred.shape[-1],
         )
+        logger.info("Structure alignment for %s seed=%d: %s", suite.name, seed, perm_provenance)
         # Align the latents before fitting the instantaneous graph: the
         # same-time block assumes the causal order j < i, so estimating in the
         # predicted order and permuting afterwards is not equivalent.
@@ -1153,7 +1239,11 @@ def _report_statistics(
                 posthoc["n_problems"],
             )
         summary[metric] = entry
-    (out_dir / f"{stem}_stats.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    atomic_write_text(
+        out_dir / f"{stem}_stats.json",
+        json.dumps(summary, indent=2),
+        backup=True,
+    )
     return summary
 
 
@@ -1484,62 +1574,97 @@ def run_grid(args: argparse.Namespace) -> int:
         tags=["crl", "grid", stem],
         progress=progress,
     )
-    for seed in range(args.seeds):
-        for config in configs:
-            suite = config.as_suite()
-            methods = build_methods(suite, epochs_scale=args.epochs_scale)
-            if args.only:
-                methods = [m for m in methods if m[0] in set(args.only)]
-            pending = [m for m in methods if (config.name, m[0], seed) not in done]
-            if not pending:
-                continue
-            if args.data_source == "pool":
-                train_data, eval_batch, ds_max_lag = _load_pool(args.dataset_dir, suite.name, seed)
-            else:
-                train_data = eval_batch = ds_max_lag = None
-            for name, factory, epochs in pending:
-                row = _run(
-                    suite,
-                    name,
-                    factory,
-                    epochs,
-                    seed,
-                    args.device,
-                    args.batch_size,
-                    args.out_dir,
-                    save_curves=False,
-                    pool_size=args.pool_size,
-                    train_data=train_data,
-                    eval_batch=eval_batch,
-                    max_lag_override=ds_max_lag,
-                    scheduler=args.scheduler,
-                    early_stopping_patience=args.early_stopping_patience or None,
-                    restore_best_weights=args.restore_best_weights,
-                    amp=args.amp,
-                    ema_decay=args.ema_decay or None,
-                    kl_warmup_epochs=args.kl_warmup_epochs,
-                )
-                row.dataset = config.name
-                rows.append(asdict(row))
-                _log_rows(config.name, name, seed, row)
-                save_rows(rows, args.out_dir, stem=stem)
-                progress.advance()
-                step.log_run(
-                    method=name,
-                    iteration=seed,
-                    params={"config": config.name},
-                    metrics={
-                        "mcc": row.mcc,
-                        "r2_diag": row.r2_diag,
-                        "r2_sep": row.r2_sep,
-                        "dci": row.dci,
-                        "forecast1": row.forecast1,
-                        "forecast4": row.forecast4,
-                    },
-                )
+    failures: list[tuple[str, int, str]] = []
+    try:
+        for seed in range(args.seeds):
+            for config in configs:
+                suite = config.as_suite()
+                methods = build_methods(suite, epochs_scale=args.epochs_scale)
+                if args.only:
+                    methods = [m for m in methods if m[0] in set(args.only)]
+                pending = [m for m in methods if (config.name, m[0], seed) not in done]
+                if not pending:
+                    continue
+                if args.data_source == "pool":
+                    train_data, eval_batch, ds_max_lag = _load_pool(args.dataset_dir, suite.name, seed)
+                else:
+                    train_data = eval_batch = ds_max_lag = None
+                for name, factory, epochs in pending:
+                    try:
+                        row = _run(
+                            suite,
+                            name,
+                            factory,
+                            epochs,
+                            seed,
+                            args.device,
+                            args.batch_size,
+                            args.out_dir,
+                            save_curves=False,
+                            pool_size=args.pool_size,
+                            train_data=train_data,
+                            eval_batch=eval_batch,
+                            max_lag_override=ds_max_lag,
+                            scheduler=args.scheduler,
+                            early_stopping_patience=args.early_stopping_patience or None,
+                            restore_best_weights=args.restore_best_weights,
+                            amp=args.amp,
+                            ema_decay=args.ema_decay or None,
+                            kl_warmup_epochs=args.kl_warmup_epochs,
+                        )
+                    except TrainingDivergedError as error:
+                        # C22: mirror the per-suite runner's divergence guard so
+                        # a diverged grid cell is recorded as a failure instead
+                        # of aborting the whole shard or writing NaNs.
+                        logger.error(
+                            "FAILED %s/%s seed=%d: %s", config.name, name, seed, error
+                        )
+                        failures.append((f"{config.name}/{name}", seed, str(error)))
+                        progress.fail()
+                        continue
+                    if not _has_finite_metric(row):
+                        message = "every benchmark metric is non-finite"
+                        logger.error(
+                            "FAILED %s/%s seed=%d: %s", config.name, name, seed, message
+                        )
+                        failures.append((f"{config.name}/{name}", seed, message))
+                        progress.fail()
+                        continue
+                    row.dataset = config.name
+                    rows.append(asdict(row))
+                    _log_rows(config.name, name, seed, row)
+                    save_rows(rows, args.out_dir, stem=stem)
+                    progress.advance()
+                    step.log_run(
+                        method=name,
+                        iteration=seed,
+                        params={"config": config.name},
+                        metrics={
+                            "mcc": row.mcc,
+                            "r2_diag": row.r2_diag,
+                            "r2_sep": row.r2_sep,
+                            "dci": row.dci,
+                            "forecast1": row.forecast1,
+                            "forecast4": row.forecast4,
+                        },
+                    )
+    except Exception:
+        progress.crash()
+        step.close(status="failed")
+        raise
+    save_rows(rows, args.out_dir, stem=stem)
+    if failures:
+        progress.finish(status="failed")
+        step.close(status="failed")
+        logger.error(
+            "%s: %d grid run(s) failed and were not written: %s",
+            stem,
+            len(failures),
+            ", ".join(f"{name}/seed{seed}" for name, seed, _ in failures),
+        )
+        return 1
     progress.finish()
     step.close()
-    save_rows(rows, args.out_dir, stem=stem)
     method_names = [name for name, _, _ in build_methods(configs[0].as_suite())]
     _log_aggregate(rows, method_names, args.seeds)
     _report_statistics(

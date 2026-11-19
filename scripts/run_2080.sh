@@ -72,7 +72,8 @@ uv run --no-sync python scripts/run_full_benchmark.py \
 
 echo "== 6/6 regenerate tables (idempotent; the barrier already did it) =="
 uv run --no-sync python scripts/make_paper_tables.py \
-  --shared-dir outputs_shared --outputs-dir outputs --latex-dir ../latex
+  --shared-dir outputs_shared --grid-dir outputs_shared --outputs-dir outputs \
+  --latex-dir ../latex --seeds "$SEEDS" --allow-mixed
 
 echo
 echo "Done. Artifacts: outputs/, outputs_shared/, ../latex/pic/experiments/*.tex"

@@ -28,6 +28,7 @@ __all__ = [
     "SimpleTrainer",
     "TrainingDivergedError",
     "move_batch",
+    "training_view",
 ]
 
 
@@ -38,6 +39,23 @@ class TrainingDivergedError(RuntimeError):
 #: static--dynamic methods (SYNC/DANN/VREx) also read ``outcome`` and ``domain``.
 #: ``z``, ``adjacency`` and ``counterfactual`` remain evaluation-only.
 TRAIN_BATCH_KEYS = frozenset({"x", "context", "outcome", "domain", "target"})
+
+
+def training_view(batch: Batch) -> Batch:
+    """Return a shallow copy of ``batch`` without evaluation-only ground truth.
+
+    Training and validation losses are model-selection signals and must not see
+    the unobserved potential outcome.  Generators emit ``counterfactual`` in
+    the same :class:`Batch` for metric computation, so the trainer removes it
+    before ``forward``/``loss``.  This is the structural half of the GANITE fix
+    (the model also asserts the field is absent); it protects every method that
+    might later be tempted to read it.
+    """
+    from dataclasses import replace
+
+    if batch.counterfactual is None:
+        return batch
+    return replace(batch, counterfactual=None)
 
 
 def _env_flag(name: str) -> bool:
@@ -424,10 +442,12 @@ class SimpleTrainer(BaseTrainer):
             n = data.x.shape[0]
             size = min(self.val_size, n)
             indices = torch.randperm(n, generator=self.generator)[:size]
-            return move_batch(_subset_batch(data, indices), device)
+            return training_view(move_batch(_subset_batch(data, indices), device))
         if hasattr(data, "sample"):
-            return move_batch(cast(Batch, data.sample(self.val_size)), device)
-        return move_batch(next(iter(data)), device)
+            return training_view(
+                move_batch(cast(Batch, data.sample(self.val_size)), device)
+            )
+        return training_view(move_batch(next(iter(data)), device))
 
     def _evaluate(self, model: BaseModel, batch: Batch) -> dict[str, float]:
         was_training = model.training
@@ -527,7 +547,7 @@ class SimpleTrainer(BaseTrainer):
                 terms: dict[str, list[float]] = defaultdict(list)
                 for _ in range(self.steps_per_epoch):
                     with phase("data"):
-                        batch = move_batch(draw(), device, keys=move_keys)
+                        batch = training_view(move_batch(draw(), device, keys=move_keys))
                     with (
                         phase("forward"),
                         torch.autocast(device_type=device.type, enabled=self._use_amp),

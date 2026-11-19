@@ -47,13 +47,22 @@ EMA_DECAY = 0.99
 
 @dataclass(frozen=True)
 class CrlBenchmark:
-    """Paper label, description and evaluation metadata for a CRL benchmark."""
+    """Paper label, description and evaluation metadata for a CRL benchmark.
+
+    ``shd_available`` and ``triplet_available`` are *structural* properties of
+    the benchmark, not run status: when a generator exposes no ground-truth
+    graph (``varma``/``ou``) or no one-to-one intervention targets (every
+    temporal suite except the interventional ones), the corresponding table
+    cell is ``n/a`` rather than a red pending ``--``.  Red is reserved for a
+    result the run has not produced yet.
+    """
 
     label: str
     description: str
     kind: str  # "temporal" | "voronoi" | "sde" | "child"
     shd_available: bool
     summary: bool = True  # include in the compact main-text MCC matrix
+    triplet_available: bool = False
 
 
 METHODS_FOR_KIND: dict[str, list[str]] = {
@@ -85,9 +94,20 @@ CRL_BENCHMARKS: dict[str, CrlBenchmark] = {
     "cartpole": CrlBenchmark(
         "A.3", "non-stationary interactive process (CartPole)", "temporal", False
     ),
-    "causal3d": CrlBenchmark("A.4", "Temporal Causal3DIdent factor process", "temporal", True),
+    "causal3d": CrlBenchmark(
+        "A.4",
+        "Temporal Causal3DIdent factor process",
+        "temporal",
+        True,
+        triplet_available=True,
+    ),
     "causal3d_img": CrlBenchmark(
-        "A.4b", "real Temporal Causal3DIdent (official seven-shape release)", "visual", False, summary=False
+        "A.4b",
+        "real Temporal Causal3DIdent (official seven-shape release)",
+        "visual",
+        False,
+        summary=False,
+        triplet_available=True,
     ),
     "pong": CrlBenchmark(
         "A.4c", "Interventional Pong (official release)", "visual", False, summary=False
@@ -109,10 +129,14 @@ CRL_BENCHMARKS: dict[str, CrlBenchmark] = {
     "van_der_pol": CrlBenchmark("A.13", "van der Pol oscillator", "temporal", False),
     "pendulum": CrlBenchmark("A.14", "torque-limited pendulum", "temporal", False),
     "mountain_car": CrlBenchmark("A.15", "mountain-car control", "temporal", False),
-    "varma": CrlBenchmark("A.16", "VARMA process", "temporal", True),
-    "ou": CrlBenchmark("A.17", "Ornstein-Uhlenbeck process", "temporal", True),
+    "varma": CrlBenchmark("A.16", "VARMA process", "temporal", False),
+    "ou": CrlBenchmark("A.17", "Ornstein-Uhlenbeck process", "temporal", False),
     "voronoi": CrlBenchmark(
-        "B", "instantaneous + lagged SCM (Voronoi / Causal Pinball)", "voronoi", True
+        "B",
+        "instantaneous + lagged SCM (Voronoi / Causal Pinball)",
+        "voronoi",
+        True,
+        triplet_available=True,
     ),
     "sde": CrlBenchmark("C", "continuous-time SDE process", "sde", False),
     "child": CrlBenchmark("D", "hierarchical temporal process (CHiLD)", "child", True),

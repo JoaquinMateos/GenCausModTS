@@ -65,7 +65,8 @@ else
   "$PY" scripts/reference_floors.py --outputs outputs --out docs/reference_floors.md
   "$PY" scripts/verify_outputs.py --pools --report docs/audit_pending.md || true
   "$PY" scripts/make_paper_tables.py --shared-dir outputs_shared \
-    --outputs-dir outputs --latex-dir ../latex
+    --grid-dir outputs_shared --outputs-dir outputs --latex-dir ../latex \
+    --seeds 10 --allow-mixed
 fi
 
 echo "== complete =="

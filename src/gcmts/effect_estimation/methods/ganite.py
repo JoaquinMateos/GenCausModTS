@@ -19,7 +19,9 @@ two blocks of the paper:
 * **ITE block** ``(I, D_I)``: ``I(x, z)`` generates the potential-outcome vector
   from features alone; ``D_I`` distinguishes the completed data set (factual
   arm from ``G``) from ``I``'s samples.  At inference ``I`` is the ITE
-  estimator.
+  estimator.  Its supervised term reconstructs the **observed** factual outcome
+  for the factual arm; no ground-truth counterfactual is ever read, so the
+  estimator cannot train on the evaluation target.
 
 For time series the blocks are applied per timestep, which is the static ITE
 formulation of the paper repeated over the trajectory; the treatment vector is
@@ -109,6 +111,24 @@ class GANITE(BaseEffectEstimator):
             action = action.unsqueeze(1).expand(-1, batch.x.shape[1], -1)
         return action.float().to(batch.x.device)
 
+    @staticmethod
+    def _reject_counterfactual(batch: Batch, where: str) -> None:
+        """Fail closed if a training/forward batch carries ground-truth effects.
+
+        GANITE must be trained on factual data only.  Reading
+        ``batch.counterfactual`` (the true unobserved potential outcome) would
+        turn the reported PEHE/CF metrics into an in-sample reconstruction of
+        the evaluation target.  The trainer strips the field from training and
+        validation batches; this assertion makes any other caller fail loudly
+        instead of silently reintroducing the leak.
+        """
+        if batch.counterfactual is not None:
+            raise AssertionError(
+                f"GANITE.{where} received batch.counterfactual; GANITE is a "
+                "factual-only estimator and must never train on ground-truth "
+                "counterfactuals. Pass a batch with counterfactual=None."
+            )
+
     def _one_hot(self, action: Tensor) -> tuple[Tensor, Tensor]:
         """Map a binary treatment vector to an arm index and one-hot encoding."""
         binary = (action > 0.5).long()
@@ -169,6 +189,7 @@ class GANITE(BaseEffectEstimator):
         )
 
     def forward(self, batch: Batch) -> dict[str, Tensor]:
+        self._reject_counterfactual(batch, "forward")
         action = self._actions(batch)
         batch_size, time, dim = batch.x.shape
         flat_x = batch.x.reshape(batch_size * time, dim)
@@ -191,10 +212,10 @@ class GANITE(BaseEffectEstimator):
             ),
         ).clamp(-10.0, 10.0)
         generated_arms = generated.reshape(flat_x.shape[0], self.n_arms, self.observed_dim)
-        g_supervised = nn.functional.mse_loss(
-            generated_arms[torch.arange(flat_x.shape[0], device=flat_x.device), index, outcome_index],
-            target_outcome,
-        )
+        factual_generated = generated_arms[
+            torch.arange(flat_x.shape[0], device=flat_x.device), index, outcome_index
+        ]
+        g_supervised = nn.functional.mse_loss(factual_generated, target_outcome)
         potential = self._potential(generated, target, index)
         completed = potential.reshape(flat_x.shape[0], -1)
         # The discriminator sees the completed vector through a gradient
@@ -217,17 +238,18 @@ class GANITE(BaseEffectEstimator):
         }
 
     def loss(self, outputs: dict[str, Tensor], batch: Batch) -> dict[str, Tensor]:
+        self._reject_counterfactual(batch, "loss")
         flat_x = outputs["flat_x"]
         flat_target = outputs["flat_target"]
         index = outputs["index"]
         time = batch.x.shape[1]
         outcome_index = -1 if time == 1 else 0
         target_outcome = flat_target[..., outcome_index]
-        counterfactual = batch.counterfactual
-        if counterfactual is not None:
-            cf_target = counterfactual.reshape(flat_target.shape)[..., outcome_index]
-        else:
-            cf_target = target_outcome
+        # The I-block is supervised on the *observed* factual outcome only, as
+        # in the paper: the generated vector's factual arm must reconstruct y_f.
+        # The unobserved potential outcome (batch.counterfactual) is an
+        # evaluation target and is never used here; the assertion above makes
+        # that structural.
         noise = torch.randn(flat_x.shape[0], self.noise_dim, device=flat_x.device)
         generated_ite = cast(
             Tensor,
@@ -236,14 +258,10 @@ class GANITE(BaseEffectEstimator):
         generated_ite_arms = generated_ite.reshape(
             flat_x.shape[0], self.n_arms, self.observed_dim
         )
-        # The paper supervises the difference of potential outcomes, not the
-        # factual arm's outcome level.
-        generated_effect = (
-            generated_ite_arms[:, 1, outcome_index] - generated_ite_arms[:, 0, outcome_index]
-        )
-        ite_supervised = nn.functional.mse_loss(
-            generated_effect, target_outcome - cf_target
-        )
+        factual_ite = generated_ite_arms[
+            torch.arange(flat_x.shape[0], device=flat_x.device), index, outcome_index
+        ]
+        ite_supervised = nn.functional.mse_loss(factual_ite, target_outcome)
         real = outputs["potential"].detach().reshape(flat_x.shape[0], -1)
         fake = generated_ite
         real_logits = self.ite_discriminator(torch.cat([flat_x, real], dim=-1))

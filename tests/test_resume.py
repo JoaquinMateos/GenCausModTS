@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
 import pytest
 
-from gcmts.evaluation.report import guard_resume, load_rows, save_rows
+from gcmts.evaluation.report import (
+    atomic_write_text,
+    distinct_seeds,
+    exact_seed_status,
+    guard_resume,
+    load_rows,
+    save_rows,
+    training_code_digest,
+)
 
 
 def test_load_rows_missing_and_roundtrip(tmp_path: Path) -> None:
@@ -19,9 +28,50 @@ def test_load_rows_missing_and_roundtrip(tmp_path: Path) -> None:
     assert load_rows(tmp_path, "s") == rows
 
 
-def test_load_rows_malformed(tmp_path: Path) -> None:
+def test_load_rows_malformed_fails_closed(tmp_path: Path) -> None:
+    # A truncated/partial JSON file must not silently restart the run from zero
+    # rows (which would overwrite the completed runs on the next save).
     (tmp_path / "s.json").write_text("{not json", encoding="utf-8")
-    assert load_rows(tmp_path, "s") == []
+    with pytest.raises(ValueError, match="Refusing to treat"):
+        load_rows(tmp_path, "s")
+
+
+def test_save_rows_is_atomic_and_keeps_a_backup(tmp_path: Path) -> None:
+    save_rows([{"case": "a", "seed": 0}], tmp_path, stem="s")
+    save_rows([{"case": "a", "seed": 0}, {"case": "a", "seed": 1}], tmp_path, stem="s")
+    assert json.loads((tmp_path / "s.json.bak").read_text()) == [{"case": "a", "seed": 0}]
+    assert len(json.loads((tmp_path / "s.json").read_text())) == 2
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_atomic_write_text_leaves_no_temp_files(tmp_path: Path) -> None:
+    target = tmp_path / "nested" / "x.tex"
+    atomic_write_text(target, "first", backup=True)
+    atomic_write_text(target, "second", backup=True)
+    assert target.read_text() == "second"
+    assert (tmp_path / "nested" / "x.tex.bak").read_text() == "first"
+    assert not list(target.parent.glob("*.tmp"))
+
+
+def test_training_code_digest_is_content_based() -> None:
+    digest = training_code_digest()
+    assert len(digest) == 64
+    assert digest == training_code_digest()
+
+
+def test_exact_seed_status_requires_exact_distinct_set() -> None:
+    rows = [{"case": "m", "seed": s} for s in (0, 1, 2)]
+    assert exact_seed_status(rows, "m", 3) == (True, "")
+    ok, reason = exact_seed_status(rows + [{"case": "m", "seed": 0}], "m", 3)
+    assert not ok and "duplicated" in reason
+    ok, reason = exact_seed_status(rows + [{"case": "m", "seed": 5}], "m", 3)
+    assert not ok and "unexpected" in reason
+    ok, reason = exact_seed_status(rows, "m", 4)
+    assert not ok and "missing" in reason
+    ok, reason = exact_seed_status([{"case": "m"}, {"case": "m", "seed": 1}], "m", 2)
+    assert not ok and "no seed" in reason
+    assert distinct_seeds(rows + [{"case": "m", "seed": 0}]) == {0, 1, 2}
+
 
 
 def test_guard_resume_same_config(tmp_path: Path) -> None:
@@ -44,6 +94,25 @@ def test_guard_resume_env_force(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv("GCMTS_FORCE", "1")
     ok, _ = guard_resume(tmp_path, "s", {"a": 2})
     assert ok
+
+
+def test_guard_resume_fails_closed_on_unreadable_config(tmp_path: Path) -> None:
+    save_rows([{"case": "a", "seed": 0}], tmp_path, stem="s")
+    (tmp_path / "s_config.json").write_text("{not json", encoding="utf-8")
+    ok, reason = guard_resume(tmp_path, "s", {"a": 1})
+    assert not ok and "unreadable" in reason
+    ok, _ = guard_resume(tmp_path, "s", {"a": 1}, force=True)
+    assert ok
+
+
+def test_guard_resume_refuses_legacy_fingerprint_format(tmp_path: Path) -> None:
+    save_rows([{"case": "a", "seed": 0}], tmp_path, stem="s")
+    (tmp_path / "s_config.json").write_text(
+        json.dumps({"fingerprint": "deadbeef", "code_revision": "old", "config": {}}),
+        encoding="utf-8",
+    )
+    ok, reason = guard_resume(tmp_path, "s", {"a": 1})
+    assert not ok and "cannot be verified" in reason
 
 
 def test_guard_resume_refuses_unknown_provenance(tmp_path: Path) -> None:

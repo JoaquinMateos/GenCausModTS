@@ -243,7 +243,8 @@ run $PY scripts/statds_report.py --outputs outputs --shared outputs_shared \
 run $PY scripts/reference_floors.py --outputs outputs --out docs/reference_floors.md
 run $PY scripts/verify_outputs.py --pools --report docs/audit_pending.md || true
 run $PY scripts/make_paper_tables.py --shared-dir outputs_shared \
-  --outputs-dir outputs --latex-dir "$LATEX_DIR"
+  --grid-dir outputs_shared --outputs-dir outputs --latex-dir "$LATEX_DIR" \
+  --seeds 10 --allow-mixed
 
 echo
 echo "Done."

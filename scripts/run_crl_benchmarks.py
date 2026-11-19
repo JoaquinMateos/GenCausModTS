@@ -389,11 +389,19 @@ def run_case(
         adj_true = eval_batch.adjacency
         if adj_true is not None:
             max_lag = int(getattr(generator, "max_lag", 1))
-            perm = (
-                latent_permutation(z_pred, eval_batch.z)
-                if eval_batch.z is not None and z_pred.shape[-1] == eval_batch.z.shape[-1]
-                else torch.arange(z_pred.shape[-1], device=z_pred.device)
-            )
+            # C2: estimate the permutation on a separate generator draw (a
+            # different seed), never on the evaluation batch's true latents.
+            align_generator = cfg.generator_factory(seed + 1_000_003)
+            align_batch = move_batch(align_generator.sample(512), resolved_device)
+            if align_batch.z is not None:
+                with torch.no_grad():
+                    z_align = model.encode(align_batch.x, align_batch.context)
+                if z_align.shape[-1] == align_batch.z.shape[-1]:
+                    perm = latent_permutation(z_align, align_batch.z)
+                else:
+                    perm = torch.arange(z_pred.shape[-1], device=z_pred.device)
+            else:
+                perm = torch.arange(z_pred.shape[-1], device=z_pred.device)
             z_aligned = z_pred[..., perm.to(z_pred.device)]
             interventions = (
                 eval_batch.context.get("I") if eval_batch.context is not None else None
